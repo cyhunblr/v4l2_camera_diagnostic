@@ -1,0 +1,198 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main", "develop"]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Fast checks: commit messages, Markdown, C++ style, frontend lint.
+  # Gates every other job so a broken formatting/lint change fails fast.
+  # ---------------------------------------------------------------------
+  quality-checks:
+    name: Code Quality & Linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # commitlint needs history to diff against
+
+      - name: Check commit messages (commitlint)
+        if: ${{ github.event_name != 'push' || !github.event.forced }}
+        uses: wagoid/commitlint-github-action@v6
+
+      # The action compares before/after through GitHub's API and crashes when
+      # a history rewrite intentionally leaves those commits unrelated.
+      - name: Check forced-push HEAD commit message
+        if: ${{ github.event_name == 'push' && github.event.forced }}
+        run: |
+          message_file=$(mktemp)
+          git log -1 --format=%B > "$message_file"
+          .githooks/commit-msg "$message_file"
+
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli
+
+      - name: Check Markdown files
+        run: markdownlint '**/*.md'
+
+      - name: Install cpplint
+        run: pip install --user cpplint
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-18
+
+      - name: Run cpplint
+        run: ~/.local/bin/cpplint --recursive source/backend/
+
+      - name: Run clang-format (dry run)
+        run: |
+          find source/backend \( -name "*.cpp" -o -name "*.hpp" \) -print0 \
+            | xargs -0 clang-format-18 --dry-run --Werror
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: source/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: source/frontend
+        run: npm ci
+
+      - name: Run frontend linter (ESLint)
+        working-directory: source/frontend
+        run: npm run lint
+
+  # ---------------------------------------------------------------------
+  # Frontend build (type-check + Vite production bundle).
+  # ---------------------------------------------------------------------
+  build-frontend:
+    name: Build Frontend
+    needs: quality-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: source/frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: source/frontend
+        run: npm ci
+
+      - name: Build web UI
+        working-directory: source/frontend
+        run: npm run build
+
+  # ---------------------------------------------------------------------
+  # Backend AMD64: native ubuntu-latest runner, one Ubuntu container per
+  # matrix leg so we test against each distro's actual libgpiod/jsoncpp/
+  # microhttpd versions without needing separate hosted runner images.
+  # ---------------------------------------------------------------------
+  build-backend-amd64:
+    name: Build AMD64 (Ubuntu ${{ matrix.ubuntu }})
+    needs: quality-checks
+    runs-on: ubuntu-latest
+    container: ubuntu:${{ matrix.ubuntu }}
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ["20.04", "22.04", "24.04"]
+    steps:
+      - name: Install git (base image ships without it)
+        run: |
+          apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
+            -o APT::Update::Error-Mode=any update
+          apt-get -o Acquire::Retries=5 install -y git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
+            -o APT::Update::Error-Mode=any update
+          apt-get -o Acquire::Retries=5 install -y build-essential cmake ninja-build pkg-config \
+            libgpiod-dev libmicrohttpd-dev libjsoncpp-dev
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DV4L2DIAG_ENABLE_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run unit tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-amd64-ubuntu-${{ matrix.ubuntu }}
+          path: |
+            build/v4l2-camera-diagnostic
+            build/v4l2-camera-diagnostic-web
+
+  # ---------------------------------------------------------------------
+  # Backend ARM64: native ubuntu-24.04-arm hosted runner, same Ubuntu
+  # container matrix as AMD64. Docker resolves each ubuntu:X image to its
+  # arm64 manifest automatically, so this is native compilation with no
+  # QEMU/binfmt emulation involved.
+  # ---------------------------------------------------------------------
+  build-backend-arm64:
+    name: Build ARM64 (Ubuntu ${{ matrix.ubuntu }})
+    needs: quality-checks
+    runs-on: ubuntu-24.04-arm
+    container: ubuntu:${{ matrix.ubuntu }}
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ["20.04", "22.04", "24.04"]
+    steps:
+      - name: Install git (base image ships without it)
+        run: |
+          apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
+            -o APT::Update::Error-Mode=any update
+          apt-get -o Acquire::Retries=5 install -y git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
+            -o APT::Update::Error-Mode=any update
+          apt-get -o Acquire::Retries=5 install -y build-essential cmake ninja-build pkg-config \
+            libgpiod-dev libmicrohttpd-dev libjsoncpp-dev
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DV4L2DIAG_ENABLE_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run unit tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-arm64-ubuntu-${{ matrix.ubuntu }}
+          path: |
+            build/v4l2-camera-diagnostic
+            build/v4l2-camera-diagnostic-web

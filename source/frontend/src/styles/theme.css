@@ -1,0 +1,39 @@
+/* Theme tokens. Dark is the default (Linear/Vercel/GitHub-dark family);
+   [data-theme="light"] overrides follow the Stripe/Notion-clean family. */
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-primary: #0b0f17;
+  --bg-elevated: #141b2b;
+  --bg-inset: #0b1120;
+  --border-subtle: rgba(148, 163, 184, 0.14);
+  --border-strong: #2a3446;
+  --text-primary: #e5e7eb;
+  --text-secondary: #94a3b8;
+  --accent: #3b82f6;
+  --accent-fg: #ffffff;
+  --success: #22c55e;
+  --warn: #f59e0b;
+  --error: #ef4444;
+  --info: #60a5fa;
+  --shadow: rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg-primary: #eef2f6;
+  --bg-elevated: #ffffff;
+  --bg-inset: #f8fafc;
+  --border-subtle: #e5eaf0;
+  --border-strong: #cbd5e1;
+  --text-primary: #111827;
+  --text-secondary: #64748b;
+  --accent: #2563eb;
+  --accent-fg: #ffffff;
+  --success: #16a34a;
+  --warn: #d97706;
+  --error: #dc2626;
+  --info: #2563eb;
+  --shadow: rgba(15, 23, 42, 0.08);
+}

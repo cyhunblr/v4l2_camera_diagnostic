@@ -1,0 +1,27 @@
+# Build output
+/build/
+/build-verify/
+/Testing/
+
+# Generated diagnostic reports
+/reports/*
+
+# Local device profiles (never commit hardware-specific wiring)
+/configs/profiles/
+/configs/profiles.local/
+
+# Node / frontend
+source/frontend/dist/
+source/frontend/node_modules/
+source/frontend/playwright-report/
+source/frontend/test-results/
+
+# Editor
+.vscode/
+
+# OS
+.DS_Store
+
+# Agent
+.claude/
+.codex/

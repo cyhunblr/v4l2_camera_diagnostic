@@ -1,0 +1,47 @@
+#!/usr/bin/env sh
+set -eu
+
+msg_file=$1
+header=$(sed -n '1p' "$msg_file")
+max_length=100
+allowed_types='feat fix docs style refactor perf test build ci chore revert'
+
+if [ -z "$header" ]; then
+  echo "commit-msg: header must not be empty" >&2
+  exit 1
+fi
+
+if [ "${#header}" -gt "$max_length" ]; then
+  echo "commit-msg: header must not be longer than $max_length characters, current length is ${#header}" >&2
+  echo "  $header" >&2
+  exit 1
+fi
+
+type=${header%%:*}
+subject=${header#*:}
+
+if [ "$type" = "$header" ] || [ -z "$subject" ]; then
+  echo "commit-msg: use Conventional Commits format, e.g. 'fix: correct GPIO trigger fallback path'" >&2
+  exit 1
+fi
+
+case " $allowed_types " in
+  *" $type "*) ;;
+  *)
+    echo "commit-msg: type must be one of: $allowed_types" >&2
+    exit 1
+    ;;
+esac
+
+case "$type" in
+  *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*)
+    echo "commit-msg: type must be lower-case" >&2
+    exit 1
+    ;;
+esac
+
+trimmed_subject=$(printf '%s' "$subject" | sed 's/^[[:space:]]*//')
+if [ -z "$trimmed_subject" ]; then
+  echo "commit-msg: subject must not be empty" >&2
+  exit 1
+fi
