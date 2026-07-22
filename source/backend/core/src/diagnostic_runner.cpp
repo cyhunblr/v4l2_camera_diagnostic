@@ -679,12 +679,12 @@ void run_t07(const std::string &camera_path, MemoryBackend backend, TriggerSourc
     snprintf(r2, sizeof(r2), "║  First miss at      : %7s  ║", fmt_int(first_miss).c_str());
     snprintf(r3, sizeof(r3), "║  Safety margin      : %7s  ║", fmt_dbl(safety).c_str());
     std::string box;
-    box += "╔═══════════ SWEEP SUMMARY ═══════╗\n";
+    box += "╔════════ SWEEP SUMMARY ═════════╗\n";
     box += std::string(r0) + "\n";
     box += std::string(r1) + "\n";
     box += std::string(r2) + "\n";
     box += std::string(r3) + "\n";
-    box += "╚═════════════════════════════════╝";
+    box += "╚════════════════════════════════╝";
     emit_data(log, camera_path, "t07", box);
   }
 
