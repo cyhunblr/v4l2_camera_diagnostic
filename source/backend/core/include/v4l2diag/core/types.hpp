@@ -65,6 +65,7 @@ struct CameraRunResult {
   std::string camera_path;
   std::string profile_id;
   std::string trigger_channel_id;
+  std::string trigger_description;
   TriggerMode trigger_mode = TriggerMode::FreeRun;
   std::vector<MemoryBackend> memory_backends;
   std::vector<TestResult> tests;

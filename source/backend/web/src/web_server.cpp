@@ -413,6 +413,7 @@ Json::Value camera_result_to_json(const CameraRunResult &camera) {
   out["camera_path"] = camera.camera_path;
   out["profile_id"] = camera.profile_id;
   out["trigger_channel_id"] = camera.trigger_channel_id;
+  out["trigger_description"] = camera.trigger_description;
   out["trigger_mode"] = to_string(camera.trigger_mode);
   for (auto backend : camera.memory_backends) {
     out["memory_backends"].append(backend_to_json(backend));

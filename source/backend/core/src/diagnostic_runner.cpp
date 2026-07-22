@@ -1891,24 +1891,35 @@ CameraRunResult DiagnosticRunner::run_camera(const RunConfig::CameraConfig &came
   std::string trigger_error;
   if (config.trigger_mode == TriggerMode::FreeRun) {
     trigger = std::make_unique<FreeRunTrigger>();
+    camera_result.trigger_description = "free-run (no external trigger)";
   } else {
     const auto channel = std::find_if(profile.trigger_channels.begin(), profile.trigger_channels.end(),
                                       [&](const TriggerChannel &item) { return item.id == camera.trigger_channel_id; });
     if (channel == profile.trigger_channels.end()) {
       trigger_error =
           "trigger channel '" + camera.trigger_channel_id + "' was not found in profile '" + camera.profile_id + "'";
-    } else if (config.trigger_mode == TriggerMode::Hardware && channel->type == TriggerChannel::Type::Hardware) {
-      auto source = std::make_unique<GpioTrigger>();
-      if (source->open(channel->gpio, &trigger_error)) {
-        trigger = std::move(source);
-      }
-    } else if (config.trigger_mode == TriggerMode::Software && channel->type == TriggerChannel::Type::Software) {
-      auto source = std::make_unique<V4l2ControlTrigger>();
-      if (source->open(camera.path, *channel, &trigger_error)) {
-        trigger = std::move(source);
-      }
     } else {
-      trigger_error = "trigger channel type does not match run trigger mode";
+      if (channel->type == TriggerChannel::Type::Hardware) {
+        camera_result.trigger_description =
+            "gpiochip" + std::to_string(channel->gpio.chip_id) + " line " + std::to_string(channel->gpio.line_number);
+        if (!channel->gpio.description.empty())
+          camera_result.trigger_description += " (" + channel->gpio.description + ")";
+      } else {
+        camera_result.trigger_description = "software: " + channel->name;
+      }
+      if (config.trigger_mode == TriggerMode::Hardware && channel->type == TriggerChannel::Type::Hardware) {
+        auto source = std::make_unique<GpioTrigger>();
+        if (source->open(channel->gpio, &trigger_error)) {
+          trigger = std::move(source);
+        }
+      } else if (config.trigger_mode == TriggerMode::Software && channel->type == TriggerChannel::Type::Software) {
+        auto source = std::make_unique<V4l2ControlTrigger>();
+        if (source->open(camera.path, *channel, &trigger_error)) {
+          trigger = std::move(source);
+        }
+      } else {
+        trigger_error = "trigger channel type does not match run trigger mode";
+      }
     }
   }
 

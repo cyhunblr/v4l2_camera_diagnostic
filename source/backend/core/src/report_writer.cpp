@@ -95,6 +95,7 @@ void write_json(const RunResult &result, const std::string &path) {
     out << "      \"profile_id\": \"" << json_escape(camera.profile_id) << "\",\n";
     out << "      \"trigger_mode\": \"" << to_string(camera.trigger_mode) << "\",\n";
     out << "      \"trigger_channel_id\": \"" << json_escape(camera.trigger_channel_id) << "\",\n";
+    out << "      \"trigger_description\": \"" << json_escape(camera.trigger_description) << "\",\n";
     out << "      \"memory_backends\": [";
     for (std::size_t bi = 0; bi < camera.memory_backends.size(); ++bi) {
       if (bi) {
@@ -156,6 +157,9 @@ void write_markdown(const RunResult &result, const std::string &path) {
     out << "- Trigger mode: `" << to_string(camera.trigger_mode) << "`\n";
     if (!camera.trigger_channel_id.empty()) {
       out << "- Trigger channel: `" << camera.trigger_channel_id << "`\n";
+    }
+    if (!camera.trigger_description.empty()) {
+      out << "- Trigger detail: `" << camera.trigger_description << "`\n";
     }
     out << "- Backends:";
     for (auto backend : camera.memory_backends) {
@@ -266,7 +270,8 @@ table.overview .summary-text { color: #475569; }
                   font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
 .export-pdf-btn:hover { background: #1e293b; }
 @media print { body { background: white; } .container { padding: 20px; } .header { break-inside: avoid; }
-               .test-section { break-inside: avoid; } .export-pdf-btn { display: none; } }
+               .test-section { break-inside: avoid; } .export-pdf-btn { display: none; }
+               @page { margin: 15mm 10mm; size: A4; } }
 </style></head><body>
 <button class="export-pdf-btn" onclick='window.print()'>Export as PDF</button>
 <div class="container">
@@ -289,6 +294,10 @@ table.overview .summary-text { color: #475569; }
         << html_escape(result.cameras[0].profile_id) << "</div></div>";
     out << "<div class=\"meta-item\"><div class=\"label\">Trigger</div><div class=\"value\">"
         << to_string(result.cameras[0].trigger_mode) << "</div></div>";
+    if (!result.cameras[0].trigger_description.empty()) {
+      out << "<div class=\"meta-item\"><div class=\"label\">Trigger Channel</div><div class=\"value\">"
+          << html_escape(result.cameras[0].trigger_description) << "</div></div>";
+    }
   }
   out << "</div></div>";
 
