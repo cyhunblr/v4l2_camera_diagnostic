@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SlidersHorizontal, Download, Upload, Plus, Trash2, Save } from "lucide-react";
 import { ThresholdConfig } from "../types";
 import * as api from "../api";
@@ -44,7 +44,7 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
 
   const defaultConfig = configs.find((c) => c.id === "default");
 
-  async function loadConfigs() {
+  const loadConfigs = useCallback(async () => {
     try {
       const res = await api.getThresholds();
       if (!res.ok) return;
@@ -53,11 +53,11 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
     } catch {
       onError("Failed to load threshold configurations.");
     }
-  }
+  }, [onError]);
 
   useEffect(() => {
     loadConfigs();
-  }, []);
+  }, [loadConfigs]);
 
   useEffect(() => {
     const found = configs.find((c) => c.id === selectedThresholdId);
@@ -67,7 +67,7 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
     } else if (configs.length > 0) {
       onSelectedChange(configs[0].id);
     }
-  }, [selectedThresholdId, configs]);
+  }, [selectedThresholdId, configs, onSelectedChange]);
 
   function handleValueChange(testId: string, key: string, value: string) {
     if (!editing) return;

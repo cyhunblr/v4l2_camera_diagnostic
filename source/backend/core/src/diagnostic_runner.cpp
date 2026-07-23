@@ -43,6 +43,19 @@ namespace v4l2diag {
 
 namespace {
 
+// Resolves a verdict threshold: the configured value from `th` if present,
+// otherwise the built-in default for (test_id, key). The default table
+// (default_threshold_config) is the single source of truth for the numbers —
+// verdict sites never hard-code them. `th` is fully populated for the tests
+// that have thresholds, so the fallback path is only a safety net.
+double thv(const TestThresholds &th, const std::string &test_id, const std::string &key) {
+  const auto it = th.find(key);
+  if (it != th.end()) {
+    return it->second;
+  }
+  return default_threshold_config().get(test_id, key);
+}
+
 // Log callback helper — emits a fine-grained log line if the callback is set.
 using LogFn = std::function<void(const std::string &severity, const std::string &camera, const std::string &test,
                                  const std::string &message, const std::string &log_type)>;
@@ -243,7 +256,7 @@ void run_t02(const std::string &camera_path, MemoryBackend backend, TriggerSourc
 
   r.metrics.push_back(metric("error_flag_total", "count", static_cast<double>(error_frames_total),
                              "Frames with V4L2_BUF_FLAG_ERROR across both variants."));
-  const int max_err = static_cast<int>(th.count("max_error_flags") ? th.at("max_error_flags") : 0);
+  const int max_err = static_cast<int>(thv(th, "t02-buffer-overwrite", "max_error_flags"));
   if (error_frames_total > max_err) {
     r.status = TestStatus::Warn;
     r.summary =
@@ -603,7 +616,7 @@ void run_t06(const std::string &camera_path, MemoryBackend backend, TriggerSourc
 void run_t07(const std::string &camera_path, MemoryBackend backend, TriggerSource &trigger, TestResult &r,
              const LogFn &log, const TestThresholds &th) {
   constexpr int FRAMES = 10;
-  const double PROD_MS = th.count("production_timeout_ms") ? th.at("production_timeout_ms") : 48.5;
+  const double PROD_MS = thv(th, "t07-poll-timeout-sweep", "production_timeout_ms");
   emit(log, camera_path, "t07", "Poll timeout sweep: 200ms → 1ms, 10 frames per level...");
 
   V4lSession s;
@@ -694,7 +707,7 @@ void run_t07(const std::string &camera_path, MemoryBackend backend, TriggerSourc
   r.metrics.push_back(metric("first_dead_ms", "ms", static_cast<double>(first_dead), "First 100% miss timeout."));
   r.metrics.push_back(metric("safety_margin_ms", "ms", safety, "Production timeout - last clean timeout."));
 
-  if (safety >= (th.count("safe_margin_ms") ? th.at("safe_margin_ms") : 5.0)) {
+  if (safety >= thv(th, "t07-poll-timeout-sweep", "safe_margin_ms")) {
     r.status = TestStatus::Pass;
     r.summary = "Safe. Cliff at " + std::to_string(first_miss) + "ms; " + std::to_string(static_cast<int>(safety)) +
                 "ms margin above production timeout.";
@@ -766,8 +779,8 @@ void run_t08(const std::string &camera_path, MemoryBackend backend, TriggerSourc
     r.status = TestStatus::Pass;
     r.summary = "All " + std::to_string(seqs.size()) + " frames continuous; no anomalies.";
   } else {
-    const int max_drop = static_cast<int>(th.count("max_dropped_frames") ? th.at("max_dropped_frames") : 5);
-    const int max_nm = static_cast<int>(th.count("max_non_monotonic") ? th.at("max_non_monotonic") : 0);
+    const int max_drop = static_cast<int>(thv(th, "t08-sequence-continuity", "max_dropped_frames"));
+    const int max_nm = static_cast<int>(thv(th, "t08-sequence-continuity", "max_non_monotonic"));
     r.status = (total_gaps > max_drop || ts_non_mono > max_nm) ? TestStatus::Fail : TestStatus::Warn;
     r.summary = "dropped=" + std::to_string(total_gaps) + " dup=" + std::to_string(duplicates) +
                 " non_mono=" + std::to_string(ts_non_mono) + ".";
@@ -854,10 +867,10 @@ void run_t09(const std::string &camera_path, MemoryBackend backend, TriggerSourc
   }
   r.metrics.push_back(metric("latency_drift_ms", "ms", drift, "Second half mean - first half mean."));
 
-  const double pass_rate = th.count("pass_rate_pct") ? th.at("pass_rate_pct") : 95.0;
-  const double warn_rate = th.count("warn_rate_pct") ? th.at("warn_rate_pct") : 80.0;
-  const double pass_drift = th.count("pass_drift_ms") ? th.at("pass_drift_ms") : 1.0;
-  const double warn_drift = th.count("warn_drift_ms") ? th.at("warn_drift_ms") : 5.0;
+  const double pass_rate = thv(th, "t09-sustained-capture", "pass_rate_pct");
+  const double warn_rate = thv(th, "t09-sustained-capture", "warn_rate_pct");
+  const double pass_drift = thv(th, "t09-sustained-capture", "pass_drift_ms");
+  const double warn_drift = thv(th, "t09-sustained-capture", "warn_drift_ms");
   if (rate >= pass_rate && std::abs(drift) < pass_drift)
     r.status = TestStatus::Pass;
   else if (rate >= warn_rate && std::abs(drift) < warn_drift)
@@ -985,7 +998,7 @@ void run_t11(const std::string &camera_path, MemoryBackend backend, TriggerSourc
     r.status = TestStatus::Pass;
     r.summary = "No buffer recycling sensitivity up to 100ms.";
   } else {
-    const int min_safe = static_cast<int>(th.count("min_safe_cliff_delay_ms") ? th.at("min_safe_cliff_delay_ms") : 50);
+    const int min_safe = static_cast<int>(thv(th, "t11-buffer-recycling", "min_safe_cliff_delay_ms"));
     r.status = cliff_delay >= min_safe ? TestStatus::Pass : TestStatus::Warn;
     r.summary = "Buffer recycling cliff at " + std::to_string(cliff_delay) + "ms delay.";
   }
@@ -1042,10 +1055,10 @@ void run_t12(const std::string &camera_path, MemoryBackend backend, TriggerSourc
     push_stats_metrics(r.metrics, "first_frame_latency", compute_stats(first_lat));
 
   const double rapid_pct = 100.0 * rapid_ok / RAPID;
-  const int max_fail_pass = static_cast<int>(th.count("max_full_failures_pass") ? th.at("max_full_failures_pass") : 0);
-  const int max_fail_warn = static_cast<int>(th.count("max_full_failures_warn") ? th.at("max_full_failures_warn") : 2);
-  const double rapid_pass = th.count("rapid_pct_pass") ? th.at("rapid_pct_pass") : 90.0;
-  const double rapid_warn = th.count("rapid_pct_warn") ? th.at("rapid_pct_warn") : 70.0;
+  const int max_fail_pass = static_cast<int>(thv(th, "t12-stream-cycles", "max_full_failures_pass"));
+  const int max_fail_warn = static_cast<int>(thv(th, "t12-stream-cycles", "max_full_failures_warn"));
+  const double rapid_pass = thv(th, "t12-stream-cycles", "rapid_pct_pass");
+  const double rapid_warn = thv(th, "t12-stream-cycles", "rapid_pct_warn");
   if (full_failures <= max_fail_pass && rapid_pct >= rapid_pass)
     r.status = TestStatus::Pass;
   else if (full_failures <= max_fail_warn && rapid_pct >= rapid_warn)
@@ -1111,7 +1124,7 @@ void run_t13(const std::string &camera_path, MemoryBackend backend, TriggerSourc
   const bool ts_ok = (flag_ts_mono == captured || flag_ts_copy == captured || (flag_ts_mono == 0 && flag_ts_copy == 0));
   r.details.push_back(std::string("Timestamp source consistent: ") + (ts_ok ? "yes" : "no"));
 
-  if (flag_error > static_cast<int>(th.count("max_error_flags") ? th.at("max_error_flags") : 0)) {
+  if (flag_error > static_cast<int>(thv(th, "t13-buffer-flags", "max_error_flags"))) {
     r.status = TestStatus::Warn;
     r.summary = std::to_string(flag_error) + " frames with V4L2_BUF_FLAG_ERROR.";
   } else {
@@ -1164,7 +1177,7 @@ void run_t14(const std::string &camera_path, MemoryBackend backend, TriggerSourc
   push_stats_metrics(r.metrics, "wall_buf_offset", compute_stats(offsets_ms));
   r.metrics.push_back(metric("non_monotonic", "count", static_cast<double>(non_mono), "Non-monotonic count."));
 
-  const int max_nm = static_cast<int>(th.count("max_non_monotonic") ? th.at("max_non_monotonic") : 0);
+  const int max_nm = static_cast<int>(thv(th, "t14-timestamp-monotonicity", "max_non_monotonic"));
   if (non_mono <= max_nm) {
     r.status = TestStatus::Pass;
     r.summary = "Timestamps monotonic across " + std::to_string(buf_ts.size()) + " frames.";
@@ -1307,7 +1320,7 @@ void run_t17(const std::string &camera_path, MemoryBackend backend, TriggerSourc
   r.details.push_back("DQBUF after STREAMOFF: " + std::string(dq_ret < 0 ? "failed" : "succeeded") +
                       " errno=" + std::to_string(dq_errno) + " (" + strerror(dq_errno) + ")");
 
-  const int min_rec = static_cast<int>(th.count("min_recovery_ok") ? th.at("min_recovery_ok") : 2);
+  const int min_rec = static_cast<int>(thv(th, "t17-pollerr-handling", "min_recovery_ok"));
   if (dq_ret < 0 && re_ok && recovery_ok >= min_rec) {
     r.status = TestStatus::Pass;
     r.summary = "STREAMOFF correctly prevents DQBUF; recovery OK (" + std::to_string(recovery_ok) + "/3).";
@@ -1381,7 +1394,7 @@ void run_t18(const std::string &camera_path, TriggerSource &trigger, TestResult 
     r.status = TestStatus::Error;
     r.summary = "No frames compared.";
   } else {
-    const double min_ratio = th.count("min_match_ratio") ? th.at("min_match_ratio") : 1.0;
+    const double min_ratio = thv(th, "t18-dmabuf-cache-sync", "min_match_ratio");
     const double ratio = static_cast<double>(match_sync) / tested;
     if (ratio >= min_ratio) {
       r.status = TestStatus::Pass;
@@ -1644,7 +1657,7 @@ void run_t21(const std::string &camera_path, MemoryBackend backend, TriggerSourc
   } else if (identical == 0) {
     r.status = TestStatus::Pass;
     r.summary = "All " + std::to_string(tested) + " frames unique. No stuck frame.";
-  } else if (max_run >= static_cast<int>(th.count("max_identical_run") ? th.at("max_identical_run") : 5)) {
+  } else if (max_run >= static_cast<int>(thv(th, "t21-stuck-frame", "max_identical_run"))) {
     r.status = TestStatus::Fail;
     r.summary = "Camera appears stuck: " + std::to_string(max_run) + " consecutive identical frames.";
   } else {
@@ -1729,10 +1742,10 @@ void run_t22(const std::string &camera_path, MemoryBackend backend, TriggerSourc
     r.metrics.push_back(metric("delta_mean_ms", "ms", dm, "Mean latency increase under load."));
     r.metrics.push_back(metric("delta_p95_ms", "ms", dp95, "p95 latency increase under load."));
 
-    if (dp95 < (th.count("pass_delta_p95_ms") ? th.at("pass_delta_p95_ms") : 5.0)) {
+    if (dp95 < thv(th, "t22-latency-under-load", "pass_delta_p95_ms")) {
       r.status = TestStatus::Pass;
       r.summary = "CPU load impact minimal: p95 delta=" + std::to_string(dp95) + "ms.";
-    } else if (dp95 < (th.count("warn_delta_p95_ms") ? th.at("warn_delta_p95_ms") : 20.0)) {
+    } else if (dp95 < thv(th, "t22-latency-under-load", "warn_delta_p95_ms")) {
       r.status = TestStatus::Warn;
       r.summary = "Moderate CPU load impact: p95 delta=" + std::to_string(dp95) + "ms.";
     } else {
@@ -1802,9 +1815,10 @@ const TestThresholds &DiagnosticRunner::thresholds_for(const std::string &test_i
 RunResult DiagnosticRunner::run(const RunConfig &config) {
   // Resolve threshold configuration once before any per-camera work.
   {
-    const std::string threshold_dir =
-        config.config_directory.empty() ? std::string() : config.config_directory + "/thresholds";
-    ThresholdRegistry registry(threshold_dir);
+    // Thresholds live under the standard config root (…/v4l2-camera-diagnostic/
+    // thresholds), a sibling of the profiles directory — independent of the
+    // profiles --config-dir, which is ProfileRegistry's own directory.
+    ThresholdRegistry registry(default_threshold_directory());
     active_thresholds_ = registry.resolve(config.threshold_config_id.empty() ? "default" : config.threshold_config_id);
   }
 

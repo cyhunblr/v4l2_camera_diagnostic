@@ -878,8 +878,7 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
   // --- Threshold configuration endpoints ---
 
   if (method == "GET" && path == "/api/thresholds") {
-    ThresholdRegistry registry(options_.config_directory.empty() ? default_threshold_directory()
-                                                                 : options_.config_directory + "/thresholds");
+    ThresholdRegistry registry(default_threshold_directory());
     Json::Value out(Json::objectValue);
     out["configs"] = Json::Value(Json::arrayValue);
     for (const auto &config : registry.list_configs()) {
@@ -904,8 +903,7 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
   if (method == "GET" && path.rfind("/api/thresholds/", 0) == 0 && path.find("/export") != std::string::npos) {
     const std::string tail = path.substr(std::string("/api/thresholds/").size());
     const std::string id = tail.substr(0, tail.find('/'));
-    ThresholdRegistry registry(options_.config_directory.empty() ? default_threshold_directory()
-                                                                 : options_.config_directory + "/thresholds");
+    ThresholdRegistry registry(default_threshold_directory());
     std::string json_text;
     if (!registry.export_config(id, &json_text)) {
       *status_code = MHD_HTTP_NOT_FOUND;
@@ -919,8 +917,7 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
 
   if (method == "GET" && path.rfind("/api/thresholds/", 0) == 0) {
     const std::string id = path.substr(std::string("/api/thresholds/").size());
-    ThresholdRegistry registry(options_.config_directory.empty() ? default_threshold_directory()
-                                                                 : options_.config_directory + "/thresholds");
+    ThresholdRegistry registry(default_threshold_directory());
     ThresholdConfig config;
     if (!registry.get_config(id, &config)) {
       *status_code = MHD_HTTP_NOT_FOUND;
@@ -945,8 +942,7 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
   }
 
   if (method == "POST" && path == "/api/thresholds/import") {
-    ThresholdRegistry registry(options_.config_directory.empty() ? default_threshold_directory()
-                                                                 : options_.config_directory + "/thresholds");
+    ThresholdRegistry registry(default_threshold_directory());
     std::string error;
     if (!registry.import_config(body, &error)) {
       *status_code = MHD_HTTP_BAD_REQUEST;
@@ -985,8 +981,7 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
         }
       }
     }
-    ThresholdRegistry registry(options_.config_directory.empty() ? default_threshold_directory()
-                                                                 : options_.config_directory + "/thresholds");
+    ThresholdRegistry registry(default_threshold_directory());
     std::string error;
     if (!registry.add_or_update_config(config, &error)) {
       *status_code = MHD_HTTP_BAD_REQUEST;
@@ -1027,8 +1022,7 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
         }
       }
     }
-    ThresholdRegistry registry(options_.config_directory.empty() ? default_threshold_directory()
-                                                                 : options_.config_directory + "/thresholds");
+    ThresholdRegistry registry(default_threshold_directory());
     std::string error;
     if (!registry.add_or_update_config(config, &error)) {
       *status_code = MHD_HTTP_BAD_REQUEST;
@@ -1044,8 +1038,7 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
 
   if (method == "DELETE" && path.rfind("/api/thresholds/", 0) == 0) {
     const std::string id = path.substr(std::string("/api/thresholds/").size());
-    ThresholdRegistry registry(options_.config_directory.empty() ? default_threshold_directory()
-                                                                 : options_.config_directory + "/thresholds");
+    ThresholdRegistry registry(default_threshold_directory());
     std::string error;
     if (!registry.remove_config(id, &error)) {
       *status_code = MHD_HTTP_BAD_REQUEST;

@@ -15,7 +15,7 @@ Build and run them with CTest:
 ```bash
 cmake -S . -B build
 cmake --build build --parallel
-ctest --test-dir build --output-on-failure
+(cd build && ctest --output-on-failure)
 ```
 
 | Test binary | Source | Covers |

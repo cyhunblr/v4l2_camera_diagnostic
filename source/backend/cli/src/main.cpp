@@ -39,6 +39,7 @@ void print_usage() {
       << "  --tests LIST               Test ids, categories, all, stable, or implemented. Default: implemented.\n"
       << "  --report LIST              json, markdown, md, html, pdf. Default: json,html.\n"
       << "  --output-dir DIR           Report output directory. Default: reports.\n"
+      << "  --thresholds ID            Verdict threshold config id. Default: default.\n"
       << "  --run-mode MODE            sequential or parallel. Default: sequential.\n"
       << "  --include-long             Include long-running tests when selecting all/stable/categories.\n"
       << "  --include-experimental     Include experimental tests when selecting all/categories.\n";
@@ -323,6 +324,8 @@ int command_run(int argc, char **argv) {
       config.output_directory = arg_value(&i, argc, argv);
     } else if (arg == "--config-dir") {
       config.config_directory = arg_value(&i, argc, argv);
+    } else if (arg == "--thresholds") {
+      config.threshold_config_id = arg_value(&i, argc, argv);
     } else if (arg == "--run-mode") {
       if (!parse_run_mode(arg_value(&i, argc, argv), &config.run_mode)) {
         std::cerr << "Unknown run mode.\n";
