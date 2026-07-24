@@ -507,6 +507,13 @@ button:disabled {
   font-size: 12px;
 }
 
+.channel-id-label {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
 .react-flow__handle {
   width: 14px;
   height: 14px;

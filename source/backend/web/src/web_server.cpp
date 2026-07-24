@@ -197,6 +197,8 @@ Json::Value profile_to_json(const DeviceProfile &profile) {
   for (ReportFormat format : profile.defaults.report_formats) {
     out["defaults"]["report_formats"].append(to_string(format));
   }
+  out["defaults"]["trigger_rate_hz"] = profile.defaults.trigger_rate_hz;
+  out["defaults"]["pulse_width_ms"] = profile.defaults.pulse_width_ms;
 
   for (const auto &channel : profile.trigger_channels) {
     Json::Value item(Json::objectValue);
@@ -286,6 +288,8 @@ DeviceProfile profile_from_json(const Json::Value &root) {
       profile.defaults.report_formats.push_back(format);
     }
   }
+  profile.defaults.trigger_rate_hz = root["defaults"].get("trigger_rate_hz", 30.0).asDouble();
+  profile.defaults.pulse_width_ms = root["defaults"].get("pulse_width_ms", 13.0).asDouble();
   for (const auto &value : root["trigger_channels"]) {
     TriggerChannel channel;
     channel.id = value.get("id", "").asString();

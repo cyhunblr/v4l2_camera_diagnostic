@@ -26,7 +26,7 @@ import {
 const BACKEND_OPTIONS = ["mmap", "dmabuf", "userptr"];
 
 type CameraNodeData = { title: string; path: string; metadata: string };
-type ChannelNodeData = { title: string; metadata: string; profile: string; mode: "hardware" | "software" };
+type ChannelNodeData = { title: string; channelId: string; metadata: string; profile: string; mode: "hardware" | "software" };
 
 function CameraNode({ data }: NodeProps<Node<CameraNodeData>>) {
   return (
@@ -48,7 +48,8 @@ function ChannelNode({ data }: NodeProps<Node<ChannelNodeData>>) {
       <Handle type="target" position={Position.Left} id="channel-input" title="Accept camera assignment" />
       <div className="routing-node-icon">{data.mode === "hardware" ? <Cable size={20} /> : <Cpu size={20} />}</div>
       <div className="routing-node-copy">
-        <strong>{data.title}</strong>
+        <strong>{data.channelId}</strong>
+        <span>{data.title}</span>
         <span>{data.metadata}</span>
         <small>{data.profile}</small>
       </div>
@@ -86,7 +87,7 @@ function channelTitle(channel: TriggerChannel) {
 
 function channelMetadata(channel: TriggerChannel) {
   if (channel.type === "hardware" && channel.gpio) {
-    return `gpiochip${channel.gpio.chip_id} · line ${channel.gpio.line_number}`;
+    return channel.gpio?.description || "";
   }
   const selector = channel.control_device;
   return selector?.kind === "capture"
@@ -195,6 +196,7 @@ export function ProfileSelectionPage({
       draggable: false,
       data: {
         title: channelTitle(channel),
+        channelId: channel.id,
         metadata: channelMetadata(channel),
         profile: profile.name,
         mode: channel.type
