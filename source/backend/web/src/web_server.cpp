@@ -448,7 +448,16 @@ Json::Value run_summary_to_json(const std::string &id, const std::string &status
   out["id"] = id;
   out["status"] = status;
   out["trigger_mode"] = to_string(config.trigger_mode);
+
+  // Derive top-level profile_id for dashboard display
+  std::string first_profile;
+  bool all_same = true;
   for (const auto &camera : config.cameras) {
+    if (first_profile.empty()) {
+      first_profile = camera.profile_id;
+    } else if (camera.profile_id != first_profile) {
+      all_same = false;
+    }
     out["camera_paths"].append(camera.path);
     Json::Value assignment(Json::objectValue);
     assignment["path"] = camera.path;
@@ -456,6 +465,7 @@ Json::Value run_summary_to_json(const std::string &id, const std::string &status
     assignment["trigger_channel_id"] = camera.trigger_channel_id;
     out["cameras"].append(assignment);
   }
+  out["profile_id"] = all_same ? first_profile : "mixed";
   out["started_at_utc"] = result.started_at_utc;
   out["finished_at_utc"] = result.finished_at_utc;
   out["duration_ms"] = static_cast<Json::Int64>(duration_ms);

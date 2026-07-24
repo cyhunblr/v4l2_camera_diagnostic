@@ -554,6 +554,36 @@ button:disabled {
   gap: 8px;
 }
 
+.trigger-timing-row {
+  display: flex;
+  gap: 1.5rem;
+  padding: 0.5rem 0;
+}
+
+.trigger-timing-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.input-with-unit {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.input-with-unit input {
+  width: 80px;
+}
+
+.input-with-unit .unit {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 .free-run-grid {
   align-self: start;
   display: grid;

@@ -63,6 +63,8 @@ struct ProfileDefaults {
   std::vector<MemoryBackend> memory_backends;
   std::vector<std::string> test_selectors;
   std::vector<ReportFormat> report_formats;
+  double trigger_rate_hz = 30.0;
+  double pulse_width_ms = 13.0;
 };
 
 struct CameraBinding {

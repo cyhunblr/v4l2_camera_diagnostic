@@ -82,8 +82,10 @@ class V4lSession {
 
   int drain();
   bool requeue(uint32_t index);
-  CaptureFrame capture(TriggerSource &trigger, int poll_timeout_ms, bool do_drain = true, bool do_requeue = true);
-  void warmup(TriggerSource &trigger, int count = 5, int interval_ms = 200, const std::atomic<bool> *cancel = nullptr);
+  CaptureFrame capture(TriggerSource &trigger, int poll_timeout_ms, bool do_drain = true, bool do_requeue = true,
+                       uint64_t pulse_ns = 13'000'000UL);
+  void warmup(TriggerSource &trigger, int count = 5, int interval_ms = 200, const std::atomic<bool> *cancel = nullptr,
+              uint64_t pulse_ns = 13'000'000UL);
 
   const std::vector<BufferInfo> &buffers() const {
     return buffers_;

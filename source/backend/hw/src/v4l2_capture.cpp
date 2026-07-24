@@ -271,7 +271,8 @@ bool V4lSession::requeue(uint32_t index) {
   return requeue_buffer(&buf);
 }
 
-CaptureFrame V4lSession::capture(TriggerSource &trigger, int poll_timeout_ms, bool do_drain, bool do_requeue) {
+CaptureFrame V4lSession::capture(TriggerSource &trigger, int poll_timeout_ms, bool do_drain, bool do_requeue,
+                                 uint64_t pulse_ns) {
   CaptureFrame frame;
 
   if (do_drain) {
@@ -279,7 +280,7 @@ CaptureFrame V4lSession::capture(TriggerSource &trigger, int poll_timeout_ms, bo
     sleep_ms(10);
   }
 
-  frame.t_trigger = trigger.send();
+  frame.t_trigger = trigger.send(pulse_ns);
 
   struct pollfd pfd;
   pfd.fd = fd_;
@@ -310,12 +311,13 @@ CaptureFrame V4lSession::capture(TriggerSource &trigger, int poll_timeout_ms, bo
   return frame;
 }
 
-void V4lSession::warmup(TriggerSource &trigger, int count, int interval_ms, const std::atomic<bool> *cancel) {
+void V4lSession::warmup(TriggerSource &trigger, int count, int interval_ms, const std::atomic<bool> *cancel,
+                        uint64_t pulse_ns) {
   for (int i = 0; i < count; i++) {
     if (cancel && cancel->load()) {
       break;
     }
-    trigger.send();
+    trigger.send(pulse_ns);
     sleep_ms(interval_ms);
     drain();
   }

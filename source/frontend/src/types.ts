@@ -21,6 +21,8 @@ export type Profile = {
     memory_backends: string[];
     test_selectors: string[];
     report_formats: string[];
+    trigger_rate_hz: number;
+    pulse_width_ms: number;
   };
   trigger_channels: TriggerChannel[];
   camera_bindings: Array<{ camera: CameraMatcher; trigger_channel_id: string }>;

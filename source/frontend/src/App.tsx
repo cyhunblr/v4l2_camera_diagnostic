@@ -272,6 +272,7 @@ export default function App() {
             onError={setErrorMessage}
             backends={backends}
             onToggleBackend={(backend) => toggleListValue(backend, backends, setBackends)}
+            requestConfirm={requestConfirm}
           />
         )}
 

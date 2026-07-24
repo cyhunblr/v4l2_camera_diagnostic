@@ -15,6 +15,7 @@ import { Camera, Cable, Cpu, Download, Plus, Save, Trash2, Upload, X } from "luc
 import * as api from "../api";
 import {
   CameraAssignment,
+  ConfirmDialogState,
   ControlDevice,
   Device,
   Profile,
@@ -72,6 +73,7 @@ type Props = {
   onError: (message: string | null) => void;
   backends: string[];
   onToggleBackend: (backend: string) => void;
+  requestConfirm: (state: Omit<ConfirmDialogState, "onConfirm"> & { onConfirm: () => void }) => void;
 };
 
 function channelTitle(channel: TriggerChannel) {
@@ -116,13 +118,16 @@ export function ProfileSelectionPage({
   onProfilesChanged,
   onError,
   backends,
-  onToggleBackend
+  onToggleBackend,
+  requestConfirm
 }: Props) {
   const [compactRouting, setCompactRouting] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
   const importFileRef = useRef<HTMLInputElement>(null);
   const [controlDevices, setControlDevices] = useState<ControlDevice[]>([]);
+
+  const selectedProfile = profiles.find((p) => p.id === singleProfileId);
   const [profileId, setProfileId] = useState("");
   const [profileName, setProfileName] = useState("");
   const [description, setDescription] = useState("");
@@ -333,7 +338,9 @@ export function ProfileSelectionPage({
         trigger_mode: triggerMode,
         memory_backends: backends,
         test_selectors: ["implemented"],
-        report_formats: ["json", "html"]
+        report_formats: ["json", "html"],
+        trigger_rate_hz: 30,
+        pulse_width_ms: 13
       },
       trigger_channels: [channel],
       camera_bindings: []
@@ -515,12 +522,42 @@ export function ProfileSelectionPage({
         <footer className="routing-footer">
           <span>{routedCount} cameras routed · {Math.max(0, devices.length - routedCount)} unassigned</span>
           <div>
-            <button onClick={resetRouting}>Reset</button>
+            <button onClick={() => requestConfirm({ title: "Reset Routing", message: "Reset all camera routing to defaults?", confirmLabel: "Reset", variant: "danger", onConfirm: resetRouting })}>Reset</button>
             {triggerMode === "software" && <button onClick={() => testSelectedRouting().catch((error: Error) => onError(error.message))} disabled={!assignments.some((item) => item.trigger_channel_id)}>Test trigger</button>}
-            <button onClick={() => saveRoutingDefaults().catch((error: Error) => onError(error.message))} disabled={triggerMode === "free-run"}><Save size={16} /> Save as profile default</button>
+            <button onClick={() => requestConfirm({ title: "Save Routing", message: "Save current routing configuration as profile default?", confirmLabel: "Save", variant: "primary", onConfirm: () => saveRoutingDefaults().catch((error: Error) => onError(error.message)) })} disabled={triggerMode === "free-run"}><Save size={16} /> Save as profile default</button>
           </div>
         </footer>
       </section>
+
+      {triggerMode !== "free-run" && (
+        <section className="panel">
+          <div className="panel-title"><h3>Trigger Timing</h3></div>
+          <div className="trigger-timing-row">
+            <label>
+              Trigger Rate
+              <div className="input-with-unit">
+                <input type="number" min="1" max="1000" step="1" value={selectedProfile?.defaults.trigger_rate_hz ?? 30} onChange={(e) => {
+                  if (!selectedProfile) return;
+                  const updated = { ...selectedProfile, defaults: { ...selectedProfile.defaults, trigger_rate_hz: Number(e.target.value) } };
+                  api.updateProfile(updated).then(() => onProfilesChanged());
+                }} />
+                <span className="unit">Hz</span>
+              </div>
+            </label>
+            <label>
+              Pulse Width
+              <div className="input-with-unit">
+                <input type="number" min="1" max="100" step="0.5" value={selectedProfile?.defaults.pulse_width_ms ?? 13} onChange={(e) => {
+                  if (!selectedProfile) return;
+                  const updated = { ...selectedProfile, defaults: { ...selectedProfile.defaults, pulse_width_ms: Number(e.target.value) } };
+                  api.updateProfile(updated).then(() => onProfilesChanged());
+                }} />
+                <span className="unit">ms</span>
+              </div>
+            </label>
+          </div>
+        </section>
+      )}
 
       <section className="panel">
         <div className="panel-title"><h3>Memory Backend</h3></div>

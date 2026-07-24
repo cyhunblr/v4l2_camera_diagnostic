@@ -123,6 +123,8 @@ Json::Value profile_to_json(const DeviceProfile &profile) {
   for (ReportFormat format : profile.defaults.report_formats) {
     defaults["report_formats"].append(to_string(format));
   }
+  defaults["trigger_rate_hz"] = profile.defaults.trigger_rate_hz;
+  defaults["pulse_width_ms"] = profile.defaults.pulse_width_ms;
   root["defaults"] = defaults;
 
   for (const auto &channel : profile.trigger_channels) {
@@ -200,6 +202,8 @@ bool parse_json_profile(const std::string &path, DeviceProfile *profile) {
       parsed.defaults.report_formats.push_back(format);
     }
   }
+  parsed.defaults.trigger_rate_hz = defaults.get("trigger_rate_hz", 30.0).asDouble();
+  parsed.defaults.pulse_width_ms = defaults.get("pulse_width_ms", 13.0).asDouble();
 
   for (const auto &value : root["trigger_channels"]) {
     TriggerChannel channel;
@@ -280,6 +284,12 @@ bool validate_device_profile(const DeviceProfile &profile, std::string *error) {
     if (channel_ids.count(binding.trigger_channel_id) == 0) {
       return fail("camera binding references an unknown trigger channel");
     }
+  }
+  if (profile.defaults.trigger_rate_hz <= 0 || profile.defaults.trigger_rate_hz > 1000) {
+    return fail("trigger_rate_hz must be > 0 and <= 1000");
+  }
+  if (profile.defaults.pulse_width_ms <= 0 || profile.defaults.pulse_width_ms > 100) {
+    return fail("pulse_width_ms must be > 0 and <= 100");
   }
   return true;
 }

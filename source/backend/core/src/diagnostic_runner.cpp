@@ -738,12 +738,12 @@ void run_poll_timeout_cliff(const std::string &camera_path, MemoryBackend backen
     snprintf(r1, sizeof(r1), "║  Cliff (stable)     : %5dms  ║", cliff_candidate);
     snprintf(r2, sizeof(r2), "║  Safety margin      : %5.1fms  ║", safety);
     snprintf(r3, sizeof(r3), "║  Stability          :   %d/%d    ║", stable_rounds, STABILITY_ROUNDS);
-    snprintf(r4, sizeof(r4), "║  Confirmed          :   %s     ║", stable ? "YES" : "NO ");
+    snprintf(r4, sizeof(r4), "║  Confirmed          :   %s    ║", stable ? "YES" : "NO ");
     std::string box;
-    box += "╔═══════ CLIFF SUMMARY ════════╗\n";
+    box += "╔═══════ CLIFF SUMMARY ══════════╗\n";
     box += std::string(r0) + "\n" + std::string(r1) + "\n" + std::string(r2) + "\n";
     box += std::string(r3) + "\n" + std::string(r4) + "\n";
-    box += "╚══════════════════════════════╝";
+    box += "╚════════════════════════════════╝";
     emit_data(log, camera_path, "t12", box);
   }
 
@@ -1562,6 +1562,32 @@ void run_gpio_pulse_width(const std::string &camera_path, MemoryBackend backend,
     } else {
       r.details.push_back(pstr + "ms: 0/" + std::to_string(SAMPLES) + " (all missed)");
     }
+  }
+
+  // Determine minimum reliable pulse width (smallest width with 100% hit rate)
+  int min_reliable_width = -1;
+  for (int wi = 0; wi < N; wi++) {
+    // Re-check: a width is "reliable" if it got full hits in the sweep above.
+    // We recorded full_rows for range computation but didn't track per-width.
+    // Recompute here from the metrics already pushed.
+  }
+  // Actually scan the pushed metrics for hits_Xms == SAMPLES
+  for (int wi = 0; wi < N; wi++) {
+    const int pw = pws[wi];
+    const std::string mkey = "hits_" + std::to_string(pw) + "ms";
+    for (const auto &m : r.metrics) {
+      if (m.name == mkey && static_cast<int>(m.value) == SAMPLES) {
+        if (min_reliable_width < 0)
+          min_reliable_width = pw;
+        break;
+      }
+    }
+  }
+  if (min_reliable_width > 0) {
+    r.metrics.push_back(metric("min_reliable_width_ms", "ms", static_cast<double>(min_reliable_width),
+                               "Smallest pulse width with 100% capture success."));
+    r.details.push_back("Minimum reliable pulse width: " + std::to_string(min_reliable_width) +
+                        "ms — configure >= this in Profile pulse_width_ms");
   }
 
   std::string edge = "inconclusive";
@@ -2511,7 +2537,6 @@ TestResult DiagnosticRunner::run_test(const std::string &camera_path, MemoryBack
                                       const TestDefinition &definition, const RunConfig &config,
                                       const DeviceProfile &profile, TriggerSource *trigger,
                                       const std::string &trigger_error) {
-  (void)profile;
   TestResult result;
   result.id = definition.id;
   result.name = definition.name;
@@ -2543,6 +2568,11 @@ TestResult DiagnosticRunner::run_test(const std::string &camera_path, MemoryBack
   }
 
   const LogFn &log = config.log_callback;
+  const uint64_t pulse_ns = static_cast<uint64_t>(profile.defaults.pulse_width_ms * 1'000'000.0);
+  // Build per-test params with profile-level trigger settings injected.
+  TestThresholds tp = tp;
+  tp["__pulse_width_ns"] = static_cast<double>(pulse_ns);
+  tp["__trigger_interval_ms"] = 1000.0 / profile.defaults.trigger_rate_hz;
   emit_section(log, camera_path, definition.id,
                "\xe2\x96\xb6 " + definition.id + " \xe2\x80\x94 " + definition.name + " [" + to_string(backend) + "]");
 
@@ -2596,60 +2626,49 @@ TestResult DiagnosticRunner::run_test(const std::string &camera_path, MemoryBack
   } else if (definition.id == "t02-control-inventory")
     run_control_inventory(camera_path, result, log);
   else if (definition.id == "t03-no-streamon")
-    run_no_streamon(camera_path, backend, result, log, params_for(definition.id));
+    run_no_streamon(camera_path, backend, result, log, tp);
   else if (definition.id == "t04-pollerr-handling")
-    run_pollerr_handling(camera_path, backend, *trigger, result, log, thresholds_for(definition.id),
-                         params_for(definition.id));
+    run_pollerr_handling(camera_path, backend, *trigger, result, log, thresholds_for(definition.id), tp);
   else if (definition.id == "t05-stream-cycles")
-    run_stream_cycles(camera_path, backend, *trigger, result, log, thresholds_for(definition.id),
-                      params_for(definition.id));
+    run_stream_cycles(camera_path, backend, *trigger, result, log, thresholds_for(definition.id), tp);
   else if (definition.id == "t06-multi-buffer")
-    run_multi_buffer(camera_path, backend, trigger, result, log, params_for(definition.id));
+    run_multi_buffer(camera_path, backend, trigger, result, log, tp);
   else if (definition.id == "t07-buffer-overwrite")
-    run_buffer_overwrite(camera_path, backend, *trigger, result, log, thresholds_for(definition.id),
-                         params_for(definition.id));
+    run_buffer_overwrite(camera_path, backend, *trigger, result, log, thresholds_for(definition.id), tp);
   else if (definition.id == "t08-buffer-recycling")
-    run_buffer_recycling(camera_path, backend, *trigger, result, log, thresholds_for(definition.id),
-                         params_for(definition.id));
+    run_buffer_recycling(camera_path, backend, *trigger, result, log, thresholds_for(definition.id), tp);
   else if (definition.id == "t09-buffer-flags")
-    run_buffer_flags(camera_path, backend, *trigger, result, log, thresholds_for(definition.id),
-                     params_for(definition.id));
+    run_buffer_flags(camera_path, backend, *trigger, result, log, thresholds_for(definition.id), tp);
   else if (definition.id == "t10-memory-throughput")
-    run_memory_throughput(camera_path, backend, result, log, params_for(definition.id));
+    run_memory_throughput(camera_path, backend, result, log, tp);
   else if (definition.id == "t11-dmabuf-cache-sync")
-    run_dmabuf_cache_sync(camera_path, *trigger, result, log, thresholds_for(definition.id), params_for(definition.id));
+    run_dmabuf_cache_sync(camera_path, *trigger, result, log, thresholds_for(definition.id), tp);
   else if (definition.id == "t12-poll-timeout-cliff")
-    run_poll_timeout_cliff(camera_path, backend, *trigger, result, log, thresholds_for(definition.id),
-                           params_for(definition.id));
+    run_poll_timeout_cliff(camera_path, backend, *trigger, result, log, thresholds_for(definition.id), tp);
   else if (definition.id == "t13-trigger-latency")
-    run_trigger_latency(camera_path, backend, *trigger, result, log, params_for(definition.id));
+    run_trigger_latency(camera_path, backend, *trigger, result, log, tp);
   else if (definition.id == "t14-nonblock-vs-block")
-    run_nonblock_vs_block(camera_path, backend, *trigger, result, log, params_for(definition.id));
+    run_nonblock_vs_block(camera_path, backend, *trigger, result, log, tp);
   else if (definition.id == "t15-gpio-pulse-width")
-    run_gpio_pulse_width(camera_path, backend, *trigger, result, log, params_for(definition.id));
+    run_gpio_pulse_width(camera_path, backend, *trigger, result, log, tp);
   else if (definition.id == "t16-format-comparison")
-    run_format_comparison(camera_path, backend, *trigger, result, log, params_for(definition.id));
+    run_format_comparison(camera_path, backend, *trigger, result, log, tp);
   else if (definition.id == "t17-control-sweep")
-    run_control_sweep(camera_path, *trigger, backend, result, log, params_for(definition.id));
+    run_control_sweep(camera_path, *trigger, backend, result, log, tp);
   else if (definition.id == "t18-resolution-sweep") {
-    run_resolution_sweep(camera_path, backend, *trigger, result, log, params_for(definition.id));
+    run_resolution_sweep(camera_path, backend, *trigger, result, log, tp);
   } else if (definition.id == "t19-sequence-continuity")
-    run_sequence_continuity(camera_path, backend, *trigger, result, log, thresholds_for(definition.id),
-                            params_for(definition.id));
+    run_sequence_continuity(camera_path, backend, *trigger, result, log, thresholds_for(definition.id), tp);
   else if (definition.id == "t20-timestamp-monotonicity")
-    run_timestamp_monotonicity(camera_path, backend, *trigger, result, log, thresholds_for(definition.id),
-                               params_for(definition.id));
+    run_timestamp_monotonicity(camera_path, backend, *trigger, result, log, thresholds_for(definition.id), tp);
   else if (definition.id == "t21-stuck-frame")
-    run_stuck_frame(camera_path, backend, *trigger, result, log, thresholds_for(definition.id),
-                    params_for(definition.id));
+    run_stuck_frame(camera_path, backend, *trigger, result, log, thresholds_for(definition.id), tp);
   else if (definition.id == "t22-sustained-capture")
-    run_sustained_capture(camera_path, backend, *trigger, result, log, thresholds_for(definition.id),
-                          params_for(definition.id));
+    run_sustained_capture(camera_path, backend, *trigger, result, log, thresholds_for(definition.id), tp);
   else if (definition.id == "t23-latency-under-load")
-    run_latency_under_load(camera_path, backend, *trigger, result, log, thresholds_for(definition.id),
-                           params_for(definition.id));
+    run_latency_under_load(camera_path, backend, *trigger, result, log, thresholds_for(definition.id), tp);
   else if (definition.id == "t24-max-fps") {
-    run_max_fps(camera_path, backend, *trigger, result, log, params_for(definition.id));
+    run_max_fps(camera_path, backend, *trigger, result, log, tp);
   } else if (definition.id == "t25-multi-camera") {
     // Multi-camera requires multiple camera paths from config.cameras. It opens
     // every camera itself, so it must run at most once per run() — the first
@@ -2667,10 +2686,10 @@ TestResult DiagnosticRunner::run_test(const std::string &camera_path, MemoryBack
       std::vector<std::string> paths;
       for (const auto &cam : config.cameras)
         paths.push_back(cam.path);
-      run_multi_camera(paths, backend, *trigger, result, log, params_for(definition.id));
+      run_multi_camera(paths, backend, *trigger, result, log, tp);
     }
   } else if (definition.id == "t26-cold-start") {
-    run_cold_start(camera_path, backend, *trigger, result, log, params_for(definition.id));
+    run_cold_start(camera_path, backend, *trigger, result, log, tp);
   } else {
     result.status = TestStatus::Skipped;
     result.summary = "No core implementation registered for this test.";
