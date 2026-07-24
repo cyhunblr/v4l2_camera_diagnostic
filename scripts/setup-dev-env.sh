@@ -73,11 +73,17 @@ if have npm; then
   if ! have markdownlint; then
     npm install -g markdownlint-cli
   fi
+  if ! have commitlint; then
+    npm install -g @commitlint/cli
+  fi
+  if ! npm list -g @commitlint/config-conventional >/dev/null 2>&1; then
+    npm install -g @commitlint/config-conventional
+  fi
   if [ -f source/frontend/package-lock.json ]; then
     (cd source/frontend && npm ci)
   fi
 else
-  echo "setup-dev-env: npm is unavailable; frontend dependencies and markdownlint were not installed." >&2
+  echo "setup-dev-env: npm is unavailable; frontend dependencies, markdownlint, and commitlint were not installed." >&2
 fi
 
 scripts/install-git-hooks.sh
