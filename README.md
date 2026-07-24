@@ -50,7 +50,10 @@ memory backends, and watch live progress. See
 
 Full installer behavior (what gets installed, where, and what dependencies
 it checks for) is documented in
-[`docs/guides/installation.md`](docs/guides/installation.md).
+[`docs/guides/installation.md`](docs/guides/installation.md). The installer
+may prompt for your **sudo password once**, to grant the web app's binary
+permission to read the kernel log for the **Export DMESG** button — see
+that doc if you skip it and need to grant it later.
 
 ## Reports
 

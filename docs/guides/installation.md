@@ -53,6 +53,22 @@ machine.
    | `~/.local/share/v4l2-camera-diagnostic/docs` | a copy of this `docs/` tree |
    | `~/.local/share/applications/v4l2-camera-diagnostic.desktop` | desktop launcher for environments that index user applications |
 
+   As part of this step, the installer runs
+   `sudo setcap cap_syslog+ep ~/.local/bin/v4l2-camera-diagnostic-web` so the
+   web app's **Export DMESG** button can read the kernel log even on systems
+   with `kernel.dmesg_restrict=1` (the common default). **This is the one
+   point in the whole script that may prompt for your sudo password** — if
+   you decline or it fails, installation still completes, but Export DMESG
+   in the browser will show "Failed to export dmesg" until you either grant
+   the capability manually or re-run `./installation.sh`:
+
+   ```bash
+   sudo setcap cap_syslog+ep ~/.local/bin/v4l2-camera-diagnostic-web
+   ```
+
+   (No capability is needed if `kernel.dmesg_restrict` is already `0` on
+   your system, or if your user is in a group with kernel-log read access.)
+
 5. **Checks `PATH`** and prints a one-line notice if `~/.local/bin` is not
    already on it.
 

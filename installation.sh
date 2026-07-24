@@ -167,11 +167,14 @@ install_files() {
   run install -m 0755 "${BUILD_DIR}/v4l2-camera-diagnostic-web" "${INSTALL_PREFIX}/bin/v4l2-camera-diagnostic-web"
 
   # Grant CAP_SYSLOG so the web binary can read dmesg even when
-  # kernel.dmesg_restrict=1 (common on hardened systems).
+  # kernel.dmesg_restrict=1 (common on hardened systems). This may prompt
+  # for a sudo password if the cached credential from an earlier apt-get
+  # step (or none was needed, e.g. all dependencies were already present)
+  # has expired.
   if command -v setcap >/dev/null 2>&1; then
-    echo "Granting CAP_SYSLOG to v4l2-camera-diagnostic-web..."
-    sudo -n setcap cap_syslog+ep "${INSTALL_PREFIX}/bin/v4l2-camera-diagnostic-web" 2>/dev/null || \
-      echo "Warning: could not set CAP_SYSLOG (sudo required). Export DMESG may fail if kernel.dmesg_restrict=1."
+    echo "Granting CAP_SYSLOG to v4l2-camera-diagnostic-web (may prompt for sudo password)..."
+    sudo setcap cap_syslog+ep "${INSTALL_PREFIX}/bin/v4l2-camera-diagnostic-web" || \
+      echo "Warning: could not set CAP_SYSLOG. Export DMESG may fail if kernel.dmesg_restrict=1."
   fi
 
   run rm -rf "${WEB_SHARE}"
