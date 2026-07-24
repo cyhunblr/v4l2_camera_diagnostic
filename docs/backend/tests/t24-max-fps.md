@@ -60,11 +60,7 @@ Registry: `t24-max-fps` in [test_registry.cpp](../../../source/backend/core/src/
 | Metric Key | Unit | Description |
 | ----------- | ------ | ------------- |
 | `latency_mean` | ms | Mean capture latency for successful frames. |
-| `latency_stddev` | ms | Standard deviation of capture latency. |
-| `latency_min` | ms | Minimum capture latency. |
-| `latency_max` | ms | Maximum capture latency. |
 | `latency_p95` | ms | 95th percentile capture latency. |
-| `latency_jitter` | ms | Jitter of capture latency. |
 
 ## Report Details
 
@@ -87,6 +83,7 @@ Drop rate: 3%
 
 - **`sustained_fps` close to sensor's native rate** (e.g. 30 fps for a 30 fps sensor) — the pipeline keeps up with the hardware; no bottleneck.
 - **`sustained_fps` well below native rate** with low `drop_pct` — the trigger/capture loop itself is the bottleneck (e.g. DQBUF latency plus the tight loop overhead limits throughput).
+- **In hardware-trigger mode specifically**, each capture calls `trigger.send()`, which blocks for the full configured pulse width before `poll()` even starts — so the theoretical ceiling for this test is roughly `1000 / (pulse_width_ms + trigger_latency_ms)` fps, regardless of the sensor's real maximum frame rate. E.g. a 10 ms pulse width plus a ~46 ms trigger-to-DQBUF latency (see `t13-trigger-latency`) caps this test at ~17-18 fps even on a sensor whose datasheet says "up to 30 fps" — that spec is almost always measured in free-run/continuous-streaming mode, not while re-triggering and re-draining for every single frame. If `send_rate ≈ sustained_fps` and `drop_pct ≈ 0%` (no missed triggers), a low fps here is NOT evidence the camera can't hit its rated frame rate — it means this test's per-frame trigger/drain protocol is the limiting factor, not the sensor. Lowering `pulse_width_ms` (see `t15-gpio-pulse-width` for the minimum reliable width) raises the ceiling somewhat, but `trigger_latency_ms` remains the dominant term.
 - **High `drop_pct`** — the pipeline is being driven faster than it can sustain. Frames are requested but never delivered within the timeout.
 - **`max_window_fps` > `sustained_fps`** — burst capability exceeds steady-state; the camera can briefly exceed its average rate (often the first second after warmup).
 - **`send_rate` >> `sustained_fps`** — the test is trigger-limited rather than sensor-limited; consider increasing buffer count or using a mode that doesn't require explicit trigger per frame.
@@ -99,5 +96,5 @@ Drop rate: 3%
 | `drop_pct` > 20% | Trigger rate exceeds what the sensor + driver can deliver. The sensor's maximum frame rate is lower than the test's trigger rate. |
 | `sustained_fps` far below expected | USB bandwidth saturation (especially with high-resolution uncompressed); try a lower resolution or MJPEG. |
 | `max_window_fps` = 0 or very low | Camera not responding to triggers at all; verify trigger wiring and that the sensor is in triggered (external sync) mode. |
-| High `latency_jitter` with moderate FPS | Buffer starvation causing variable wait times; increase buffer count (already 4 in this test, but driver may need more). |
+| High `latency_p95` vs `latency_mean` with moderate FPS | Buffer starvation causing variable wait times; increase buffer count (already 4 in this test, but driver may need more). |
 | `total_sent` much higher than expected for duration | The trigger-send + capture loop completes very quickly when captures fail, inflating the send count. Check `total_missed`. |

@@ -34,9 +34,17 @@ Registry: `t12-poll-timeout-cliff` in [test_registry.cpp](../../../source/backen
 
 ## Output Metrics
 
+> **Important:** each probe calls `TriggerSource::send()`, which blocks for the
+> full configured pulse width before returning — `poll()` only starts once
+> `send()` returns. So `cliff_ms` is the minimum `poll()` timeout *after the
+> pulse has already elapsed*, not the total trigger-to-frame latency. Do not
+> compare `cliff_ms` directly against latency measured from trigger send (e.g.
+> `t13-trigger-latency`'s `latency_mean`) — use `cliff_total_ms` for that.
+
 | Metric Key | Unit | Description |
 | ----------- | ------ | ------------- |
-| `cliff_ms` | ms | Lowest timeout with 100% capture success (-1 if no cliff found or pipeline unreliable) |
+| `cliff_ms` | ms | Lowest `poll()` timeout (measured after the pulse) with 100% capture success (-1 if no cliff found or pipeline unreliable) |
+| `cliff_total_ms` | ms | `cliff_ms + pulse_width_ms` — the true minimum trigger-to-frame timeout budget, directly comparable with trigger-latency measurements. |
 | `first_miss_ms` | ms | Highest timeout value where misses occurred |
 | `safety_margin_ms` | ms | `production_timeout_ms` minus `cliff_ms` |
 | `stability_confirmed` | bool | 1.0 if cliff was stable over the required number of rounds |
@@ -66,12 +74,18 @@ A summary box is also emitted to the log:
 ```text
 ╔═══════ CLIFF SUMMARY ══════════╗
 ║  Production timeout :  48.5ms  ║
-║  Cliff (stable)     :    32ms  ║
+║  Cliff (post-pulse) :    32ms  ║
+║  Cliff (total)      :  42.0ms  ║
 ║  Safety margin      :  16.5ms  ║
 ║  Stability          :   5/5    ║
 ║  Confirmed          :   YES    ║
 ╚════════════════════════════════╝
 ```
+
+`Cliff (post-pulse)` is `cliff_ms` (the `poll()` timeout measured after the
+trigger pulse already elapsed); `Cliff (total)` is `cliff_total_ms`
+(`cliff_ms + pulse_width_ms`), directly comparable to trigger-to-frame
+latency figures from other tests (e.g. `t13-trigger-latency`).
 
 ## Verdict Logic
 

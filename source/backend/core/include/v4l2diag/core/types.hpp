@@ -77,6 +77,8 @@ struct RunResult {
   std::string started_at_utc;
   std::string finished_at_utc;
   std::string host_name;
+  std::string kernel_release;
+  std::string kernel_version;
   std::string output_directory;
   RunMode run_mode = RunMode::Sequential;
   std::vector<CameraRunResult> cameras;
@@ -89,7 +91,13 @@ struct RunConfig {
     std::string trigger_channel_id;
   };
 
-  std::vector<CameraConfig> cameras;
+  // The single camera under test: the full test suite (t01..t26 minus
+  // t25) runs against this camera only.
+  CameraConfig master;
+  // Extra cameras that exist solely to participate in t25-multi-camera as
+  // additional watchers of the master's (or their own, if on a different
+  // physical GPIO line) trigger pulse. Empty means t25 is skipped.
+  std::vector<CameraConfig> slaves;
   TriggerMode trigger_mode = TriggerMode::FreeRun;
   std::vector<MemoryBackend> memory_backends;
   std::vector<std::string> test_selectors;
@@ -135,5 +143,7 @@ std::vector<std::string> split_csv(const std::string &value);
 std::string trim(const std::string &value);
 std::string utc_timestamp();
 std::string host_name();
+std::string kernel_release();
+std::string kernel_version();
 
 }  // namespace v4l2diag

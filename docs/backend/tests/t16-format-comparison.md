@@ -43,11 +43,7 @@ Registry: `t16-format-comparison` in [test_registry.cpp](../../../source/backend
 | Metric Key Pattern | Unit | Description |
 | ------------------- | ------ | ------------- |
 | `{fmt}_latency_mean` | ms | Mean trigger-to-DQBUF latency |
-| `{fmt}_latency_stddev` | ms | Standard deviation |
-| `{fmt}_latency_min` | ms | Minimum latency |
 | `{fmt}_latency_max` | ms | Maximum latency |
-| `{fmt}_latency_p95` | ms | 95th percentile latency |
-| `{fmt}_latency_jitter` | ms | Jitter (max - min) |
 
 ### Per-format throughput metric
 

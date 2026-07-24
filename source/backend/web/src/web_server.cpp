@@ -436,6 +436,8 @@ Json::Value run_result_to_json(const RunResult &result) {
   out["started_at_utc"] = result.started_at_utc;
   out["finished_at_utc"] = result.finished_at_utc;
   out["host_name"] = result.host_name;
+  out["kernel_release"] = result.kernel_release;
+  out["kernel_version"] = result.kernel_version;
   out["output_directory"] = result.output_directory;
   out["run_mode"] = to_string(result.run_mode);
   for (const auto &camera : result.cameras) {
@@ -455,23 +457,24 @@ Json::Value run_summary_to_json(const std::string &id, const std::string &status
   out["status"] = status;
   out["trigger_mode"] = to_string(config.trigger_mode);
 
-  // Derive top-level profile_id for dashboard display
-  std::string first_profile;
-  bool all_same = true;
-  for (const auto &camera : config.cameras) {
-    if (first_profile.empty()) {
-      first_profile = camera.profile_id;
-    } else if (camera.profile_id != first_profile) {
-      all_same = false;
-    }
-    out["camera_paths"].append(camera.path);
+  // Dashboard display: master's profile is the run's headline profile_id;
+  // slaves are reported separately since they don't run the test suite.
+  out["profile_id"] = config.master.profile_id;
+  out["camera_paths"].append(config.master.path);
+  {
     Json::Value assignment(Json::objectValue);
-    assignment["path"] = camera.path;
-    assignment["profile_id"] = camera.profile_id;
-    assignment["trigger_channel_id"] = camera.trigger_channel_id;
-    out["cameras"].append(assignment);
+    assignment["path"] = config.master.path;
+    assignment["profile_id"] = config.master.profile_id;
+    assignment["trigger_channel_id"] = config.master.trigger_channel_id;
+    out["master"] = assignment;
   }
-  out["profile_id"] = all_same ? first_profile : "mixed";
+  for (const auto &slave : config.slaves) {
+    Json::Value assignment(Json::objectValue);
+    assignment["path"] = slave.path;
+    assignment["profile_id"] = slave.profile_id;
+    assignment["trigger_channel_id"] = slave.trigger_channel_id;
+    out["slaves"].append(assignment);
+  }
   out["started_at_utc"] = result.started_at_utc;
   out["finished_at_utc"] = result.finished_at_utc;
   out["duration_ms"] = static_cast<Json::Int64>(duration_ms);
@@ -528,12 +531,19 @@ RunConfig run_config_from_json(const Json::Value &root, const WebServerOptions &
   config.include_experimental_tests = root.get("include_experimental_tests", false).asBool();
   config.threshold_config_id = root.get("threshold_config_id", "default").asString();
 
-  for (const auto &item : root["cameras"]) {
+  auto parse_camera = [](const Json::Value &item) {
     RunConfig::CameraConfig camera;
     camera.path = item.get("path", "").asString();
     camera.profile_id = item.get("profile_id", "").asString();
     camera.trigger_channel_id = item.get("trigger_channel_id", "").asString();
-    config.cameras.push_back(std::move(camera));
+    return camera;
+  };
+
+  if (root.isMember("master")) {
+    config.master = parse_camera(root["master"]);
+  }
+  for (const auto &item : root["slaves"]) {
+    config.slaves.push_back(parse_camera(item));
   }
 
   for (const auto &item : root["memory_backends"]) {
@@ -568,19 +578,21 @@ RunConfig run_config_from_json(const Json::Value &root, const WebServerOptions &
 }
 
 bool validate_run_config(const RunConfig &config, const WebServerOptions &options, std::string *error) {
-  if (config.cameras.empty()) {
-    *error = "at least one camera assignment is required";
+  if (config.master.path.empty()) {
+    *error = "a master camera is required";
     return false;
   }
+
   std::set<std::string> camera_paths;
   ProfileRegistry profiles(options.config_directory);
-  for (const auto &camera : config.cameras) {
+
+  auto validate_camera = [&](const RunConfig::CameraConfig &camera) {
     if (camera.path.empty() || !camera_paths.insert(camera.path).second) {
       *error = camera.path.empty() ? "camera path is required" : "camera paths must be unique";
       return false;
     }
     if (config.trigger_mode == TriggerMode::FreeRun) {
-      continue;
+      return true;
     }
     DeviceProfile profile;
     if (camera.profile_id.empty() || !profiles.get_profile(camera.profile_id, &profile)) {
@@ -598,6 +610,16 @@ bool validate_run_config(const RunConfig &config, const WebServerOptions &option
         (config.trigger_mode == TriggerMode::Software && channel->type == TriggerChannel::Type::Software);
     if (!compatible) {
       *error = "trigger channel type does not match the selected trigger mode";
+      return false;
+    }
+    return true;
+  };
+
+  if (!validate_camera(config.master)) {
+    return false;
+  }
+  for (const auto &slave : config.slaves) {
+    if (!validate_camera(slave)) {
       return false;
     }
   }
@@ -1406,12 +1428,9 @@ void WebServer::execute_run(std::shared_ptr<RunState> run) {
   append_log(run, "info", "Diagnostic run started.");
   ensure_directory(run->config.output_directory);
 
-  if (run->config.cameras.empty()) {
-    append_log(run, "warn", "No cameras were selected. The run will complete without camera diagnostics.");
-  } else {
-    for (const auto &camera : run->config.cameras) {
-      append_log(run, "info", "Selected camera: " + camera.path, camera.path);
-    }
+  append_log(run, "info", "Master camera: " + run->config.master.path, run->config.master.path);
+  for (const auto &slave : run->config.slaves) {
+    append_log(run, "info", "Slave camera (t25 only): " + slave.path, slave.path);
   }
 
   ProfileRegistry profiles(options_.config_directory);

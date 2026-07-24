@@ -211,14 +211,34 @@ void V4lSession::release_buffers() {
 }
 
 bool V4lSession::streamon(std::string *error) {
+  // Some drivers (observed on tegra-video) intermittently fail STREAMON with
+  // a transient I2C error (EREMOTEIO) right after a prior stream teardown.
+  // Retry a few times with a short backoff before treating it as a real
+  // failure; last_streamon_attempts()/last_streamon_first_error() let callers
+  // report the flake even when a retry ultimately succeeds.
+  constexpr int kMaxAttempts = 3;
+  constexpr int kRetryDelayMs = 50;
   enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  if (ioctl(fd_, VIDIOC_STREAMON, &type) < 0) {
-    if (error) {
-      *error = "VIDIOC_STREAMON: " + std::string(strerror(errno));
+  last_streamon_attempts_ = 0;
+  last_streamon_first_error_.clear();
+  for (int attempt = 1; attempt <= kMaxAttempts; attempt++) {
+    last_streamon_attempts_ = attempt;
+    if (ioctl(fd_, VIDIOC_STREAMON, &type) == 0) {
+      return true;
     }
-    return false;
+    const std::string this_error = "VIDIOC_STREAMON: " + std::string(strerror(errno));
+    if (attempt == 1) {
+      last_streamon_first_error_ = this_error;
+    }
+    if (attempt < kMaxAttempts) {
+      sleep_ms(kRetryDelayMs);
+      continue;
+    }
+    if (error) {
+      *error = this_error;
+    }
   }
-  return true;
+  return false;
 }
 
 void V4lSession::streamoff() {
@@ -280,7 +300,7 @@ CaptureFrame V4lSession::capture(TriggerSource &trigger, int poll_timeout_ms, bo
     sleep_ms(10);
   }
 
-  frame.t_trigger = trigger.send(pulse_ns);
+  frame.t_trigger = trigger.send_async(pulse_ns);
 
   struct pollfd pfd;
   pfd.fd = fd_;
@@ -317,7 +337,8 @@ void V4lSession::warmup(TriggerSource &trigger, int count, int interval_ms, cons
     if (cancel && cancel->load()) {
       break;
     }
-    trigger.send(pulse_ns);
+    trigger.send_async(pulse_ns);
+    trigger.wait_pulse_done();
     sleep_ms(interval_ms);
     drain();
   }

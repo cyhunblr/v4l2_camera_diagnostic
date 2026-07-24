@@ -151,11 +151,13 @@ export type TestSummary = {
 
 export type StartRunPayload = {
   trigger_mode: TriggerMode;
-  cameras: CameraAssignment[];
+  /** The single camera under test — the full test suite runs against it. */
+  master: CameraAssignment;
+  /** Extra cameras that only participate in t25-multi-camera. Empty means t25 is skipped. */
+  slaves: CameraAssignment[];
   memory_backends: string[];
   test_selectors: string[];
   report_formats: string[];
-  run_mode: "parallel" | "sequential";
   include_long_tests: boolean;
   include_experimental_tests: boolean;
   threshold_config_id?: string;

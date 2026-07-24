@@ -319,7 +319,7 @@ bool V4l2ControlTrigger::apply(const std::vector<V4l2ControlWrite> &writes, std:
   return true;
 }
 
-struct timespec V4l2ControlTrigger::send(uint64_t) {
+struct timespec V4l2ControlTrigger::send_async(uint64_t) {
   struct timespec issued_at {};
   clock_gettime(CLOCK_REALTIME, &issued_at);
   last_error_.clear();

@@ -14,10 +14,8 @@
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
-#include <future>
 #include <linux/videodev2.h>
 #include <memory>
-#include <map>
 #include <numeric>
 #include <poll.h>
 #include <set>
@@ -163,6 +161,21 @@ void push_stats_metrics(std::vector<MetricValue> &metrics, const std::string &pr
   metrics.push_back(metric(prefix + "_max", unit, s.max, "Max " + prefix));
   metrics.push_back(metric(prefix + "_p95", unit, s.p95, "95th-percentile " + prefix));
   metrics.push_back(metric(prefix + "_jitter", unit, s.jitter, "Jitter " + prefix));
+}
+
+// Collapsed variant for fixed-cadence/low-sample tests where stddev/p95/jitter
+// add no distinct information beyond mean and the worst-case outlier.
+void push_stats_metrics_brief(std::vector<MetricValue> &metrics, const std::string &prefix, const Stats &s,
+                              const std::string &unit = "ms") {
+  metrics.push_back(metric(prefix + "_mean", unit, s.mean, "Mean " + prefix));
+  metrics.push_back(metric(prefix + "_max", unit, s.max, "Max " + prefix));
+}
+
+// Collapsed variant for tests whose verdict is driven by a p95 tail threshold.
+void push_stats_metrics_p95(std::vector<MetricValue> &metrics, const std::string &prefix, const Stats &s,
+                            const std::string &unit = "ms") {
+  metrics.push_back(metric(prefix + "_mean", unit, s.mean, "Mean " + prefix));
+  metrics.push_back(metric(prefix + "_p95", unit, s.p95, "95th-percentile " + prefix));
 }
 
 // Docs: docs/backend/tests/t03-no-streamon.md
@@ -561,6 +574,10 @@ void run_format_comparison(const std::string &camera_path, MemoryBackend backend
       r.details.push_back(std::string(fn) + ": start failed: " + err);
       continue;
     }
+    if (s.last_streamon_attempts() > 1) {
+      r.details.push_back(std::string(fn) + ": STREAMON succeeded after " + std::to_string(s.last_streamon_attempts()) +
+                          " attempts (first error: " + s.last_streamon_first_error() + ")");
+    }
     s.warmup(trigger, 5, 200, nullptr, pulse_ns);
 
     std::vector<double> lat;
@@ -589,7 +606,7 @@ void run_format_comparison(const std::string &camera_path, MemoryBackend backend
     if (!lat.empty()) {
       std::string prefix = std::string(fn);
       std::transform(prefix.begin(), prefix.end(), prefix.begin(), ::tolower);
-      push_stats_metrics(r.metrics, prefix + "_latency", compute_stats(lat));
+      push_stats_metrics_brief(r.metrics, prefix + "_latency", compute_stats(lat));
       r.metrics.push_back(metric(prefix + "_throughput_mbps", "MB/s", mbps, std::string(fn) + " memcpy throughput."));
     }
   }
@@ -672,6 +689,7 @@ void run_poll_timeout_cliff(const std::string &camera_path, MemoryBackend backen
   if (hi_ms < 0) {
     // No timeout in range caused misses
     r.metrics.push_back(metric("cliff_ms", "ms", -1.0, "No cliff found — pipeline reliable even at 1ms."));
+    r.metrics.push_back(metric("cliff_total_ms", "ms", -1.0, "N/A when no cliff."));
     r.metrics.push_back(metric("safety_margin_ms", "ms", PROD_MS - 1.0, "Margin vs production timeout."));
     r.metrics.push_back(metric("stability_confirmed", "bool", 1.0, "N/A when no cliff."));
     r.status = TestStatus::Pass;
@@ -735,9 +753,17 @@ void run_poll_timeout_cliff(const std::string &camera_path, MemoryBackend backen
   const int min_stable_rounds = (STABILITY_ROUNDS / 2) + 1;  // Majority of configured rounds must confirm the cliff
   bool stable = (stable_rounds >= min_stable_rounds);
   double safety = PROD_MS - static_cast<double>(cliff_candidate);
+  const double pulse_width_ms = static_cast<double>(pulse_ns) / 1'000'000.0;
+  const double cliff_total_ms = static_cast<double>(cliff_candidate) + pulse_width_ms;
 
   // Push metrics
-  r.metrics.push_back(metric("cliff_ms", "ms", static_cast<double>(cliff_candidate), "Stable cliff timeout."));
+  r.metrics.push_back(metric("cliff_ms", "ms", static_cast<double>(cliff_candidate),
+                             "Stable poll(2) timeout, measured AFTER the blocking trigger pulse has already "
+                             "elapsed — not the total trigger-to-frame latency."));
+  r.metrics.push_back(
+      metric("cliff_total_ms", "ms", cliff_total_ms,
+             "cliff_ms + pulse_width_ms: the true minimum trigger-to-frame timeout budget, since trigger.send() "
+             "blocks for the pulse width before poll() begins."));
   r.metrics.push_back(metric("first_miss_ms", "ms", static_cast<double>(hi_ms), "Highest timeout with misses."));
   r.metrics.push_back(metric("safety_margin_ms", "ms", safety, "Production timeout - cliff timeout."));
   r.metrics.push_back(metric("stability_confirmed", "bool", stable ? 1.0 : 0.0,
@@ -747,15 +773,16 @@ void run_poll_timeout_cliff(const std::string &camera_path, MemoryBackend backen
 
   // Emit summary box
   {
-    char r0[64], r1[64], r2[64], r3[64], r4[64];
+    char r0[64], r1[64], r1b[64], r2[64], r3[64], r4[64];
     snprintf(r0, sizeof(r0), "║  Production timeout : %5.1fms  ║", PROD_MS);
-    snprintf(r1, sizeof(r1), "║  Cliff (stable)     : %5dms  ║", cliff_candidate);
+    snprintf(r1, sizeof(r1), "║  Cliff (post-pulse) : %5dms  ║", cliff_candidate);
+    snprintf(r1b, sizeof(r1b), "║  Cliff (total)      : %5.1fms  ║", cliff_total_ms);
     snprintf(r2, sizeof(r2), "║  Safety margin      : %5.1fms  ║", safety);
     snprintf(r3, sizeof(r3), "║  Stability          :   %d/%d    ║", stable_rounds, STABILITY_ROUNDS);
     snprintf(r4, sizeof(r4), "║  Confirmed          :   %s    ║", stable ? "YES" : "NO ");
     std::string box;
     box += "╔═══════ CLIFF SUMMARY ══════════╗\n";
-    box += std::string(r0) + "\n" + std::string(r1) + "\n" + std::string(r2) + "\n";
+    box += std::string(r0) + "\n" + std::string(r1) + "\n" + std::string(r1b) + "\n" + std::string(r2) + "\n";
     box += std::string(r3) + "\n" + std::string(r4) + "\n";
     box += "╚════════════════════════════════╝";
     emit_data(log, camera_path, "t12", box);
@@ -921,7 +948,7 @@ void run_sustained_capture(const std::string &camera_path, MemoryBackend backend
 
   double drift = 0.0;
   if (!all_lat.empty()) {
-    push_stats_metrics(r.metrics, "latency", compute_stats(all_lat));
+    push_stats_metrics_p95(r.metrics, "latency", compute_stats(all_lat));
     if (win_means.size() >= 2) {
       const size_t half = win_means.size() / 2;
       double f = 0.0, sec = 0.0;
@@ -1134,7 +1161,7 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
   r.metrics.push_back(metric("rapid_cycles_ok", "count", static_cast<double>(rapid_ok), "Rapid cycles with frame."));
   r.metrics.push_back(metric("rapid_cycles_total", "count", static_cast<double>(RAPID), "Total rapid cycles."));
   if (!first_lat.empty())
-    push_stats_metrics(r.metrics, "first_frame_latency", compute_stats(first_lat));
+    push_stats_metrics_brief(r.metrics, "first_frame_latency", compute_stats(first_lat));
 
   const double rapid_pct = 100.0 * rapid_ok / RAPID;
   const int max_fail_pass = static_cast<int>(thv(th, "t05-stream-cycles", "max_full_failures_pass"));
@@ -1749,6 +1776,10 @@ void run_stuck_frame(const std::string &camera_path, MemoryBackend backend, Trig
     r.summary = "Session setup failed: " + err;
     return;
   }
+  if (s.last_streamon_attempts() > 1) {
+    r.details.push_back("STREAMON succeeded after " + std::to_string(s.last_streamon_attempts()) +
+                        " attempts (first error: " + s.last_streamon_first_error() + ")");
+  }
   s.warmup(trigger, 5, 200, nullptr, pulse_ns);
 
   std::vector<uint8_t> prev(CMP, 0);
@@ -1961,9 +1992,30 @@ void run_resolution_sweep(const std::string &camera_path, MemoryBackend backend,
   orig_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   ioctl(fd, VIDIOC_G_FMT, &orig_fmt);
 
-  // Enumerate frame sizes for the current pixel format
+  // The device's currently-set format (queried above) is not guaranteed to be
+  // one of the formats it actually advertises via ENUM_FMT — some drivers
+  // report a different default/raw format until a capture format is
+  // explicitly negotiated. Pin the format to the first ENUM_FMT-advertised
+  // pixel format before sweeping frame sizes, so this test measures a format
+  // the device actually supports rather than whatever it happened to boot with.
+  struct v4l2_fmtdesc fmtdesc {};
+  fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  fmtdesc.index = 0;
+  uint32_t sweep_pixel_format = orig_fmt.fmt.pix.pixelformat;
+  if (ioctl(fd, VIDIOC_ENUM_FMT, &fmtdesc) == 0) {
+    sweep_pixel_format = fmtdesc.pixelformat;
+    struct v4l2_format fmt {};
+    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    fmt.fmt.pix.width = orig_fmt.fmt.pix.width > 0 ? orig_fmt.fmt.pix.width : 640;
+    fmt.fmt.pix.height = orig_fmt.fmt.pix.height > 0 ? orig_fmt.fmt.pix.height : 480;
+    fmt.fmt.pix.pixelformat = sweep_pixel_format;
+    fmt.fmt.pix.field = V4L2_FIELD_NONE;
+    ioctl(fd, VIDIOC_S_FMT, &fmt);
+  }
+
+  // Enumerate frame sizes for the advertised pixel format
   struct v4l2_frmsizeenum frmsize {};
-  frmsize.pixel_format = orig_fmt.fmt.pix.pixelformat;
+  frmsize.pixel_format = sweep_pixel_format;
   frmsize.index = 0;
 
   struct Resolution {
@@ -1989,6 +2041,7 @@ void run_resolution_sweep(const std::string &camera_path, MemoryBackend backend,
   }
 
   if (resolutions.empty()) {
+    ioctl(fd, VIDIOC_S_FMT, &orig_fmt);
     ::close(fd);
     r.status = TestStatus::Warn;
     r.summary = "Device does not enumerate any frame sizes for format " + fourcc_to_string(frmsize.pixel_format) + ".";
@@ -2098,6 +2151,11 @@ void run_cold_start(const std::string &camera_path, MemoryBackend backend, Trigg
     if (!s.open(camera_path, &err) || !s.start(2, backend, &err)) {
       r.details.push_back("cycle " + std::to_string(cycle + 1) + ": session failed — " + err);
       continue;
+    }
+    if (s.last_streamon_attempts() > 1) {
+      r.details.push_back("cycle " + std::to_string(cycle + 1) + ": STREAMON succeeded after " +
+                          std::to_string(s.last_streamon_attempts()) +
+                          " attempts (first error: " + s.last_streamon_first_error() + ")");
     }
 
     // Capture frames sequentially, tracking latency from the very first frame
@@ -2258,7 +2316,7 @@ void run_max_fps(const std::string &camera_path, MemoryBackend backend, TriggerS
   r.metrics.push_back(metric("drop_pct", "%", drop_pct, "Frame drop percentage."));
   if (!latencies.empty()) {
     Stats ls = compute_stats(latencies);
-    push_stats_metrics(r.metrics, "latency", ls);
+    push_stats_metrics_p95(r.metrics, "latency", ls);
   }
 
   r.details.push_back("Duration: " + std::to_string(static_cast<int>(total_elapsed)) + "s");
@@ -2284,35 +2342,64 @@ void run_max_fps(const std::string &camera_path, MemoryBackend backend, TriggerS
   }
 }
 
+// One participant (master or a slave) in t25-multi-camera: its capture
+// session plus the shared TriggerSource for whichever physical GPIO line
+// its profile+trigger_channel_id resolves to.
+struct MultiCamParticipant {
+  std::string camera_path;
+  std::shared_ptr<TriggerSource> trigger;
+};
+
 // Docs: docs/backend/tests/t25-multi-camera.md
-void run_multi_camera(const std::vector<std::string> &camera_paths, MemoryBackend backend, TriggerSource &trigger,
-                      TestResult &r, const LogFn &log, const TestThresholds &tp) {
+void run_multi_camera(const std::vector<MultiCamParticipant> &participants, MemoryBackend backend, TestResult &r,
+                      const LogFn &log, const TestThresholds &tp) {
   const int SAMPLES = static_cast<int>(tpv(tp, "t25-multi-camera", "sample_count"));
   const int POLL_TIMEOUT = static_cast<int>(tpv(tp, "t25-multi-camera", "poll_timeout_ms"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(
-      log, camera_paths[0], "t25",
-      "Multi-camera: " + std::to_string(camera_paths.size()) + " devices x " + std::to_string(SAMPLES) + " samples...");
+      log, participants[0].camera_path, "t25",
+      "Multi-camera: " + std::to_string(participants.size()) + " devices x " + std::to_string(SAMPLES) + " samples...");
 
   // Open sessions on all cameras
-  std::vector<V4lSession> sessions(camera_paths.size());
-  for (size_t i = 0; i < camera_paths.size(); i++) {
+  std::vector<V4lSession> sessions(participants.size());
+  for (size_t i = 0; i < participants.size(); i++) {
     std::string err;
-    if (!sessions[i].open(camera_paths[i], &err) || !sessions[i].start(2, backend, &err)) {
+    if (!sessions[i].open(participants[i].camera_path, &err) || !sessions[i].start(2, backend, &err)) {
       r.status = TestStatus::Fail;
-      r.summary = "Failed to open camera " + camera_paths[i] + ": " + err;
+      r.summary = "Failed to open camera " + participants[i].camera_path + ": " + err;
       return;
     }
   }
   // Warmup all
-  for (auto &s : sessions)
-    s.warmup(trigger, 5, 200, nullptr, pulse_ns);
+  for (size_t i = 0; i < participants.size(); i++)
+    sessions[i].warmup(*participants[i].trigger, 5, 200, nullptr, pulse_ns);
 
-  // Concurrent capture: drain all queues, fire ONE shared trigger, then poll
-  // every camera against that single t_trigger so latency/jitter reflect
-  // actual cross-device skew rather than each camera's own re-triggered pulse.
-  std::vector<std::vector<double>> per_cam_latencies(camera_paths.size());
+  // Dedup participants sharing the SAME physical trigger (same chip:line
+  // resolves to the same shared_ptr via TriggerRegistry) so a shared line
+  // is fired exactly once per round, not once per camera on it. Also record,
+  // per participant, which fire_set entry drives it, so each camera's latency
+  // can be measured against ITS OWN line's edge rather than a shared one.
+  std::vector<TriggerSource *> fire_set;
+  std::vector<size_t> participant_fire_index(participants.size());
+  for (size_t i = 0; i < participants.size(); i++) {
+    TriggerSource *t = participants[i].trigger.get();
+    auto it = std::find(fire_set.begin(), fire_set.end(), t);
+    if (it == fire_set.end()) {
+      participant_fire_index[i] = fire_set.size();
+      fire_set.push_back(t);
+    } else {
+      participant_fire_index[i] = static_cast<size_t>(std::distance(fire_set.begin(), it));
+    }
+  }
+
+  // Concurrent capture: drain all queues, fire every unique physical trigger
+  // line (in parallel via send_async — the pulse's LOW-wait overlaps with
+  // every camera's poll), then poll every camera and measure its latency
+  // against its own line's fire edge, so latency/jitter reflect actual
+  // cross-device skew rather than each camera's own re-triggered pulse.
+  std::vector<std::vector<double>> per_cam_latencies(participants.size());
   std::vector<double> cross_jitters;
+  std::vector<double> fire_spreads_ms;
   int successful_rounds = 0;
 
   for (int sample = 0; sample < SAMPLES; sample++) {
@@ -2320,7 +2407,20 @@ void run_multi_camera(const std::vector<std::string> &camera_paths, MemoryBacken
       s.drain();
     V4lSession::sleep_ms(10);
 
-    const struct timespec t_trigger = trigger.send(pulse_ns);
+    std::vector<struct timespec> fire_edges;
+    fire_edges.reserve(fire_set.size());
+    for (TriggerSource *t : fire_set) {
+      fire_edges.push_back(t->send_async(pulse_ns));
+    }
+    if (fire_edges.size() > 1) {
+      const auto earliest = *std::min_element(
+          fire_edges.begin(), fire_edges.end(),
+          [](const struct timespec &a, const struct timespec &b) { return V4lSession::ts_diff_ms(a, b) < 0.0; });
+      const auto latest = *std::max_element(
+          fire_edges.begin(), fire_edges.end(),
+          [](const struct timespec &a, const struct timespec &b) { return V4lSession::ts_diff_ms(a, b) < 0.0; });
+      fire_spreads_ms.push_back(V4lSession::ts_diff_ms(latest, earliest));
+    }
 
     std::vector<struct pollfd> pfds(sessions.size());
     for (size_t i = 0; i < sessions.size(); i++) {
@@ -2342,7 +2442,8 @@ void run_multi_camera(const std::vector<std::string> &camera_paths, MemoryBacken
         if (ioctl(sessions[i].fd(), VIDIOC_DQBUF, &buf) == 0) {
           struct timespec t_recv;
           clock_gettime(CLOCK_REALTIME, &t_recv);
-          latency_ms = V4lSession::ts_diff_ms(t_recv, t_trigger);
+          // Measure against this camera's own line edge, not a shared one.
+          latency_ms = V4lSession::ts_diff_ms(t_recv, fire_edges[participant_fire_index[i]]);
           sessions[i].requeue(buf.index);
         }
       }
@@ -2360,11 +2461,21 @@ void run_multi_camera(const std::vector<std::string> &camera_paths, MemoryBacken
       cross_jitters.push_back(max_l - min_l);
       successful_rounds++;
     }
+    for (TriggerSource *t : fire_set)
+      t->wait_pulse_done();
     V4lSession::sleep_ms(100);
   }
 
+  if (!fire_spreads_ms.empty()) {
+    Stats fs = compute_stats(fire_spreads_ms);
+    r.metrics.push_back(metric("trigger_fire_spread_mean", "ms", fs.mean,
+                               "Mean spread between the earliest and latest trigger edge when participants span "
+                               "multiple physical GPIO lines (0 when all participants share one line)."));
+    r.metrics.push_back(metric("trigger_fire_spread_max", "ms", fs.max, "Worst-case multi-line firing spread."));
+  }
+
   // Report per-camera stats
-  for (size_t i = 0; i < camera_paths.size(); i++) {
+  for (size_t i = 0; i < participants.size(); i++) {
     std::vector<double> valid;
     for (double v : per_cam_latencies[i])
       if (v > 0)
@@ -2372,9 +2483,9 @@ void run_multi_camera(const std::vector<std::string> &camera_paths, MemoryBacken
     if (!valid.empty()) {
       Stats ls = compute_stats(valid);
       std::string prefix = "cam" + std::to_string(i) + "_latency";
-      push_stats_metrics(r.metrics, prefix, ls);
+      push_stats_metrics_brief(r.metrics, prefix, ls);
     }
-    r.details.push_back(camera_paths[i] + ": " + std::to_string(per_cam_latencies[i].size()) + " captures");
+    r.details.push_back(participants[i].camera_path + ": " + std::to_string(per_cam_latencies[i].size()) + " captures");
   }
 
   // Cross-camera jitter
@@ -2388,7 +2499,7 @@ void run_multi_camera(const std::vector<std::string> &camera_paths, MemoryBacken
     if (js.p95 < 5.0) {
       r.status = TestStatus::Pass;
       r.summary = "Cross-device jitter p95=" + std::to_string(static_cast<int>(js.p95)) + "ms across " +
-                  std::to_string(camera_paths.size()) + " cameras.";
+                  std::to_string(participants.size()) + " cameras.";
     } else if (js.p95 < 20.0) {
       r.status = TestStatus::Warn;
       r.summary = "Moderate cross-device jitter p95=" + std::to_string(static_cast<int>(js.p95)) + "ms.";
@@ -2431,73 +2542,26 @@ RunResult DiagnosticRunner::run(const RunConfig &config) {
     ThresholdRegistry registry(default_threshold_directory());
     active_thresholds_ = registry.resolve(config.threshold_config_id.empty() ? "default" : config.threshold_config_id);
   }
-  multi_camera_claimed_ = false;
 
   RunResult result;
   result.started_at_utc = utc_timestamp();
   result.host_name = host_name();
+  result.kernel_release = kernel_release();
+  result.kernel_version = kernel_version();
   result.output_directory = config.output_directory;
   result.run_mode = config.run_mode;
 
   const auto tests = select_tests(config.test_selectors, config.include_long_tests, config.include_experimental_tests);
 
-  struct CameraJob {
-    RunConfig::CameraConfig camera;
-    DeviceProfile profile;
-  };
-  std::map<std::string, std::vector<CameraJob>> groups;
-  int unassigned_index = 0;
-  for (const auto &camera : config.cameras) {
-    CameraJob job;
-    job.camera = camera;
-    if (!camera.profile_id.empty()) {
-      profiles_->get_profile(camera.profile_id, &job.profile);
-    }
-
-    std::string resource_key = "camera:" + camera.path;
-    if (config.trigger_mode != TriggerMode::FreeRun) {
-      const auto channel =
-          std::find_if(job.profile.trigger_channels.begin(), job.profile.trigger_channels.end(),
-                       [&](const TriggerChannel &item) { return item.id == camera.trigger_channel_id; });
-      if (channel != job.profile.trigger_channels.end() && config.trigger_mode == TriggerMode::Hardware &&
-          channel->type == TriggerChannel::Type::Hardware) {
-        resource_key =
-            "gpio:" + std::to_string(channel->gpio.chip_id) + ":" + std::to_string(channel->gpio.line_number);
-      } else if (channel != job.profile.trigger_channels.end() && config.trigger_mode == TriggerMode::Software &&
-                 channel->type == TriggerChannel::Type::Software) {
-        resource_key = "software:" + camera.profile_id + ":" + channel->id;
-      } else {
-        resource_key = "unassigned:" + std::to_string(unassigned_index++);
-      }
-    }
-    groups[resource_key].push_back(std::move(job));
+  DeviceProfile master_profile;
+  if (!config.master.profile_id.empty()) {
+    profiles_->get_profile(config.master.profile_id, &master_profile);
   }
 
-  const auto run_group = [&](const std::vector<CameraJob> &group) {
-    std::vector<CameraRunResult> camera_results;
-    for (const auto &job : group) {
-      camera_results.push_back(run_camera(job.camera, config, job.profile, tests));
-    }
-    return camera_results;
-  };
-
-  if (config.run_mode == RunMode::Parallel && groups.size() > 1) {
-    std::vector<std::future<std::vector<CameraRunResult>>> futures;
-    for (const auto &entry : groups) {
-      futures.push_back(std::async(std::launch::async, [&, group = entry.second]() { return run_group(group); }));
-    }
-    for (auto &future : futures) {
-      auto group_results = future.get();
-      result.cameras.insert(result.cameras.end(), std::make_move_iterator(group_results.begin()),
-                            std::make_move_iterator(group_results.end()));
-    }
-  } else {
-    for (const auto &entry : groups) {
-      auto group_results = run_group(entry.second);
-      result.cameras.insert(result.cameras.end(), std::make_move_iterator(group_results.begin()),
-                            std::make_move_iterator(group_results.end()));
-    }
-  }
+  // Exactly one test subject (the master) — no grouping/parallelism needed.
+  // t25-multi-camera, if applicable, is dispatched as one of the master's
+  // own tests (see run_test()'s t25 branch) and opens the slaves directly.
+  result.cameras.push_back(run_camera(config.master, config, master_profile, tests));
 
   result.finished_at_utc = utc_timestamp();
   return result;
@@ -2514,10 +2578,10 @@ CameraRunResult DiagnosticRunner::run_camera(const RunConfig::CameraConfig &came
   camera_result.pulse_width_ms = profile.defaults.pulse_width_ms;
   camera_result.memory_backends = config.memory_backends;
 
-  std::unique_ptr<TriggerSource> trigger;
+  std::shared_ptr<TriggerSource> trigger;
   std::string trigger_error;
   if (config.trigger_mode == TriggerMode::FreeRun) {
-    trigger = std::make_unique<FreeRunTrigger>();
+    trigger = std::make_shared<FreeRunTrigger>();
     camera_result.trigger_description = "free-run (no external trigger)";
   } else {
     const auto channel = std::find_if(profile.trigger_channels.begin(), profile.trigger_channels.end(),
@@ -2535,12 +2599,13 @@ CameraRunResult DiagnosticRunner::run_camera(const RunConfig::CameraConfig &came
         camera_result.trigger_description = "software: " + channel->name;
       }
       if (config.trigger_mode == TriggerMode::Hardware && channel->type == TriggerChannel::Type::Hardware) {
-        auto source = std::make_unique<GpioTrigger>();
-        if (source->open(channel->gpio, &trigger_error)) {
-          trigger = std::move(source);
-        }
+        // Shared per-physical-line trigger: cameras (master + slaves) that
+        // resolve to the same chip_id:line_number reuse the same
+        // GpioTrigger/background thread instead of each opening the pin
+        // independently.
+        trigger = trigger_registry_.get_or_create(channel->gpio, &trigger_error);
       } else if (config.trigger_mode == TriggerMode::Software && channel->type == TriggerChannel::Type::Software) {
-        auto source = std::make_unique<V4l2ControlTrigger>();
+        auto source = std::make_shared<V4l2ControlTrigger>();
         if (source->open(camera.path, *channel, &trigger_error)) {
           trigger = std::move(source);
         }
@@ -2556,7 +2621,7 @@ CameraRunResult DiagnosticRunner::run_camera(const RunConfig::CameraConfig &came
       if (config.stop_token && config.stop_token->load(std::memory_order_relaxed)) {
         break;
       }
-      auto test_result = run_test(camera.path, backend, test, config, profile, trigger.get(), trigger_error);
+      auto test_result = run_test(camera.path, backend, test, config, profile, trigger.get(), trigger, trigger_error);
       if (config.progress_callback) {
         config.progress_callback(camera.path, test_result);
       }
@@ -2572,6 +2637,7 @@ CameraRunResult DiagnosticRunner::run_camera(const RunConfig::CameraConfig &came
 TestResult DiagnosticRunner::run_test(const std::string &camera_path, MemoryBackend backend,
                                       const TestDefinition &definition, const RunConfig &config,
                                       const DeviceProfile &profile, TriggerSource *trigger,
+                                      const std::shared_ptr<TriggerSource> &master_trigger,
                                       const std::string &trigger_error) {
   TestResult result;
   result.id = definition.id;
@@ -2706,23 +2772,42 @@ TestResult DiagnosticRunner::run_test(const std::string &camera_path, MemoryBack
   else if (definition.id == "t24-max-fps") {
     run_max_fps(camera_path, backend, *trigger, result, log, tp);
   } else if (definition.id == "t25-multi-camera") {
-    // Multi-camera requires multiple camera paths from config.cameras. It opens
-    // every camera itself, so it must run at most once per run() — the first
-    // camera/group to reach it claims multi_camera_claimed_ and runs it for the
-    // whole camera set; every other dispatch (including concurrent ones under
-    // RunMode::Parallel) is skipped rather than re-running or racing on the
-    // same devices.
-    if (config.cameras.size() <= 1) {
+    // Multi-camera requires at least one slave in addition to the master.
+    // It opens every participant camera itself and dispatches naturally at
+    // most once per run() since only the master's test suite ever calls
+    // into here (see run()).
+    if (config.slaves.empty()) {
       result.status = TestStatus::Skipped;
-      result.summary = "Multi-camera test requires 2+ cameras selected.";
-    } else if (multi_camera_claimed_.exchange(true)) {
-      result.status = TestStatus::Skipped;
-      result.summary = "Multi-camera test already run once for this run (covers all cameras).";
+      result.summary = "Multi-camera test requires at least one slave camera selected.";
     } else {
-      std::vector<std::string> paths;
-      for (const auto &cam : config.cameras)
-        paths.push_back(cam.path);
-      run_multi_camera(paths, backend, *trigger, result, log, tp);
+      std::vector<MultiCamParticipant> participants;
+      participants.push_back({camera_path, master_trigger});
+      for (const auto &slave : config.slaves) {
+        DeviceProfile slave_profile;
+        if (!slave.profile_id.empty()) {
+          profiles_->get_profile(slave.profile_id, &slave_profile);
+        }
+        const auto channel =
+            std::find_if(slave_profile.trigger_channels.begin(), slave_profile.trigger_channels.end(),
+                         [&](const TriggerChannel &item) { return item.id == slave.trigger_channel_id; });
+        if (channel == slave_profile.trigger_channels.end() || channel->type != TriggerChannel::Type::Hardware) {
+          result.details.push_back(slave.path + ": no valid hardware trigger channel — excluded from t25");
+          continue;
+        }
+        std::string slave_error;
+        auto slave_trigger = trigger_registry_.get_or_create(channel->gpio, &slave_error);
+        if (!slave_trigger) {
+          result.details.push_back(slave.path + ": failed to open GPIO trigger (" + slave_error + ") — excluded");
+          continue;
+        }
+        participants.push_back({slave.path, slave_trigger});
+      }
+      if (participants.size() <= 1) {
+        result.status = TestStatus::Skipped;
+        result.summary = "No slave camera resolved a valid hardware trigger channel.";
+      } else {
+        run_multi_camera(participants, backend, result, log, tp);
+      }
     }
   } else if (definition.id == "t26-cold-start") {
     run_cold_start(camera_path, backend, *trigger, result, log, tp);

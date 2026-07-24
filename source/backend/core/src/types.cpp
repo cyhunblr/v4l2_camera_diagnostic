@@ -5,6 +5,7 @@
 #include <ctime>
 #include <sstream>
 #include <string>
+#include <sys/utsname.h>
 #include <unistd.h>
 #include <vector>
 
@@ -188,6 +189,22 @@ std::string host_name() {
   if (gethostname(buffer, sizeof(buffer)) == 0) {
     buffer[sizeof(buffer) - 1] = '\0';
     return buffer;
+  }
+  return "unknown";
+}
+
+std::string kernel_release() {
+  struct utsname info {};
+  if (uname(&info) == 0) {
+    return info.release;
+  }
+  return "unknown";
+}
+
+std::string kernel_version() {
+  struct utsname info {};
+  if (uname(&info) == 0) {
+    return info.version;
   }
   return "unknown";
 }

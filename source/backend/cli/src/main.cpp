@@ -379,8 +379,11 @@ int command_run(int argc, char **argv) {
       trigger_channel_id = compatible.front();
     }
   }
-  for (const auto &path : camera_paths) {
-    config.cameras.push_back({path, profile_id, trigger_channel_id});
+  // First --camera is the master (the full test suite runs against it); any
+  // further ones are slaves that only participate in t25-multi-camera.
+  config.master = {camera_paths.front(), profile_id, trigger_channel_id};
+  for (size_t i = 1; i < camera_paths.size(); i++) {
+    config.slaves.push_back({camera_paths[i], profile_id, trigger_channel_id});
   }
 
   DiagnosticRunner runner(&profiles);

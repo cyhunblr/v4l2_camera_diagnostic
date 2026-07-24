@@ -22,7 +22,9 @@ export default function App() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [tests, setTests] = useState<TestDefinition[]>([]);
-  const [selectedCameras, setSelectedCameras] = useState<string[]>([]);
+  const [cameraMode, setCameraMode] = useState<"single" | "multi">("single");
+  const [masterPath, setMasterPath] = useState<string | null>(null);
+  const [slavePaths, setSlavePaths] = useState<string[]>([]);
   const [triggerMode, setTriggerMode] = useState<TriggerMode>("free-run");
   const [assignmentMode, setAssignmentMode] = useState<"single" | "per-camera">("single");
   const [singleProfileId, setSingleProfileId] = useState("");
@@ -88,15 +90,37 @@ export default function App() {
     setSingleProfileId(profiles[0]?.id ?? "");
   }, [profiles, singleProfileId]);
 
+  const involvedPaths = useMemo(
+    () => [masterPath, ...slavePaths].filter((path): path is string => Boolean(path)),
+    [masterPath, slavePaths]
+  );
+
   useEffect(() => {
     setCameraAssignments((current) =>
-      selectedCameras.map((path) => current.find((assignment) => assignment.path === path) ?? {
+      involvedPaths.map((path) => current.find((assignment) => assignment.path === path) ?? {
         path,
         profile_id: "",
         trigger_channel_id: ""
       })
     );
-  }, [selectedCameras]);
+  }, [involvedPaths]);
+
+  // Switching to single-camera mode drops any slaves; changing the master
+  // also removes it from the slave list so a camera can't be both.
+  useEffect(() => {
+    if (cameraMode === "single" && slavePaths.length > 0) {
+      setSlavePaths([]);
+    }
+  }, [cameraMode, slavePaths.length]);
+
+  function selectMaster(path: string) {
+    setMasterPath(path);
+    setSlavePaths((current) => current.filter((slave) => slave !== path));
+  }
+
+  function toggleSlave(path: string) {
+    setSlavePaths((current) => (current.includes(path) ? current.filter((item) => item !== path) : [...current, path]));
+  }
 
   useEffect(() => {
     if (autoScroll && outputRef.current) {
@@ -179,8 +203,8 @@ export default function App() {
   }
 
   function requestStart() {
-    if (selectedCameras.length === 0) {
-      setErrorMessage("Select at least one camera before starting a run.");
+    if (!masterPath) {
+      setErrorMessage("Select a camera to test before starting a run.");
       return;
     }
     if (triggerMode !== "free-run" && cameraAssignments.some((assignment) => !assignment.profile_id || !assignment.trigger_channel_id)) {
@@ -188,9 +212,12 @@ export default function App() {
       setActivePage("profiles");
       return;
     }
+    const master = cameraAssignments.find((assignment) => assignment.path === masterPath)!;
+    const slaves = cameraAssignments.filter((assignment) => slavePaths.includes(assignment.path));
+    const description = slaves.length > 0 ? `1 master + ${slaves.length} slave camera(s)` : "1 camera";
     requestConfirm({
       title: "Start Diagnostic",
-      message: `Run diagnostics on ${selectedCameras.length} camera(s) in ${triggerMode} mode?`,
+      message: `Run diagnostics on ${description} in ${triggerMode} mode?`,
       confirmLabel: "Start",
       variant: "primary",
       onConfirm: () => {
@@ -198,11 +225,11 @@ export default function App() {
         setViewedRunId(null);
         startRun({
           trigger_mode: triggerMode,
-          cameras: cameraAssignments,
+          master,
+          slaves,
           memory_backends: backends,
           test_selectors: selectedTests.length ? selectedTests : ["implemented"],
           report_formats: reports,
-          run_mode: selectedCameras.length > 1 ? "parallel" : "sequential",
           include_long_tests: includeLong,
           include_experimental_tests: includeExperimental,
           threshold_config_id: selectedThresholdId
@@ -250,15 +277,19 @@ export default function App() {
         {activePage === "cameras" && (
           <CameraSelectionPage
             devices={devices}
-            selectedCameras={selectedCameras}
-            onToggle={(path) => toggleListValue(path, selectedCameras, setSelectedCameras)}
+            cameraMode={cameraMode}
+            onCameraModeChange={setCameraMode}
+            masterPath={masterPath}
+            onSelectMaster={selectMaster}
+            slavePaths={slavePaths}
+            onToggleSlave={toggleSlave}
             onRefresh={loadBasics}
           />
         )}
 
         {activePage === "profiles" && (
           <ProfileSelectionPage
-            devices={devices.filter((device) => selectedCameras.includes(device.path))}
+            devices={devices.filter((device) => involvedPaths.includes(device.path))}
             profiles={profiles}
             triggerMode={triggerMode}
             onTriggerModeChange={setTriggerMode}

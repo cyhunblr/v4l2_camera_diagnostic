@@ -53,11 +53,7 @@ Registry: `t22-sustained-capture` in [test_registry.cpp](../../../source/backend
 | Metric Key | Unit | Description |
 | ----------- | ------ | ------------- |
 | `latency_mean` | ms | Mean capture latency across all successful frames. |
-| `latency_stddev` | ms | Standard deviation of capture latency. |
-| `latency_min` | ms | Minimum capture latency observed. |
-| `latency_max` | ms | Maximum capture latency observed. |
-| `latency_p95` | ms | 95th percentile capture latency. |
-| `latency_jitter` | ms | Jitter (max − min) of capture latency. |
+| `latency_p95` | ms | 95th percentile capture latency. `latency_drift_ms` (below) already covers trend/spread over the run, so only the tail (`p95`) is kept alongside the mean. |
 
 ## Report Details
 

@@ -45,11 +45,7 @@ For each camera index `N` (0-based), a full stats block is reported:
 | Metric Key Pattern | Unit | Description |
 | ------------------- | ------ | ------------- |
 | `cam0_latency_mean` | ms | Mean capture latency for camera 0. |
-| `cam0_latency_stddev` | ms | Standard deviation for camera 0. |
-| `cam0_latency_min` | ms | Minimum latency for camera 0. |
-| `cam0_latency_max` | ms | Maximum latency for camera 0. |
-| `cam0_latency_p95` | ms | 95th percentile for camera 0. |
-| `cam0_latency_jitter` | ms | Jitter for camera 0. |
+| `cam0_latency_max` | ms | Maximum latency for camera 0. Per-camera stats are diagnostic filler for spotting an outlier device — the verdict itself is driven by `cross_jitter_p95` below. |
 
 (Repeated for `cam1_latency_*`, `cam2_latency_*`, etc.)
 

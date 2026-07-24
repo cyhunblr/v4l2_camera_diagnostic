@@ -68,7 +68,8 @@ class V4l2ControlTrigger final : public TriggerSource {
   TriggerMode mode() const override {
     return TriggerMode::Software;
   }
-  struct timespec send(uint64_t pulse_ns = 13'000'000UL) override;
+  struct timespec send_async(uint64_t pulse_ns = 13'000'000UL) override;
+  void wait_pulse_done() override {}
   const std::string &last_error() const {
     return last_error_;
   }

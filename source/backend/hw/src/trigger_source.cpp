@@ -4,7 +4,7 @@
 
 namespace v4l2diag {
 
-struct timespec FreeRunTrigger::send(uint64_t) {
+struct timespec FreeRunTrigger::send_async(uint64_t) {
   struct timespec now {};
   clock_gettime(CLOCK_REALTIME, &now);
   return now;

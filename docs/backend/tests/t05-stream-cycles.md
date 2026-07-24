@@ -41,11 +41,7 @@ Registry: `t05-stream-cycles` in [test_registry.cpp](../../../source/backend/cor
 | `rapid_cycles_ok` | count | Rapid cycles where a frame was captured |
 | `rapid_cycles_total` | count | Total rapid cycles attempted |
 | `first_frame_latency_mean` | ms | Mean first-frame latency across full cycles |
-| `first_frame_latency_stddev` | ms | Std-dev of first-frame latency |
-| `first_frame_latency_min` | ms | Minimum first-frame latency |
 | `first_frame_latency_max` | ms | Maximum first-frame latency |
-| `first_frame_latency_p95` | ms | 95th percentile first-frame latency |
-| `first_frame_latency_jitter` | ms | Jitter of first-frame latency |
 
 ## Report Details
 

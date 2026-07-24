@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -54,6 +55,44 @@ std::string json_escape(const std::string &value) {
   return out.str();
 }
 
+// Renders an ISO-8601 "%Y-%m-%dT%H:%M:%SZ" timestamp as "%Y-%m-%d %H:%M:%S UTC"
+// for display; falls back to the raw value if it doesn't match the expected shape.
+std::string readable_utc(const std::string &iso_timestamp) {
+  std::tm tm{};
+  if (strptime(iso_timestamp.c_str(), "%Y-%m-%dT%H:%M:%SZ", &tm) == nullptr) {
+    return iso_timestamp;
+  }
+  char buffer[32];
+  std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S UTC", &tm);
+  return buffer;
+}
+
+std::string readable_duration(const std::string &started_at_utc, const std::string &finished_at_utc) {
+  std::tm start_tm{};
+  std::tm finish_tm{};
+  if (strptime(started_at_utc.c_str(), "%Y-%m-%dT%H:%M:%SZ", &start_tm) == nullptr ||
+      strptime(finished_at_utc.c_str(), "%Y-%m-%dT%H:%M:%SZ", &finish_tm) == nullptr) {
+    return "";
+  }
+  const time_t start_epoch = timegm(&start_tm);
+  const time_t finish_epoch = timegm(&finish_tm);
+  if (finish_epoch < start_epoch) {
+    return "";
+  }
+  long total_sec = static_cast<long>(finish_epoch - start_epoch);
+  const long hours = total_sec / 3600;
+  total_sec %= 3600;
+  const long minutes = total_sec / 60;
+  const long seconds = total_sec % 60;
+  std::ostringstream out;
+  if (hours > 0)
+    out << hours << "h ";
+  if (hours > 0 || minutes > 0)
+    out << minutes << "m ";
+  out << seconds << "s";
+  return out.str();
+}
+
 std::string html_escape(const std::string &value) {
   std::ostringstream out;
   for (char c : value) {
@@ -86,6 +125,8 @@ void write_json(const RunResult &result, const std::string &path) {
   out << "  \"started_at_utc\": \"" << json_escape(result.started_at_utc) << "\",\n";
   out << "  \"finished_at_utc\": \"" << json_escape(result.finished_at_utc) << "\",\n";
   out << "  \"host_name\": \"" << json_escape(result.host_name) << "\",\n";
+  out << "  \"kernel_release\": \"" << json_escape(result.kernel_release) << "\",\n";
+  out << "  \"kernel_version\": \"" << json_escape(result.kernel_version) << "\",\n";
   out << "  \"run_mode\": \"" << to_string(result.run_mode) << "\",\n";
   out << "  \"cameras\": [\n";
   for (std::size_t ci = 0; ci < result.cameras.size(); ++ci) {
@@ -151,6 +192,7 @@ void write_markdown(const RunResult &result, const std::string &path) {
   out << "- Started: `" << result.started_at_utc << "`\n";
   out << "- Finished: `" << result.finished_at_utc << "`\n";
   out << "- Host: `" << result.host_name << "`\n";
+  out << "- Kernel: `" << result.kernel_release << "` (`" << result.kernel_version << "`)\n";
   out << "- Run mode: `" << to_string(result.run_mode) << "`\n\n";
 
   for (const auto &camera : result.cameras) {
@@ -215,10 +257,14 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans
 .header { background: linear-gradient(135deg, #0f172a, #1e293b); color: white; padding: 48px 40px; border-radius: 12px; margin-bottom: 32px; }
 .header h1 { margin: 0 0 8px; font-size: 28px; font-weight: 800; }
 .header .subtitle { color: #94a3b8; font-size: 14px; margin: 0; }
-.meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 24px; }
-.meta-item { background: rgba(255,255,255,0.06); border-radius: 8px; padding: 12px 16px; }
-.meta-item .label { color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
-.meta-item .value { color: #f1f5f9; font-size: 14px; font-weight: 600; margin-top: 4px; }
+.meta-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-top: 24px; }
+.meta-group { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 14px 16px; }
+.meta-group .group-title { color: #64748b; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; margin-bottom: 10px; }
+.meta-row { padding: 6px 0; font-size: 13px; }
+.meta-row + .meta-row { border-top: 1px solid rgba(255,255,255,0.06); }
+.meta-row .k { color: #94a3b8; display: block; margin-bottom: 2px; }
+.meta-row .v { color: #f1f5f9; font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 12px; word-break: break-word; }
+.meta-note { color: #94a3b8; font-size: 11px; font-style: italic; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); }
 
 .summary-bar { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 32px; }
 .summary-badge { display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 8px; font-weight: 700; font-size: 14px; }
@@ -290,34 +336,59 @@ table.overview .summary-text { color: #475569; }
   // Header
   out << "<div class=\"header\"><h1>V4L2 Camera Diagnostic Report</h1>";
   out << "<p class=\"subtitle\">Automated hardware diagnostic test results</p>";
-  out << "<div class=\"meta-grid\">";
-  out << "<div class=\"meta-item\"><div class=\"label\">Started</div><div class=\"value\">"
-      << html_escape(result.started_at_utc) << "</div></div>";
-  out << "<div class=\"meta-item\"><div class=\"label\">Finished</div><div class=\"value\">"
-      << html_escape(result.finished_at_utc) << "</div></div>";
-  out << "<div class=\"meta-item\"><div class=\"label\">Host</div><div class=\"value\">"
-      << html_escape(result.host_name) << "</div></div>";
+  out << "<div class=\"meta-groups\">";
+
+  out << "<div class=\"meta-group\"><div class=\"group-title\">Run</div>";
+  out << "<div class=\"meta-row\"><span class=\"k\">Started</span><span class=\"v\">"
+      << html_escape(readable_utc(result.started_at_utc)) << "</span></div>";
+  out << "<div class=\"meta-row\"><span class=\"k\">Finished</span><span class=\"v\">"
+      << html_escape(readable_utc(result.finished_at_utc)) << "</span></div>";
+  const std::string duration = readable_duration(result.started_at_utc, result.finished_at_utc);
+  if (!duration.empty()) {
+    out << "<div class=\"meta-row\"><span class=\"k\">Duration</span><span class=\"v\">" << html_escape(duration)
+        << "</span></div>";
+  }
+  out << "</div>";
+
+  out << "<div class=\"meta-group\"><div class=\"group-title\">System</div>";
+  out << "<div class=\"meta-row\"><span class=\"k\">Host</span><span class=\"v\">" << html_escape(result.host_name)
+      << "</span></div>";
+  out << "<div class=\"meta-row\"><span class=\"k\">Kernel release</span><span class=\"v\">"
+      << html_escape(result.kernel_release) << "</span></div>";
+  out << "<div class=\"meta-row\"><span class=\"k\">Kernel version</span><span class=\"v\">"
+      << html_escape(result.kernel_version) << "</span></div>";
+  out << "</div>";
+
   if (!result.cameras.empty()) {
-    out << "<div class=\"meta-item\"><div class=\"label\">Camera</div><div class=\"value\">"
-        << html_escape(result.cameras[0].camera_path) << "</div></div>";
-    out << "<div class=\"meta-item\"><div class=\"label\">Profile</div><div class=\"value\">"
-        << html_escape(result.cameras[0].profile_id) << "</div></div>";
-    out << "<div class=\"meta-item\"><div class=\"label\">Trigger</div><div class=\"value\">"
-        << to_string(result.cameras[0].trigger_mode) << "</div></div>";
+    out << "<div class=\"meta-group\"><div class=\"group-title\">Camera</div>";
+    out << "<div class=\"meta-row\"><span class=\"k\">Device</span><span class=\"v\">"
+        << html_escape(result.cameras[0].camera_path) << "</span></div>";
+    out << "<div class=\"meta-row\"><span class=\"k\">Profile</span><span class=\"v\">"
+        << html_escape(result.cameras[0].profile_id) << "</span></div>";
+    out << "</div>";
+
+    out << "<div class=\"meta-group\"><div class=\"group-title\">Trigger</div>";
+    out << "<div class=\"meta-row\"><span class=\"k\">Mode</span><span class=\"v\">"
+        << to_string(result.cameras[0].trigger_mode) << "</span></div>";
     if (!result.cameras[0].trigger_description.empty()) {
-      out << "<div class=\"meta-item\"><div class=\"label\">Trigger Channel</div><div class=\"value\">"
-          << html_escape(result.cameras[0].trigger_description) << "</div></div>";
+      out << "<div class=\"meta-row\"><span class=\"k\">Channel</span><span class=\"v\">"
+          << html_escape(result.cameras[0].trigger_description) << "</span></div>";
     }
     if (result.cameras[0].trigger_mode != TriggerMode::FreeRun) {
       std::ostringstream rate_ss, pulse_ss;
       rate_ss << std::fixed << std::setprecision(2) << result.cameras[0].trigger_rate_hz;
       pulse_ss << std::fixed << std::setprecision(2) << result.cameras[0].pulse_width_ms;
-      out << "<div class=\"meta-item\"><div class=\"label\">Trigger Rate</div><div class=\"value\">" << rate_ss.str()
-          << " Hz</div></div>";
-      out << "<div class=\"meta-item\"><div class=\"label\">Pulse Width</div><div class=\"value\">" << pulse_ss.str()
-          << " ms</div></div>";
+      out << "<div class=\"meta-row\"><span class=\"k\">Nominal pulse rate</span><span class=\"v\">" << rate_ss.str()
+          << " Hz</span></div>";
+      out << "<div class=\"meta-row\"><span class=\"k\">Pulse width</span><span class=\"v\">" << pulse_ss.str()
+          << " ms</span></div>";
+      out << "<div class=\"meta-note\">\"Nominal pulse rate\" is the profile's configured GPIO trigger "
+             "frequency; most tests pace their own capture loop independently and do not follow this "
+             "rate (see each test's own sample-interval parameters).</div>";
     }
+    out << "</div>";
   }
+
   out << "</div></div>";
 
   for (const auto &camera : result.cameras) {

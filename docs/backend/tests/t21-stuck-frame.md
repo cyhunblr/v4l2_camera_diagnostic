@@ -52,8 +52,8 @@ No explicit detail lines are pushed. The summary message describes the outcome.
 | Status | Condition |
 | -------- | ----------- |
 | **Pass** | `identical_pairs == 0` — every frame is unique. |
-| **Warn** | `identical_pairs > 0` but `max_identical_run < max_identical_run` threshold. |
-| **Fail** | `max_identical_run ≥ max_identical_run` threshold (default: 5), or fewer than 2 frames captured. |
+| **Warn** | `identical_pairs > 0` but `max_identical_run` is below the threshold. |
+| **Fail** | `max_identical_run` ≥ threshold (default: 5), or fewer than 2 frames captured. |
 
 Default threshold: `max_identical_run = 5`.
 

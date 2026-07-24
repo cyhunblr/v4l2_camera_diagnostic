@@ -94,6 +94,20 @@ class V4lSession {
     return buffers_.size();
   }
 
+  // Number of VIDIOC_STREAMON attempts made by the last streamon()/start()
+  // call (1 if it succeeded on the first try). Some drivers (e.g. tegra-video)
+  // intermittently fail STREAMON with a transient I2C error right after a
+  // prior stream teardown; streamon() retries a few times before giving up.
+  int last_streamon_attempts() const {
+    return last_streamon_attempts_;
+  }
+  // The error from the FIRST STREAMON attempt, even if a later retry
+  // succeeded — so callers can surface "it worked, but only after N retries
+  // and the first attempt said X" instead of silently hiding the flake.
+  const std::string &last_streamon_first_error() const {
+    return last_streamon_first_error_;
+  }
+
   static double ts_diff_ms(const struct timespec &end, const struct timespec &start);
   static void sleep_ms(int ms);
   static void sleep_ns(uint64_t ns);
@@ -102,6 +116,8 @@ class V4lSession {
   int fd_ = -1;
   std::vector<BufferInfo> buffers_;
   v4l2_memory memory_type_ = V4L2_MEMORY_MMAP;
+  int last_streamon_attempts_ = 0;
+  std::string last_streamon_first_error_;
 
   bool requeue_buffer(struct v4l2_buffer *buf);
 };

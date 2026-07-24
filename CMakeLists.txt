@@ -32,6 +32,7 @@ add_library(v4l2diag_core
   source/backend/core/src/report_writer.cpp
   source/backend/core/src/stats.cpp
   source/backend/core/src/test_registry.cpp
+  source/backend/core/src/trigger_registry.cpp
   source/backend/core/src/types.cpp
   source/backend/hw/src/v4l2_capture.cpp
 )
@@ -96,6 +97,16 @@ add_executable(v4l2diag_report_writer_test tests/report_writer_test.cpp)
 target_link_libraries(v4l2diag_report_writer_test PRIVATE v4l2diag_core)
 v4l2diag_apply_warnings(v4l2diag_report_writer_test)
 add_test(NAME report_writer COMMAND v4l2diag_report_writer_test)
+
+add_executable(v4l2diag_gpio_trigger_worker_test tests/gpio_trigger_worker_test.cpp)
+target_link_libraries(v4l2diag_gpio_trigger_worker_test PRIVATE v4l2diag_core)
+v4l2diag_apply_warnings(v4l2diag_gpio_trigger_worker_test)
+add_test(NAME gpio_trigger_worker COMMAND v4l2diag_gpio_trigger_worker_test)
+
+add_executable(v4l2diag_trigger_registry_test tests/trigger_registry_test.cpp)
+target_link_libraries(v4l2diag_trigger_registry_test PRIVATE v4l2diag_core)
+v4l2diag_apply_warnings(v4l2diag_trigger_registry_test)
+add_test(NAME trigger_registry COMMAND v4l2diag_trigger_registry_test)
 
 install(TARGETS v4l2-camera-diagnostic v4l2-camera-diagnostic-web RUNTIME DESTINATION bin)
 install(DIRECTORY source/backend/core/include/ DESTINATION include)

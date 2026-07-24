@@ -231,6 +231,19 @@ nav button:focus-visible {
   font-size: 13px;
 }
 
+.master-slave-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .master-slave-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .empty {
   padding: 20px;
   border: 1px dashed var(--border-strong);
