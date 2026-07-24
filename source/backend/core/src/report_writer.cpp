@@ -271,16 +271,19 @@ table.overview .summary-text { color: #475569; }
 .warnings-box { background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 10px 14px; margin-top: 8px;
                 color: #92400e; font-size: 13px; }
 .footer { text-align: center; color: #94a3b8; font-size: 12px; margin-top: 40px; padding-top: 24px; border-top: 1px solid #e2e8f0; }
-.export-pdf-btn { position: fixed; top: 20px; right: 20px; display: flex; align-items: center; gap: 8px;
+.export-actions { position: fixed; top: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; }
+.export-pdf-btn { display: flex; align-items: center; gap: 8px;
                   background: #0f172a; color: white; border: none; border-radius: 8px; padding: 10px 18px;
                   font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
 .export-pdf-btn:hover { background: #1e293b; }
 @media print { body { background: white; } .container { padding: 20px; } .header { break-inside: avoid; }
-               .test-section { break-inside: avoid; } .export-pdf-btn { display: none; }
+               .test-section { break-inside: avoid; } .export-actions { display: none; }
                @page { margin: 15mm 10mm; size: A4; } }
 </style></head><body>
+<div class="export-actions">
 <button class="export-pdf-btn" onclick='window.print()'>Export as PDF</button>
 <button class="export-pdf-btn" onclick='fetch("/api/dmesg").then(r=>r.text()).then(t=>{const b=new Blob([t],{type:"text/plain"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="dmesg.txt";a.click();URL.revokeObjectURL(u)}).catch(()=>alert("Failed to export dmesg"))'>Export DMESG</button>
+</div>
 <div class="container">
 )";
 

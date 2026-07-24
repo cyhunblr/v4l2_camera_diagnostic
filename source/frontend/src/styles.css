@@ -985,7 +985,7 @@ summary span {
 
 /* Section start — test header bar */
 .log-line.section_start {
-  grid-template-columns: 120px 1fr;
+  grid-template-columns: 120px auto 1fr;
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 15%, transparent), transparent);
   border-left: 3px solid var(--accent);
   border-bottom: none;
@@ -997,6 +997,12 @@ summary span {
 .log-line.section_start .section-ts {
   color: var(--text-secondary);
   font-size: 11px;
+}
+
+.log-line.section_start .section-camera {
+  color: var(--info);
+  font-size: 11px;
+  align-self: center;
 }
 
 .log-line.section_start .section-title {
@@ -1013,6 +1019,13 @@ summary span {
   padding: 8px 12px;
   border-bottom: none;
   margin-left: 16px;
+}
+
+.log-line.data .data-camera {
+  display: block;
+  color: var(--info);
+  font-size: 11px;
+  margin-bottom: 4px;
 }
 
 .log-line.data .data-block {

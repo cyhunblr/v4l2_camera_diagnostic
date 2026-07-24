@@ -87,10 +87,14 @@ export function LiveOutputPage({
             {line.log_type === "section_start" ? (
               <>
                 <span className="section-ts">{line.timestamp_utc}</span>
+                <code className="section-camera">{line.camera || "system"}</code>
                 <p className="section-title">{line.message}</p>
               </>
             ) : line.log_type === "data" ? (
-              <pre className="data-block">{line.message}</pre>
+              <>
+                <code className="data-camera">{line.camera || "system"}</code>
+                <pre className="data-block">{line.message}</pre>
+              </>
             ) : (
               <>
                 <span>{line.timestamp_utc}</span>
