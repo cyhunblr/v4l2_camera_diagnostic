@@ -59,6 +59,16 @@ jobs:
           find source/backend \( -name "*.cpp" -o -name "*.hpp" \) -print0 \
             | xargs -0 clang-format-18 --dry-run --Werror
 
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Run shellcheck
+        run: |
+          find .githooks scripts \( -name "*.sh" -o -path ".githooks/*" \) -type f ! -name "*.sample" -print0 \
+            | xargs -0 shellcheck --shell=sh
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:

@@ -49,6 +49,9 @@ fi
 if ! have npm; then
   missing_apt="$missing_apt npm"
 fi
+if ! have shellcheck; then
+  missing_apt="$missing_apt shellcheck"
+fi
 
 if [ -n "$missing_apt" ]; then
   # shellcheck disable=SC2086

@@ -6,3 +6,4 @@ repo_root=$(git rev-parse --show-toplevel)
 "$repo_root/scripts/dev/check-md-lint.sh"
 "$repo_root/scripts/dev/check-cpplint.sh"
 "$repo_root/scripts/dev/check-frontend-lint.sh"
+"$repo_root/scripts/dev/check-shellcheck.sh"
