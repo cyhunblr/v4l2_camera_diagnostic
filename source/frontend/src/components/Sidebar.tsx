@@ -10,8 +10,8 @@ type NavItem = { id: PageId; label: string; icon: React.ReactNode };
 const CONFIGURE_ITEMS: NavItem[] = [
   { id: "cameras", label: "Cameras", icon: <Camera size={16} /> },
   { id: "profiles", label: "Profiles", icon: <SlidersHorizontal size={16} /> },
-  { id: "tests", label: "Tests", icon: <ListChecks size={16} /> },
-  { id: "thresholds", label: "Thresholds", icon: <Settings2 size={16} /> },
+  { id: "tests", label: "Test Selection", icon: <ListChecks size={16} /> },
+  { id: "config", label: "Test Configuration", icon: <Settings2 size={16} /> },
   { id: "reports", label: "Report Formats", icon: <FileDown size={16} /> }
 ];
 

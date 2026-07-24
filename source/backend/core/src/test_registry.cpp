@@ -12,64 +12,83 @@ std::vector<TestDefinition> built_in_tests() {
   std::vector<TestDefinition> tests = {
       // id, name, category, description,
       // uses_trigger, requires_dmabuf, long_running, experimental, risky, implemented_in_core
-      {"t01-no-streamon", "Frame capture without STREAMON", "stream-state",
+
+      // --- Layer 1: Discovery ---
+      {"t01-device-compliance", "V4L2 device compliance", "discovery",
+       "Queries capabilities, memory backend support, formats, and frame sizes.", false, false, false, false, false,
+       true},
+      {"t02-control-inventory", "V4L2 control inventory", "discovery",
+       "Enumerates all V4L2 controls with ranges and current values.", false, false, false, false, false, true},
+
+      // --- Layer 2: State-machine correctness ---
+      {"t03-no-streamon", "Frame capture without STREAMON", "stream-state",
        "Validates that no frames are delivered before VIDIOC_STREAMON.", false, false, false, false, false, true},
-      {"t02-buffer-overwrite", "Buffer overwrite behavior", "buffering",
-       "Sends many triggers without DQBUF to observe queued buffer behavior.", true, false, false, false, true, true},
-      {"t03-gpio-latency", "Trigger to DQBUF latency", "latency", "Measures trigger to received frame latency.", true,
-       false, false, false, false, true},
-      {"t04-nonblock-vs-block", "NON_BLOCK vs BLOCK comparison", "io-mode",
-       "Compares non-blocking spin behavior with blocking DQBUF behavior.", true, false, false, false, false, true},
-      {"t05-poll-timeout-effect", "Poll timeout effect", "polling",
-       "Measures miss behavior across representative poll timeout values.", true, false, false, false, false, true},
-      {"t06-format-comparison", "Format comparison", "format",
-       "Compares supported capture formats and copy throughput.", true, false, false, false, false, true},
-      {"t07-poll-timeout-sweep", "Poll timeout sweep", "polling",
-       "Sweeps poll timeout from high to low values to find cliff behavior.", true, false, false, false, false, true},
-      {"t08-sequence-continuity", "Sequence number continuity", "sequence",
-       "Checks sequence gaps, duplicates, and timestamp monotonicity.", true, false, false, false, false, true},
-      {"t09-sustained-capture", "Sustained capture stability", "stability",
-       "Runs a long capture session and detects drift or sustained misses.", true, false, true, false, false, true},
-      {"t10-multi-buffer", "Multi-buffer configurations", "buffering",
-       "Compares capture behavior across several requested buffer counts.", false, false, false, false, false, true},
-      {"t11-buffer-recycling", "Buffer recycling timing", "buffering", "Measures sensitivity to DQBUF to QBUF delay.",
-       true, false, false, false, false, true},
-      {"t12-stream-cycles", "STREAMON/STREAMOFF cycles", "stream-state",
+      {"t04-pollerr-handling", "POLLERR/POLLHUP handling", "stream-state",
+       "Checks DQBUF rejection after STREAMOFF and stream recovery.", true, false, false, true, true, true},
+      {"t05-stream-cycles", "STREAMON/STREAMOFF cycle reliability", "stream-state",
        "Exercises full and rapid stream setup/teardown cycles.", true, false, false, false, false, true},
-      {"t13-buffer-flags", "V4L2 buffer flag analysis", "metadata",
+
+      // --- Layer 3: Buffer & memory ---
+      {"t06-multi-buffer", "Multi-buffer configurations", "buffering",
+       "Compares capture behavior across several requested buffer counts.", false, false, false, false, false, true},
+      {"t07-buffer-overwrite", "Buffer overwrite behavior", "buffering",
+       "Sends many triggers without DQBUF to observe queued buffer behavior.", true, false, false, false, true, true},
+      {"t08-buffer-recycling", "Buffer recycling timing", "buffering", "Measures sensitivity to DQBUF-to-QBUF delay.",
+       true, false, false, false, false, true},
+      {"t09-buffer-flags", "V4L2 buffer flag analysis", "metadata",
        "Collects V4L2 buffer flags and timestamp source flags.", true, false, false, false, false, true},
-      {"t14-timestamp-monotonicity", "Timestamp monotonicity", "metadata",
-       "Checks V4L2 buffer timestamp monotonicity and wall clock offsets.", true, false, false, false, false, true},
-      {"t15-memory-throughput", "Memory access throughput", "memory",
-       "Benchmarks device-mapped buffer memcpy throughput without requiring a captured frame.", false, false, false,
-       false, false, true},
-      {"t16-v4l2-compliance", "V4L2 compliance checks", "v4l2",
-       "Queries V4L2 capabilities, formats, and streaming support.", false, false, false, false, false, true},
-      {"t17-pollerr-handling", "POLLERR/POLLHUP handling", "stream-state", "Checks recovery behavior after STREAMOFF.",
-       true, false, false, true, true, true},
-      {"t18-dmabuf-cache-sync", "DMA_BUF_IOCTL_SYNC cache coherency", "dmabuf",
+      {"t10-memory-throughput", "Memory access throughput", "memory",
+       "Benchmarks device-mapped buffer memcpy throughput without streaming.", false, false, false, false, false, true},
+      {"t11-dmabuf-cache-sync", "DMA_BUF_IOCTL_SYNC cache coherency", "dmabuf",
        "Compares MMAP and DMABUF reads with cache sync.", true, true, false, false, false, true},
-      {"t19-gpio-pulse-width", "GPIO pulse width characterization", "trigger",
+
+      // --- Layer 4: Polling / timeout ---
+      {"t12-poll-timeout-cliff", "Poll timeout cliff finder", "polling",
+       "Finds the stable poll timeout cliff via adaptive sweep and stability tracking.", true, false, false, false,
+       false, true},
+
+      // --- Layer 5: Latency ---
+      {"t13-trigger-latency", "Trigger to DQBUF latency", "latency", "Measures trigger to received frame latency.",
+       true, false, false, false, false, true},
+      {"t14-nonblock-vs-block", "NON_BLOCK vs BLOCK comparison", "io-mode",
+       "Compares non-blocking spin behavior with blocking DQBUF behavior.", true, false, false, false, false, true},
+      {"t15-gpio-pulse-width", "GPIO pulse width characterization", "trigger",
        "Sweeps GPIO pulse width to infer trigger edge behavior.", true, false, false, false, false, true},
-      {"t20-camera-controls", "Camera control parameter effect", "controls",
-       "Enumerates all V4L2 controls; sweeps ISX021-specific ISP controls when available.", true, false, false, true,
-       true, true},
+      {"t16-format-comparison", "Format comparison", "format",
+       "Compares supported capture formats and copy throughput.", true, false, false, false, false, true},
+      {"t17-control-sweep", "Control parameter sweep", "controls",
+       "Sweeps writable V4L2 controls and measures latency effect per combination.", true, false, false, true, true,
+       true},
+      {"t18-resolution-sweep", "Resolution sweep", "format",
+       "Measures latency and throughput at each supported resolution.", true, false, false, false, false, true},
+
+      // --- Layer 6: Integrity ---
+      {"t19-sequence-continuity", "Sequence number continuity", "sequence",
+       "Checks sequence gaps, duplicates, and timestamp monotonicity.", true, false, false, false, false, true},
+      {"t20-timestamp-monotonicity", "Timestamp monotonicity", "metadata",
+       "Checks V4L2 buffer timestamp monotonicity and wall clock offsets.", true, false, false, false, false, true},
       {"t21-stuck-frame", "Stuck frame detection", "quality",
        "Compares consecutive frames byte-by-byte to detect a frozen camera output.", true, false, false, false, false,
        true},
-      {"t22-latency-under-load", "Latency under CPU load", "stability",
-       "Measures GPIO to DQBUF latency while all CPU cores are saturated.", true, false, false, false, false, true},
-      {"t24-control-inventory", "V4L2 control inventory", "controls",
-       "Enumerates all V4L2 controls supported by the driver with their ranges and current values.", false, false,
-       false, false, false, true},
-      {"v4l2-memory-probe", "V4L2 memory backend probe", "v4l2",
-       "Probes MMAP, DMABUF, and USERPTR support with VIDIOC_REQBUFS.", false, false, false, false, false, true},
+
+      // --- Layer 7: Stability ---
+      {"t22-sustained-capture", "Sustained capture stability", "stability",
+       "Runs a long capture session and detects drift or sustained misses.", true, false, true, false, false, true},
+      {"t23-latency-under-load", "Latency under CPU load", "stability",
+       "Measures trigger-to-DQBUF latency while all CPU cores are saturated.", true, false, false, false, false, true},
+      {"t24-max-fps", "Maximum frame rate", "stability",
+       "Measures maximum sustainable frame rate for the configured trigger mode.", true, false, true, false, false,
+       true},
+      {"t25-multi-camera", "Multi-camera contention", "stability",
+       "Measures cross-device latency jitter under concurrent capture.", true, false, true, false, false, true},
+      {"t26-cold-start", "Cold-start warm-up cost", "stability",
+       "Measures frames needed to reach steady-state latency after STREAMON.", true, false, false, false, false, true},
   };
   for (auto &test : tests) {
-    if (test.id == "t02-buffer-overwrite" || test.id == "t03-gpio-latency") {
-      test.trigger_mode_mask = 0x01 | 0x02;
-    } else if (test.id == "t19-gpio-pulse-width") {
-      test.trigger_mode_mask = 0x01;
+    if (test.id == "t07-buffer-overwrite" || test.id == "t13-trigger-latency") {
+      test.trigger_mode_mask = 0x01 | 0x02;  // Hardware + Software only
+    } else if (test.id == "t15-gpio-pulse-width") {
+      test.trigger_mode_mask = 0x01;  // Hardware only
     }
   }
   return tests;

@@ -1,111 +1,76 @@
-# t21 — Stuck frame detection
+# t21 — Stuck Frame
 
-> - **Implementation:** search `run_t21` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)
-> - **Definition:** search `t21-stuck-frame` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
-> - **Category:** `quality`
-> - **`uses_trigger`:** yes
-> - **Trigger modes:** all (Hardware, Software, FreeRun)
-> - Not in the original legacy diagnostic — added when the modular runner was built.
+**Layer:** 6 — Integrity  
+**Category:** quality  
+**Trigger required:** yes  
 
-## 1. Overview / scope
+## Purpose
 
-**What it checks:** whether the sensor ever delivers the **same image data**
-for consecutive triggered frames — a frozen or stuck camera output — by
-directly comparing frame content, not just metadata like sequence numbers.
+Detects whether the camera is delivering identical (stuck/frozen) frame content across consecutive captures. A "stuck frame" condition means the sensor or ISP has stopped updating the frame buffer — the application still receives DQBUF completions with new sequence numbers, but the pixel data is unchanged. This is a critical quality defect invisible to sequence-number or timestamp checks alone.
 
-**Questions it answers:**
+## How It Works
 
-- Does any pair of consecutive frames contain byte-for-byte identical image
-  data?
-- If identical frames occur, are they isolated one-off repeats, or a long
-  consecutive run (i.e. the camera actually froze for a while)?
+1. Opens a V4L2 session with 2 buffers and warms up the pipeline.
+2. Captures up to `sample_count` frames with manual buffer management (deferred requeue).
+3. For each captured frame, compares the first `compare_bytes` bytes of the current frame against the previous frame using `memcmp`.
+4. Tracks:
+   - Total number of identical consecutive pairs.
+   - Length of the longest run of identical frames.
+5. Requeues each buffer immediately after comparison.
+6. Reports metrics and applies a tiered verdict based on the longest identical run.
 
-**Why it matters:** [t08](t08-sequence-continuity.md) checks that
-`sequence` numbers advance correctly, but a stuck sensor could still
-increment `sequence` while returning the same underlying pixel data. This
-test is the suite's only check on actual frame **content**, catching a
-failure mode that pure metadata checks cannot see.
+## Implementation
 
-**Method:** capture 50 triggered frames; for each, compare the first 4 KB of
-its buffer against the previous frame's first 4 KB; count identical pairs
-and track the longest run of consecutive identical frames.
+Function: `run_stuck_frame` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
+Registry: `t21-stuck-frame` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-## 2. Trigger modes
+> The source file contains `// Docs: docs/backend/tests/t21-stuck-frame.md`
+> above the function as a back-reference to this document.
 
-No restriction — stuck-frame detection is checked the same way regardless
-of trigger source.
+## Parameters
 
-## 3. Inputs
+| Key | Default | Unit | Description |
+|-----|---------|------|-------------|
+| `sample_count` | 50 | count | Maximum frames to capture and compare. |
+| `compare_bytes` | 4096 | bytes | Number of leading bytes compared between consecutive frames. |
+| `capture_timeout_ms` | 100 | ms | Per-frame poll timeout. |
 
-All parameters are fixed in `run_t21`:
+## Output Metrics
 
-| Input | Value | Meaning |
-| --- | --- | --- |
-| Sample count | `50` | Triggered frames captured. |
-| Bytes compared | `4096` | Leading bytes of each frame's buffer compared against the previous frame. |
-| Buffer count | `2` | |
-| Capture timeout | `100 ms` | Per sample. |
-| Sample interval | `100 ms` | Between captures. |
-| Fail threshold | `max_identical_run >= 5` | See Status below. |
+| Metric Key | Unit | Description |
+|-----------|------|-------------|
+| `frames_tested` | count | Frames successfully captured and compared (may be less than `sample_count` if some captures time out). |
+| `identical_pairs` | count | Number of consecutive frame pairs with identical content in the comparison window. |
+| `max_identical_run` | count | Longest consecutive streak of identical frames. |
 
-> **Preconditions:** a streaming-capable camera and a working trigger for
-> the selected mode. `s.warmup(trigger)` runs once before measurement.
+## Report Details
 
-## 4. Outputs & interpretation
+No explicit detail lines are pushed. The summary message describes the outcome.
 
-### Metrics
+## Verdict Logic
 
-| Metric | Unit | Meaning |
-| --- | --- | --- |
-| `frames_tested` | count | Frames with enough data (≥4096 bytes) to be compared. |
-| `identical_pairs` | count | Consecutive frame pairs found byte-identical in their first 4 KB. |
-| `max_identical_run` | count | Longest unbroken run of consecutive identical frames observed. |
+| Status | Condition |
+|--------|-----------|
+| **Pass** | `identical_pairs == 0` — every frame is unique. |
+| **Warn** | `identical_pairs > 0` but `max_identical_run < max_identical_run` threshold. |
+| **Fail** | `max_identical_run ≥ max_identical_run` threshold (default: 5), or fewer than 2 frames captured. |
 
-### Status
+Default threshold: `max_identical_run = 5`.
 
-| Status | Condition | Meaning |
-| --- | --- | --- |
-| `Pass` | `identical_pairs == 0` | Every tested frame differed from its predecessor — no stuck output detected. |
-| `Fail` | `max_identical_run >= 5` | 5 or more consecutive frames were byte-identical — the sensor appears to have frozen for a meaningful stretch. |
-| `Warn` | `identical_pairs > 0` but `max_identical_run < 5` | Some identical pairs occurred, but never in a long run — likely isolated repeats rather than a genuine freeze. |
-| `Error` | session open/start failed, or fewer than 2 frames were comparable | Not enough data to analyze (see summary). |
+## Interpretation Guide
 
-### How to read the numbers
+- **`identical_pairs = 0`** — the sensor is producing genuinely new data for every frame; no stuck condition.
+- **`identical_pairs` small (1–2) with `max_identical_run = 1`** — occasional duplicate (e.g. exposure time equals frame interval causing identical frames under static scene). Usually benign in static test fixtures.
+- **`max_identical_run ≥ 5`** — the camera is likely frozen. The ISP or sensor has stalled; the driver continues to cycle buffers with stale data.
+- **Very high `identical_pairs` but low `max_identical_run`** — intermittent stalls; may indicate thermal throttling or a sensor that periodically pauses.
+- **Note:** If testing against a perfectly static scene (e.g. lens cap on), even a healthy camera will produce identical frames. Use a scene with noise or a blinking LED for meaningful results.
 
-- **`max_identical_run` is the key signal, not `identical_pairs` alone** —
-  a handful of scattered identical pairs (`Warn`) is a different problem
-  than one long identical run (`Fail`): the former could be a genuinely
-  static scene or a sensor quirk, the latter looks like the camera actually
-  stopped updating.
-- **A completely static scene can produce false-positive identical
-  frames** even with a healthy camera — if `Warn`/`Fail` appears
-  unexpectedly, consider whether the scene itself was static during the
-  test run before concluding the camera is at fault.
-- **Only the first 4 KB is compared**, not the full frame — this is a fast
-  content probe, not an exhaustive check. A sensor that freezes only in
-  regions beyond the first 4 KB would not be caught by this test.
+## Failure Modes
 
-## 5. How the code works
-
-`run_t21`:
-
-1. **Open + start + warm-up** — opens the device, starts streaming with `2`
-   buffers, and warms up. Failure yields `Error`.
-2. **Capture + compare loop** — 50 iterations, each capturing with
-   drain-only (no auto-requeue, so the buffer is still valid to read).
-   Frames with too little data are requeued and skipped. For valid frames,
-   copies the first 4096 bytes, requeues the buffer, then `memcmp`s the
-   copy against the **previous** frame's saved 4096 bytes (skipped on the
-   very first tested frame, since there is no predecessor yet). A match
-   increments `identical` and the current consecutive-run counter
-   (updating `max_run`); a mismatch resets the run counter to zero.
-3. **Aggregate** — pushes `frames_tested`, `identical_pairs`,
-   `max_identical_run`.
-4. **Verdict** — `Error` if fewer than 2 frames were tested; `Pass` if zero
-   identical pairs occurred; `Fail` if the longest run reached 5 or more;
-   otherwise `Warn`.
-
-This test is one of three added when the modular runner was built that never
-existed in the original legacy diagnostic (alongside
-[t22](t22-latency-under-load.md) and [t24](t24-control-inventory.md)) — see
-[docs/testing.md](../../testing.md) for the full migration inventory.
+| Symptom | Likely Cause |
+|---------|--------------|
+| `max_identical_run` ≥ threshold | Sensor/ISP frozen. Possible firmware hang, clock loss to sensor, or I²C communication failure preventing new frame production. |
+| `identical_pairs` equals `frames_tested - 1` | Camera is completely stuck for the entire capture window. Power-cycle or driver reload required. |
+| `frames_tested` much less than `sample_count` | Many capture timeouts; the camera is intermittently delivering frames. May precede a full stuck condition. |
+| False positive with lens cap | Expected behaviour — physical scene produces no photon noise variation. Ensure test fixture has at least some dynamic element. |
+| `compare_bytes` too small misses stuck condition | If the first 4 KB is a fixed header/metadata region that never changes, increase `compare_bytes` to include actual pixel data. |

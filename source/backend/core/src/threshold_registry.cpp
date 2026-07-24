@@ -50,7 +50,7 @@ bool ends_with(const std::string &value, const std::string &suffix) {
 
 Json::Value config_to_json(const ThresholdConfig &config) {
   Json::Value root(Json::objectValue);
-  root["schema_version"] = 1;
+  root["schema_version"] = 2;
   root["id"] = config.id;
   root["name"] = config.name;
   root["description"] = config.description;
@@ -63,6 +63,15 @@ Json::Value config_to_json(const ThresholdConfig &config) {
     values[test.first] = keys;
   }
   root["values"] = values;
+  Json::Value params(Json::objectValue);
+  for (const auto &test : config.params) {
+    Json::Value keys(Json::objectValue);
+    for (const auto &kv : test.second) {
+      keys[kv.first] = kv.second;
+    }
+    params[test.first] = keys;
+  }
+  root["params"] = params;
   return root;
 }
 
@@ -98,6 +107,30 @@ bool config_from_json(const Json::Value &root, bool known_only, ThresholdConfig 
           continue;
         }
         parsed.values[test_id][key] = keys[key].asDouble();
+      }
+    }
+  }
+
+  const Json::Value &params = root["params"];
+  if (params.isObject()) {
+    const auto default_params = default_test_params();
+    for (const auto &test_id : params.getMemberNames()) {
+      const bool known_test = default_params.count(test_id) != 0;
+      if (known_only && !known_test) {
+        continue;
+      }
+      const Json::Value &keys = params[test_id];
+      if (!keys.isObject()) {
+        continue;
+      }
+      for (const auto &key : keys.getMemberNames()) {
+        if (known_only && (!known_test || default_params.at(test_id).count(key) == 0)) {
+          continue;
+        }
+        if (!keys[key].isNumeric()) {
+          continue;
+        }
+        parsed.params[test_id][key] = keys[key].asDouble();
       }
     }
   }
@@ -144,31 +177,101 @@ double ThresholdConfig::get(const std::string &test_id, const std::string &key) 
   return 0.0;
 }
 
+double ThresholdConfig::get_param(const std::string &test_id, const std::string &key) const {
+  auto test_it = params.find(test_id);
+  if (test_it != params.end()) {
+    auto key_it = test_it->second.find(key);
+    if (key_it != test_it->second.end()) {
+      return key_it->second;
+    }
+  }
+  const auto defaults = default_test_params();
+  auto dt = defaults.find(test_id);
+  if (dt != defaults.end()) {
+    auto dk = dt->second.find(key);
+    if (dk != dt->second.end()) {
+      return dk->second;
+    }
+  }
+  return 0.0;
+}
+
 ThresholdConfig default_threshold_config() {
   ThresholdConfig config;
   config.id = "default";
   config.name = "Default";
   config.description = "Built-in default verdict thresholds (conservative, matches historical behavior).";
   config.values = {
-      {"t02-buffer-overwrite", {{"max_error_flags", 0}}},
-      {"t07-poll-timeout-sweep", {{"production_timeout_ms", 48.5}, {"safe_margin_ms", 5.0}}},
-      {"t08-sequence-continuity", {{"max_dropped_frames", 5}, {"max_non_monotonic", 0}}},
-      {"t09-sustained-capture",
+      {"t07-buffer-overwrite", {{"max_error_flags", 0}}},
+      {"t12-poll-timeout-cliff", {{"production_timeout_ms", 48.5}, {"safe_margin_ms", 5.0}}},
+      {"t19-sequence-continuity", {{"max_dropped_frames", 5}, {"max_non_monotonic", 0}}},
+      {"t22-sustained-capture",
        {{"pass_rate_pct", 95.0}, {"warn_rate_pct", 80.0}, {"pass_drift_ms", 1.0}, {"warn_drift_ms", 5.0}}},
-      {"t11-buffer-recycling", {{"min_safe_cliff_delay_ms", 50}}},
-      {"t12-stream-cycles",
+      {"t08-buffer-recycling", {{"min_safe_cliff_delay_ms", 50}}},
+      {"t05-stream-cycles",
        {{"max_full_failures_pass", 0},
         {"max_full_failures_warn", 2},
         {"rapid_pct_pass", 90.0},
         {"rapid_pct_warn", 70.0}}},
-      {"t13-buffer-flags", {{"max_error_flags", 0}}},
-      {"t14-timestamp-monotonicity", {{"max_non_monotonic", 0}}},
-      {"t17-pollerr-handling", {{"min_recovery_ok", 2}}},
-      {"t18-dmabuf-cache-sync", {{"min_match_ratio", 1.0}}},
+      {"t09-buffer-flags", {{"max_error_flags", 0}}},
+      {"t20-timestamp-monotonicity", {{"max_non_monotonic", 0}}},
+      {"t04-pollerr-handling", {{"min_recovery_ok", 2}}},
+      {"t11-dmabuf-cache-sync", {{"min_match_ratio", 1.0}}},
       {"t21-stuck-frame", {{"max_identical_run", 5}}},
-      {"t22-latency-under-load", {{"pass_delta_p95_ms", 5.0}, {"warn_delta_p95_ms", 20.0}}},
+      {"t23-latency-under-load", {{"pass_delta_p95_ms", 5.0}, {"warn_delta_p95_ms", 20.0}}},
   };
+  config.params = default_test_params();
   return config;
+}
+
+std::map<std::string, TestThresholds> default_test_params() {
+  return {
+      {"t03-no-streamon", {{"buffer_count", 2}, {"poll_timeout_ms", 50}}},
+      {"t04-pollerr-handling",
+       {{"baseline_captures", 3}, {"recovery_captures", 3}, {"poll_timeout_ms", 100}, {"warmup_count", 3}}},
+      {"t05-stream-cycles",
+       {{"full_cycles", 20}, {"rapid_cycles", 50}, {"full_warmup", 3}, {"full_captures", 5}, {"rapid_pacing_ms", 10}}},
+      {"t06-multi-buffer",
+       {{"sample_count", 20},
+        {"max_buffers", 5},
+        {"warmup_count", 3},
+        {"capture_timeout_ms", 100},
+        {"sample_interval_ms", 200}}},
+      {"t07-buffer-overwrite",
+       {{"buffer_count", 2},
+        {"variant_a_triggers", 100},
+        {"variant_a_interval_ms", 100},
+        {"variant_b_triggers", 200},
+        {"variant_b_interval_ms", 50},
+        {"settle_ms", 500}}},
+      {"t08-buffer-recycling", {{"reps_per_delay", 10}, {"capture_timeout_ms", 100}, {"inter_rep_interval_ms", 100}}},
+      {"t09-buffer-flags", {{"sample_count", 50}, {"capture_timeout_ms", 100}, {"sample_interval_ms", 100}}},
+      {"t10-memory-throughput", {{"benchmark_reps", 100}}},
+      {"t11-dmabuf-cache-sync", {{"sample_count", 20}, {"compare_bytes", 64}, {"capture_timeout_ms", 100}}},
+      {"t12-poll-timeout-cliff", {{"probe_frames", 10}, {"stability_rounds", 5}, {"stability_frames", 10}}},
+      {"t13-trigger-latency",
+       {{"sample_count", 50}, {"warmup_count", 5}, {"capture_timeout_ms", 100}, {"sample_interval_ms", 200}}},
+      {"t14-nonblock-vs-block",
+       {{"sample_count", 30}, {"spin_deadline_ms", 100}, {"poll_timeout_ms", 200}, {"sample_interval_ms", 200}}},
+      {"t15-gpio-pulse-width", {{"samples_per_width", 8}, {"warmup_count", 5}, {"poll_timeout_ms", 500}}},
+      {"t16-format-comparison", {{"sample_count", 20}, {"throughput_reps", 50}, {"width", 1920}, {"height", 1280}}},
+      {"t17-control-sweep", {{"warmup_count", 8}, {"sample_count", 20}, {"capture_timeout_ms", 200}}},
+      {"t18-resolution-sweep", {{"sample_count", 15}, {"throughput_reps", 30}}},
+      {"t19-sequence-continuity", {{"sample_count", 100}, {"capture_timeout_ms", 100}, {"sample_interval_ms", 100}}},
+      {"t20-timestamp-monotonicity", {{"sample_count", 100}, {"capture_timeout_ms", 100}, {"sample_interval_ms", 100}}},
+      {"t21-stuck-frame", {{"sample_count", 50}, {"compare_bytes", 4096}, {"capture_timeout_ms", 100}}},
+      {"t22-sustained-capture",
+       {{"duration_sec", 60}, {"window_sec", 10}, {"sample_interval_ms", 100}, {"capture_timeout_ms", 100}}},
+      {"t23-latency-under-load",
+       {{"sample_count", 30},
+        {"load_threads", 4},
+        {"baseline_timeout_ms", 100},
+        {"load_timeout_ms", 200},
+        {"sample_interval_ms", 200}}},
+      {"t26-cold-start", {{"cycles", 10}, {"max_frames_per_cycle", 30}, {"stability_threshold_pct", 15.0}}},
+      {"t24-max-fps", {{"duration_sec", 10}, {"warmup_frames", 20}, {"poll_timeout_ms", 100}}},
+      {"t25-multi-camera", {{"sample_count", 50}, {"poll_timeout_ms", 200}}},
+  };
 }
 
 std::string default_threshold_directory() {
@@ -326,6 +429,17 @@ ThresholdConfig ThresholdRegistry::resolve(const std::string &id) const {
       for (const auto &kv : test.second) {
         if (base_test->second.count(kv.first) != 0) {
           base_test->second[kv.first] = kv.second;  // only overlay known keys
+        }
+      }
+    }
+    for (const auto &test : requested.params) {
+      auto base_test = base.params.find(test.first);
+      if (base_test == base.params.end()) {
+        continue;
+      }
+      for (const auto &kv : test.second) {
+        if (base_test->second.count(kv.first) != 0) {
+          base_test->second[kv.first] = kv.second;
         }
       }
     }

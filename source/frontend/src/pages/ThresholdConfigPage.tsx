@@ -80,6 +80,18 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
     setDirty(true);
   }
 
+  function handleParamChange(testId: string, key: string, value: string) {
+    if (!editing) return;
+    const num = parseFloat(value);
+    if (isNaN(num)) return;
+    const next = structuredClone(editing);
+    if (!next.params) next.params = {};
+    if (!next.params[testId]) next.params[testId] = {};
+    next.params[testId][key] = num;
+    setEditing(next);
+    setDirty(true);
+  }
+
   async function handleSave() {
     if (!editing || !dirty) return;
     setSaving(true);
@@ -106,7 +118,8 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
       id,
       name: id,
       description: "",
-      values: defaultConfig ? structuredClone(defaultConfig.values) : {}
+      values: defaultConfig ? structuredClone(defaultConfig.values) : {},
+      params: defaultConfig?.params ? structuredClone(defaultConfig.params) : {}
     };
     try {
       const res = await api.createThreshold(config);
@@ -181,21 +194,24 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
   }
 
   const isDefault = editing?.id === "default";
-  const testIds = editing ? Object.keys(editing.values).sort() : [];
+  // Collect all test IDs from both values and params
+  const allTestIds = editing
+    ? [...new Set([...Object.keys(editing.values), ...Object.keys(editing.params ?? {})])].sort()
+    : [];
 
   return (
     <div className="page">
       <header className="topbar">
         <div>
           <p className="eyebrow">Configure</p>
-          <h2>Verdict Thresholds</h2>
+          <h2>Test Configuration</h2>
         </div>
       </header>
 
       <div className="panel">
         <div className="panel-title">
           <SlidersHorizontal size={18} />
-          <h3>Threshold Configuration</h3>
+          <h3>Parameters &amp; Verdicts</h3>
         </div>
 
         <div className="threshold-toolbar">
@@ -255,34 +271,76 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
               </p>
             )}
 
-            {testIds.map((testId) => {
+            {allTestIds.map((testId) => {
               const defaultValues = defaultConfig?.values[testId] ?? {};
+              const defaultParams = defaultConfig?.params?.[testId] ?? {};
+              const testValues = editing.values[testId] ?? {};
+              const testParams = editing.params?.[testId] ?? {};
+              const hasParams = Object.keys(testParams).length > 0 || Object.keys(defaultParams).length > 0;
+              const hasValues = Object.keys(testValues).length > 0 || Object.keys(defaultValues).length > 0;
+
               return (
                 <div key={testId} className="threshold-card">
                   <h4 className="threshold-card-title">{formatTestName(testId)}</h4>
-                  <div className="threshold-keys">
-                    {Object.entries(editing.values[testId]).map(([key, value]) => {
-                      const defVal = defaultValues[key];
-                      const modified = defVal !== undefined && value !== defVal;
-                      const unit = unitForKey(key);
-                      return (
-                        <div key={key} className={`threshold-row${modified ? " modified" : ""}`}>
-                          <span className="threshold-key-name">{formatKey(key)}</span>
-                          <input
-                            type="number"
-                            step="any"
-                            value={value}
-                            disabled={isDefault}
-                            onChange={(e) => handleValueChange(testId, key, e.target.value)}
-                          />
-                          <span className="threshold-unit">{unit}</span>
-                          {defVal !== undefined && (
-                            <span className="threshold-default">default: {defVal}</span>
-                          )}
-                          {modified && <span className="threshold-modified-dot" title="Modified from default">●</span>}
+                  <div className="config-two-col">
+                    {hasParams && (
+                      <div className="config-col">
+                        <p className="config-col-label">Parameters</p>
+                        <div className="threshold-keys">
+                          {Object.entries(testParams).map(([key, value]) => {
+                            const defVal = defaultParams[key];
+                            const modified = defVal !== undefined && value !== defVal;
+                            const unit = unitForKey(key);
+                            return (
+                              <div key={key} className={`threshold-row${modified ? " modified" : ""}`}>
+                                <span className="threshold-key-name">{formatKey(key)}</span>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={value}
+                                  disabled={isDefault}
+                                  onChange={(e) => handleParamChange(testId, key, e.target.value)}
+                                />
+                                <span className="threshold-unit">{unit}</span>
+                                {defVal !== undefined && (
+                                  <span className="threshold-default">default: {defVal}</span>
+                                )}
+                                {modified && <span className="threshold-modified-dot" title="Modified from default">●</span>}
+                              </div>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
+                      </div>
+                    )}
+                    {hasValues && (
+                      <div className="config-col">
+                        <p className="config-col-label">Verdicts</p>
+                        <div className="threshold-keys">
+                          {Object.entries(testValues).map(([key, value]) => {
+                            const defVal = defaultValues[key];
+                            const modified = defVal !== undefined && value !== defVal;
+                            const unit = unitForKey(key);
+                            return (
+                              <div key={key} className={`threshold-row${modified ? " modified" : ""}`}>
+                                <span className="threshold-key-name">{formatKey(key)}</span>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={value}
+                                  disabled={isDefault}
+                                  onChange={(e) => handleValueChange(testId, key, e.target.value)}
+                                />
+                                <span className="threshold-unit">{unit}</span>
+                                {defVal !== undefined && (
+                                  <span className="threshold-default">default: {defVal}</span>
+                                )}
+                                {modified && <span className="threshold-modified-dot" title="Modified from default">●</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

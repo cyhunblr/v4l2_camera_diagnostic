@@ -310,7 +310,6 @@ table.overview .summary-text { color: #475569; }
           pass_count++;
           break;
         case TestStatus::Fail:
-        case TestStatus::Error:
           fail_count++;
           break;
         case TestStatus::Warn:

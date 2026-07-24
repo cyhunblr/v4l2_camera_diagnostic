@@ -78,8 +78,6 @@ const char *to_string(TestStatus status) {
       return "warn";
     case TestStatus::Skipped:
       return "skipped";
-    case TestStatus::Error:
-      return "error";
   }
   return "unknown";
 }

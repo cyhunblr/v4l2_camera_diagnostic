@@ -6,33 +6,39 @@
 
 namespace v4l2diag {
 
-// Per-test threshold values, keyed by threshold name (e.g. "pass_delta_p95_ms").
-// Every value is a double; integer-valued thresholds (counts) are stored as
-// doubles too and compared as such by the runner.
+// Per-test key-value map. Used for both run parameters and verdict thresholds.
+// Every value is a double; integer-valued entries (counts) are stored as doubles
+// too and compared as such by the runner.
 using TestThresholds = std::map<std::string, double>;
 
-// A named set of verdict thresholds. `values` maps a test id (e.g.
-// "t22-latency-under-load") to that test's TestThresholds. Only tests that have
-// tunable numeric verdict thresholds appear; structural/correctness checks
-// (t01, t16, ...) are intentionally not represented here.
+// A named test configuration combining run parameters (how a test executes) and
+// verdict thresholds (what determines pass/warn/fail). Both map a test id to
+// that test's key-value set.
 struct ThresholdConfig {
   std::string id;
   std::string name;
   std::string description;
+  // Verdict thresholds: pass/fail cut-off values per test.
   std::map<std::string, TestThresholds> values;
+  // Run parameters: sample counts, timeouts, repetitions per test.
+  std::map<std::string, TestThresholds> params;
 
   // Returns values[test_id][key] if present, otherwise the built-in default for
   // that (test_id, key), otherwise 0.0. Never throws.
   double get(const std::string &test_id, const std::string &key) const;
+
+  // Returns params[test_id][key] if present, otherwise the built-in default for
+  // that (test_id, key), otherwise 0.0. Never throws.
+  double get_param(const std::string &test_id, const std::string &key) const;
 };
 
-// The built-in, always-available default configuration. Its values are exactly
-// the thresholds that were previously hard-coded in the runner's verdict logic,
-// so a run using "default" behaves identically to before this system existed.
+// The built-in, always-available default configuration.
 ThresholdConfig default_threshold_config();
 
-// Directory where user threshold configs (and a written-out copy of the
-// default) live. Mirrors default_config_directory() but ends in /thresholds.
+// The built-in default run parameters.
+std::map<std::string, TestThresholds> default_test_params();
+
+// Directory where user configs live.
 std::string default_threshold_directory();
 
 class ThresholdRegistry {
@@ -46,9 +52,8 @@ class ThresholdRegistry {
   bool import_config(const std::string &json_text, std::string *error);
   bool export_config(const std::string &id, std::string *json_text) const;
 
-  // Returns a fully-populated config for `id`: the built-in default with any
-  // known values from config `id` overlaid on top. Unknown ids resolve to the
-  // plain default. The result always has every test/key the runner needs.
+  // Returns a fully-populated config for `id`: the built-in defaults with any
+  // known values from config `id` overlaid on top.
   ThresholdConfig resolve(const std::string &id) const;
 
   const std::string &directory() const {
@@ -57,7 +62,7 @@ class ThresholdRegistry {
 
  private:
   std::string directory_;
-  std::vector<ThresholdConfig> configs_;  // user configs only; "default" is built-in
+  std::vector<ThresholdConfig> configs_;
 
   void load();
   void seed_default_file() const;

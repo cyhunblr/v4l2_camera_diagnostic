@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FileDown } from "lucide-react";
+import { FileDown, Terminal } from "lucide-react";
 import { getRunLogs, getRunReports } from "../api";
 import { ResultsTable } from "../components/ResultsTable";
 import { LogLine, ReportLink, TestSummary } from "../types";
@@ -97,6 +97,34 @@ export function ResultsPage({ viewedRunId, liveSummaries, liveReportLinks, liveR
           {reportLinks.map((r) => (
             <a key={r.url} href={r.url} target="_blank" rel="noreferrer">{r.format.toUpperCase()}</a>
           ))}
+          <button
+            className="icon-button dmesg-export-btn"
+            title="Export full boot dmesg"
+            onClick={() => {
+              fetch("/api/dmesg")
+                .then(async (res) => {
+                  if (!res.ok) {
+                    throw new Error(await res.text() || `dmesg export failed (${res.status})`);
+                  }
+                  return res.text();
+                })
+                .then((text) => {
+                  const blob = new Blob([text], { type: "text/plain" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "dmesg.txt";
+                  a.click();
+                  URL.revokeObjectURL(url);
+                })
+                .catch((err) => {
+                  window.alert(err instanceof Error ? err.message : "Failed to export dmesg.");
+                });
+            }}
+          >
+            <Terminal size={14} />
+            <span>Export DMESG</span>
+          </button>
         </div>
       )}
     </div>

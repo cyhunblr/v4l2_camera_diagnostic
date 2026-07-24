@@ -5,6 +5,15 @@ type Props = {
   emptyMessage?: string;
 };
 
+function statusColor(status: string): string {
+  switch (status.toLowerCase()) {
+    case "pass": return "var(--success)";
+    case "fail": return "var(--error)";
+    case "warn": return "var(--warn)";
+    default: return "var(--text-secondary)";
+  }
+}
+
 export function ResultsTable({
   summaries,
   emptyMessage = "No test results yet. Results appear as tests complete."
@@ -25,9 +34,11 @@ export function ResultsTable({
         {summaries.map((s, i) => (
           <tr key={i} className={`status-${s.status.toLowerCase()}`}>
             <td className="col-status">
-              <span className="status-badge">
-                {s.status === "Pass" ? "✓" : s.status === "Fail" ? "✗" : s.status === "Warn" ? "⚠" : "⏭"}
-              </span>
+              <span
+                className="status-dot-indicator"
+                style={{ backgroundColor: statusColor(s.status) }}
+                title={s.status}
+              />
             </td>
             <td className="col-test">{s.test}</td>
             <td className="col-summary">{s.message}</td>

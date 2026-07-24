@@ -468,7 +468,6 @@ Json::Value run_summary_to_json(const std::string &id, const std::string &status
           pass_count++;
           break;
         case TestStatus::Fail:
-        case TestStatus::Error:
           fail_count++;
           break;
         case TestStatus::Warn:
@@ -715,6 +714,30 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
     out["url"] = url();
     out["web_root"] = options_.web_root;
     return json_to_string(out);
+  }
+
+  if (method == "GET" && path == "/api/dmesg") {
+    *content_type = "text/plain; charset=utf-8";
+    FILE *pipe = popen("dmesg 2>&1", "r");
+    if (!pipe) {
+      *status_code = MHD_HTTP_INTERNAL_SERVER_ERROR;
+      return "Failed to execute dmesg.\n";
+    }
+    std::string output;
+    char buf[4096];
+    while (fgets(buf, sizeof(buf), pipe) != nullptr) {
+      output += buf;
+    }
+    const int exit_status = pclose(pipe);
+    if (exit_status != 0) {
+      *status_code = MHD_HTTP_INTERNAL_SERVER_ERROR;
+      return "dmesg failed: " + output;
+    }
+    if (output.empty()) {
+      *status_code = MHD_HTTP_NO_CONTENT;
+      return "";
+    }
+    return output;
   }
 
   if (method == "GET" && path == "/api/devices") {
@@ -1383,7 +1406,7 @@ void WebServer::execute_run(std::shared_ptr<RunState> run) {
 
   // Stream each test result as it completes rather than waiting for the full run.
   run->config.progress_callback = [this, run](const std::string &camera_path, const TestResult &test) {
-    const std::string severity = test.status == TestStatus::Error || test.status == TestStatus::Fail     ? "error"
+    const std::string severity = test.status == TestStatus::Fail                                         ? "error"
                                  : test.status == TestStatus::Warn || test.status == TestStatus::Skipped ? "warn"
                                                                                                          : "info";
     append_log(run, severity, test.id + " [" + std::string(to_string(test.status)) + "] " + test.summary, camera_path,

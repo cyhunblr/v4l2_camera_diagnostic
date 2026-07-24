@@ -290,7 +290,7 @@ export default function App() {
           />
         )}
 
-        {activePage === "thresholds" && (
+        {activePage === "config" && (
           <ThresholdConfigPage
             selectedThresholdId={selectedThresholdId}
             onSelectedChange={setSelectedThresholdId}

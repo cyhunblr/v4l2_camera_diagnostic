@@ -159,11 +159,12 @@ export type StartRunPayload = {
   threshold_config_id?: string;
 };
 
-export type PageId = "dashboard" | "cameras" | "profiles" | "tests" | "thresholds" | "reports" | "output" | "results";
+export type PageId = "dashboard" | "cameras" | "profiles" | "tests" | "config" | "reports" | "output" | "results";
 
 export type ThresholdConfig = {
   id: string;
   name: string;
   description: string;
   values: Record<string, Record<string, number>>;
+  params: Record<string, Record<string, number>>;
 };

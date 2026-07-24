@@ -38,7 +38,6 @@ enum class TestStatus {
   Fail,
   Warn,
   Skipped,
-  Error,
 };
 
 struct MetricValue {

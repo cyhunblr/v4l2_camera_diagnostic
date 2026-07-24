@@ -145,10 +145,11 @@ Use `scripts/setup-dev-env.sh` for contributor tooling; it requires the same
 
 ## Camera Diagnostic Tests
 
-The modular runner contains 24 implemented diagnostics. Each ID in the
-inventory below links to a detailed reference page under
-[`docs/backend/tests/`](backend/tests/) covering scope, inputs, output
-metrics, interpretation guidance, and a walkthrough of the implementation.
+The modular runner contains 26 registered diagnostics (23 fully implemented,
+3 pending implementation). Each ID in the inventory below links to a detailed
+reference page under [`docs/backend/tests/`](backend/tests/) covering scope,
+inputs, output metrics, interpretation guidance, and a walkthrough of the
+implementation.
 
 ### Trigger modes
 
@@ -174,56 +175,91 @@ hardware validation checklist in
 
 ### Test inventory
 
+Tests are grouped into 7 logical layers that run in dependency order:
+
+#### Layer 1 — Discovery
+
 | ID | Name | Category | Notes |
 | --- | --- | --- | --- |
-| [t01-no-streamon](backend/tests/t01-no-streamon.md) | Frame capture without STREAMON | stream-state | |
-| [t02-buffer-overwrite](backend/tests/t02-buffer-overwrite.md) | Buffer overwrite behavior | buffering | risky; no free-run (Hardware/Software only) |
-| [t03-gpio-latency](backend/tests/t03-gpio-latency.md) | Trigger to DQBUF latency | latency | no free-run (Hardware/Software only) |
-| [t04-nonblock-vs-block](backend/tests/t04-nonblock-vs-block.md) | NON_BLOCK vs BLOCK comparison | io-mode | |
-| [t05-poll-timeout-effect](backend/tests/t05-poll-timeout-effect.md) | Poll timeout effect | polling | |
-| [t06-format-comparison](backend/tests/t06-format-comparison.md) | Format comparison | format | |
-| [t07-poll-timeout-sweep](backend/tests/t07-poll-timeout-sweep.md) | Poll timeout sweep | polling | |
-| [t08-sequence-continuity](backend/tests/t08-sequence-continuity.md) | Sequence number continuity | sequence | |
-| [t09-sustained-capture](backend/tests/t09-sustained-capture.md) | Sustained capture stability | stability | long-running |
-| [t10-multi-buffer](backend/tests/t10-multi-buffer.md) | Multi-buffer configurations | buffering | |
-| [t11-buffer-recycling](backend/tests/t11-buffer-recycling.md) | Buffer recycling timing | buffering | |
-| [t12-stream-cycles](backend/tests/t12-stream-cycles.md) | STREAMON/STREAMOFF cycles | stream-state | |
-| [t13-buffer-flags](backend/tests/t13-buffer-flags.md) | V4L2 buffer flag analysis | metadata | |
-| [t14-timestamp-monotonicity](backend/tests/t14-timestamp-monotonicity.md) | Timestamp monotonicity | metadata | |
-| [t15-memory-throughput](backend/tests/t15-memory-throughput.md) | Memory access throughput | memory | benchmarks the selected backend's device-mapped buffer |
-| [t16-v4l2-compliance](backend/tests/t16-v4l2-compliance.md) | V4L2 compliance checks | v4l2 | no hardware trigger required |
-| [t17-pollerr-handling](backend/tests/t17-pollerr-handling.md) | POLLERR/POLLHUP handling | stream-state | experimental, risky |
-| [t18-dmabuf-cache-sync](backend/tests/t18-dmabuf-cache-sync.md) | DMA_BUF_IOCTL_SYNC cache coherency | dmabuf | **requires the DMABUF backend** — skipped for `mmap`/`userptr` runs by design (`requires_dmabuf`), not a bug |
-| [t19-gpio-pulse-width](backend/tests/t19-gpio-pulse-width.md) | GPIO pulse width characterization | trigger | Hardware trigger only |
-| [t20-camera-controls](backend/tests/t20-camera-controls.md) | Camera control parameter effect | controls | experimental, risky, profile-scoped (ISX021) |
-| [t21-stuck-frame](backend/tests/t21-stuck-frame.md) | Stuck frame detection | quality | |
-| [t22-latency-under-load](backend/tests/t22-latency-under-load.md) | Latency under CPU load | stability | |
-| [t24-control-inventory](backend/tests/t24-control-inventory.md) | V4L2 control inventory | controls | no active trigger required |
-| [v4l2-memory-probe](backend/tests/v4l2-memory-probe.md) | V4L2 memory backend probe | v4l2 | no hardware trigger required |
+| t01-device-compliance | V4L2 device compliance | discovery | no trigger required; includes memory backend probe |
+| t02-control-inventory | V4L2 control inventory | discovery | no trigger required |
 
-Every test above has a real implementation in `diagnostic_runner.cpp` — none
-return a placeholder "pending migration" skip. A test being reported as
-`Skipped` at runtime is always one of the following expected conditions in
-`run_test()`, never a missing implementation:
+#### Layer 2 — State-machine correctness
 
-- **Memory-backend skip** — `t18`'s DMABUF requirement (`requires_dmabuf`):
-  selecting `mmap` or `userptr` will correctly show `t18` as `Skipped` with
-  "Test requires DMABUF..." — `t18` is the one and only test with this
+| ID | Name | Category | Notes |
+| --- | --- | --- | --- |
+| t03-no-streamon | Frame capture without STREAMON | stream-state | |
+| t04-pollerr-handling | POLLERR/POLLHUP handling | stream-state | experimental, risky |
+| t05-stream-cycles | STREAMON/STREAMOFF cycle reliability | stream-state | |
+
+#### Layer 3 — Buffer & memory
+
+| ID | Name | Category | Notes |
+| --- | --- | --- | --- |
+| t06-multi-buffer | Multi-buffer configurations | buffering | |
+| t07-buffer-overwrite | Buffer overwrite behavior | buffering | risky; no free-run (Hardware/Software only) |
+| t08-buffer-recycling | Buffer recycling timing | buffering | |
+| t09-buffer-flags | V4L2 buffer flag analysis | metadata | |
+| t10-memory-throughput | Memory access throughput | memory | no trigger required |
+| t11-dmabuf-cache-sync | DMA_BUF_IOCTL_SYNC cache coherency | dmabuf | **requires DMABUF backend** |
+
+#### Layer 4 — Polling / timeout
+
+| ID | Name | Category | Notes |
+| --- | --- | --- | --- |
+| t12-poll-timeout-cliff | Poll timeout cliff finder | polling | adaptive binary search + stability tracking |
+
+#### Layer 5 — Latency
+
+| ID | Name | Category | Notes |
+| --- | --- | --- | --- |
+| t13-trigger-latency | Trigger to DQBUF latency | latency | no free-run (Hardware/Software only) |
+| t14-nonblock-vs-block | NON_BLOCK vs BLOCK comparison | io-mode | |
+| t15-gpio-pulse-width | GPIO pulse width characterization | trigger | Hardware trigger only |
+| t16-format-comparison | Format comparison | format | |
+| t17-control-sweep | Control parameter sweep | controls | experimental, risky |
+| t18-resolution-sweep | Resolution sweep | format | **not yet implemented** |
+
+#### Layer 6 — Integrity
+
+| ID | Name | Category | Notes |
+| --- | --- | --- | --- |
+| t19-sequence-continuity | Sequence number continuity | sequence | |
+| t20-timestamp-monotonicity | Timestamp monotonicity | metadata | |
+| t21-stuck-frame | Stuck frame detection | quality | |
+
+#### Layer 7 — Stability
+
+| ID | Name | Category | Notes |
+| --- | --- | --- | --- |
+| t22-sustained-capture | Sustained capture stability | stability | long-running (60 s) |
+| t23-latency-under-load | Latency under CPU load | stability | |
+| t24-max-fps | Maximum frame rate | stability | long-running; **not yet implemented** |
+| t25-multi-camera | Multi-camera contention | stability | long-running; **not yet implemented** |
+| t26-cold-start | Cold-start warm-up cost | stability | **not yet implemented** |
+
+Tests marked **not yet implemented** report `Skipped` at runtime.
+A test being reported as `Skipped` is always one of the following expected
+conditions in `run_test()`, never a missing implementation for an implemented
+test:
+
+- **Memory-backend skip** — `t11`'s DMABUF requirement (`requires_dmabuf`):
+  selecting `mmap` or `userptr` will correctly show `t11` as `Skipped` with
+  "Test requires DMABUF..." — `t11` is the one and only test with this
   memory-backend condition, and it is expected behavior, not a defect in the
   `mmap`/`userptr` path.
 - **Trigger-mode skip** — tests whose `trigger_mode_mask` does not include the
   selected run mode (checked by `supports_trigger_mode()`) are skipped
-  explicitly. Pulse-width characterization (`t19`) is hardware-only;
-  buffer-overwrite (`t02`) and trigger-latency (`t03`) require an active
+  explicitly. Pulse-width characterization (`t15`) is hardware-only;
+  buffer-overwrite (`t07`) and trigger-latency (`t13`) require an active
   hardware or software trigger and are skipped in free-run mode.
 - **Trigger-source skip** — an active-mode test is skipped when its profile,
   channel, GPIO, control device, or V4L2 control validation is unavailable.
-- **Missing `linux/dma-buf.h`** — `t18` additionally compiles to a `Skipped`
+- **Missing `linux/dma-buf.h`** — `t11` additionally compiles to a `Skipped`
   result ("linux/dma-buf.h not available...") on systems without the DMA-BUF
   sync header.
-
-The fallback "No core implementation registered for this test." skip is only
-reachable for an unknown test id, not for any of the 24 built-in tests above.
+- **Not-yet-implemented tests** — `t18`, `t24`, `t25`, `t26` report `Skipped`
+  with a "not yet implemented" message until their implementations land.
 
 List everything the current binary knows about, with implementation status:
 

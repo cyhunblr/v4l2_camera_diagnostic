@@ -395,7 +395,7 @@ int command_run(int argc, char **argv) {
     }
     std::cout << "Camera " << camera.camera_path << ": pass=" << counts[TestStatus::Pass]
               << " warn=" << counts[TestStatus::Warn] << " fail=" << counts[TestStatus::Fail]
-              << " skipped=" << counts[TestStatus::Skipped] << " error=" << counts[TestStatus::Error] << "\n";
+              << " skipped=" << counts[TestStatus::Skipped] << "\n";
   }
   std::cout << "Artifacts:\n";
   for (const auto &artifact : artifacts) {

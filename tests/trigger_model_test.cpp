@@ -136,7 +136,7 @@ int main() {
   }
 
   v4l2diag::TestDefinition pulse_width;
-  if (!v4l2diag::find_test_definition("t19-gpio-pulse-width", &pulse_width) ||
+  if (!v4l2diag::find_test_definition("t15-gpio-pulse-width", &pulse_width) ||
       !v4l2diag::supports_trigger_mode(pulse_width, v4l2diag::TriggerMode::Hardware) ||
       v4l2diag::supports_trigger_mode(pulse_width, v4l2diag::TriggerMode::Software) ||
       v4l2diag::supports_trigger_mode(pulse_width, v4l2diag::TriggerMode::FreeRun)) {
