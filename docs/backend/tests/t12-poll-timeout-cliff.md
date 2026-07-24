@@ -27,7 +27,7 @@ Registry: `t12-poll-timeout-cliff` in [test_registry.cpp](../../../source/backen
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `probe_frames` | 10 | count | Frames per probe at each timeout value |
 | `stability_rounds` | 5 | count | Rounds of stability confirmation |
 | `stability_frames` | 10 | count | Frames per stability round |
@@ -35,7 +35,7 @@ Registry: `t12-poll-timeout-cliff` in [test_registry.cpp](../../../source/backen
 ## Output Metrics
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `cliff_ms` | ms | Lowest timeout with 100% capture success (-1 if no cliff found or pipeline unreliable) |
 | `first_miss_ms` | ms | Highest timeout value where misses occurred |
 | `safety_margin_ms` | ms | `production_timeout_ms` minus `cliff_ms` |
@@ -46,7 +46,7 @@ Registry: `t12-poll-timeout-cliff` in [test_registry.cpp](../../../source/backen
 
 The test emits detail lines for each probed timeout and stability round:
 
-```
+```text
 coarse: 100ms → 10/10
 coarse:  50ms → 10/10
 coarse:  40ms → 10/10
@@ -63,7 +63,7 @@ stability round 5: @32ms=10/10, @31ms=5/10 ✓
 
 A summary box is also emitted to the log:
 
-```
+```text
 ╔═══════ CLIFF SUMMARY ══════════╗
 ║  Production timeout :  48.5ms  ║
 ║  Cliff (stable)     :    32ms  ║
@@ -76,7 +76,7 @@ A summary box is also emitted to the log:
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| -------- | ----------- |
 | **Pass** | Cliff is stable AND `safety_margin_ms >= safe_margin_ms` threshold (default: 5.0 ms) |
 | **Pass** | No cliff found — pipeline is reliable even at 1 ms timeout |
 | **Warn** | Cliff is stable but safety margin is less than threshold (but still ≥ 0) |
@@ -87,7 +87,7 @@ A summary box is also emitted to the log:
 **Thresholds from `default_threshold_config`:**
 
 | Key | Default | Description |
-|-----|---------|-------------|
+| --- | ------- | ----------- |
 | `production_timeout_ms` | 48.5 | The production poll timeout to compare against |
 | `safe_margin_ms` | 5.0 | Minimum acceptable safety margin for Pass |
 
@@ -102,7 +102,7 @@ A summary box is also emitted to the log:
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | "Misses even at 500ms timeout" | Camera not triggering, I2C bus error, or driver/firmware hang |
 | Unstable cliff (fluctuates between rounds) | Thermal throttling, kernel scheduling jitter, or trigger source instability |
 | Cliff very high (> 100 ms) | Camera in a slow readout mode, low frame rate configuration, or long integration time |

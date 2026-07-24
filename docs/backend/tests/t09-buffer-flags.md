@@ -33,7 +33,7 @@ Registry: `t09-buffer-flags` in [test_registry.cpp](../../../source/backend/core
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `sample_count` | 50 | count | Number of frames to capture and analyze |
 | `capture_timeout_ms` | 100 | ms | Timeout for each capture attempt |
 | `sample_interval_ms` | 100 | ms | Delay between captures |
@@ -41,7 +41,7 @@ Registry: `t09-buffer-flags` in [test_registry.cpp](../../../source/backend/core
 ## Output Metrics
 
 | Key | Unit | Description |
-|-----|------|-------------|
+| ----- | ------ | ------------- |
 | `frames_captured` | count | Total frames successfully captured |
 | `flag_error` | count | Frames with V4L2_BUF_FLAG_ERROR set |
 | `flag_keyframe` | count | Frames with V4L2_BUF_FLAG_KEYFRAME set |
@@ -52,7 +52,7 @@ Registry: `t09-buffer-flags` in [test_registry.cpp](../../../source/backend/core
 
 ## Report Details
 
-```
+```text
 Combined flags OR: 0x00002002
 Timestamp source consistent: yes
 ```
@@ -60,7 +60,7 @@ Timestamp source consistent: yes
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| ------ | --------- |
 | **Pass** | flag_error ≤ 0 (max_error_flags threshold) |
 | **Warn** | flag_error > 0 — some frames had V4L2_BUF_FLAG_ERROR |
 
@@ -79,7 +79,7 @@ Timestamp source consistent: yes
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | "Session setup failed" | Cannot open device or start streaming |
 | `frames_captured = 0` | Trigger not working or camera not producing frames |
 | High `flag_error` count | DMA errors, sensor timing issues, or buffer corruption |

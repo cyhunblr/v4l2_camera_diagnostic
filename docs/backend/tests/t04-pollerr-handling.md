@@ -29,7 +29,7 @@ Registry: `t04-pollerr-handling` in [test_registry.cpp](../../../source/backend/
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `baseline_captures` | 3 | count | Number of baseline frames to capture before STREAMOFF |
 | `recovery_captures` | 3 | count | Number of recovery frames to capture after re-STREAMON |
 | `poll_timeout_ms` | 100 | ms | Timeout for poll() calls |
@@ -38,7 +38,7 @@ Registry: `t04-pollerr-handling` in [test_registry.cpp](../../../source/backend/
 ## Output Metrics
 
 | Key | Unit | Description |
-|-----|------|-------------|
+| ----- | ------ | ------------- |
 | `baseline_ok` | count | Number of baseline frames captured successfully |
 | `pollerr_raised` | bool | Whether POLLERR was set in revents after STREAMOFF |
 | `pollhup_raised` | bool | Whether POLLHUP was set in revents after STREAMOFF |
@@ -48,7 +48,7 @@ Registry: `t04-pollerr-handling` in [test_registry.cpp](../../../source/backend/
 
 ## Report Details
 
-```
+```text
 poll ret=0 POLLERR
 DQBUF after STREAMOFF: failed errno=22 (Invalid argument)
 ```
@@ -56,7 +56,7 @@ DQBUF after STREAMOFF: failed errno=22 (Invalid argument)
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| -------- | ----------- |
 | **Pass** | DQBUF fails after STREAMOFF AND re-STREAMON succeeds AND recovery_ok ≥ 2 (min_recovery_ok threshold) |
 | **Warn** | DQBUF fails correctly but recovery is partial (recovery_ok < min_recovery_ok) |
 | **Fail** | DQBUF succeeded after STREAMOFF — state machine violation |
@@ -72,7 +72,7 @@ DQBUF after STREAMOFF: failed errno=22 (Invalid argument)
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | DQBUF succeeded after STREAMOFF | Driver bug — buffers not properly invalidated on STREAMOFF |
 | `restreamon_ok = 0` | Driver requires full close/reopen cycle to restart streaming |
 | `recovery_ok = 0` | Stream restart works at the ioctl level but the pipeline is stalled |

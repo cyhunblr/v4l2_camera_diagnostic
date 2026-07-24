@@ -32,7 +32,7 @@ Registry: `t25-multi-camera` in [test_registry.cpp](../../../source/backend/core
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| --- | ------- | ---- | ----------- |
 | `sample_count` | 50 | count | Number of trigger-and-capture rounds. |
 | `poll_timeout_ms` | 200 | ms | Per-camera poll timeout within each round. |
 
@@ -43,7 +43,7 @@ Registry: `t25-multi-camera` in [test_registry.cpp](../../../source/backend/core
 For each camera index `N` (0-based), a full stats block is reported:
 
 | Metric Key Pattern | Unit | Description |
-|-------------------|------|-------------|
+| ------------------- | ------ | ------------- |
 | `cam0_latency_mean` | ms | Mean capture latency for camera 0. |
 | `cam0_latency_stddev` | ms | Standard deviation for camera 0. |
 | `cam0_latency_min` | ms | Minimum latency for camera 0. |
@@ -56,7 +56,7 @@ For each camera index `N` (0-based), a full stats block is reported:
 ### Cross-camera jitter statistics (`cross_jitter_*`)
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `cross_jitter_mean` | ms | Mean jitter (max − min latency) across cameras per round. |
 | `cross_jitter_stddev` | ms | Standard deviation of cross-camera jitter. |
 | `cross_jitter_min` | ms | Minimum cross-camera jitter observed. |
@@ -69,7 +69,7 @@ For each camera index `N` (0-based), a full stats block is reported:
 
 Per-camera capture count lines:
 
-```
+```text
 /dev/video0: 50 captures
 /dev/video2: 50 captures
 Cross-camera jitter mean: 2.340000 ms
@@ -78,7 +78,7 @@ Cross-camera jitter mean: 2.340000 ms
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| -------- | ----------- |
 | **Pass** | `cross_jitter_p95 < 5.0` ms |
 | **Warn** | `cross_jitter_p95 < 20.0` ms |
 | **Fail** | `cross_jitter_p95 ≥ 20.0` ms, or no successful rounds (all cameras never captured in the same round). |
@@ -95,7 +95,7 @@ Cross-camera jitter mean: 2.340000 ms
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | `cross_jitter_p95` > 20 ms | Cameras on different USB controllers with different interrupt latencies; or one camera is on USB 2.0 while another is on USB 3.0. |
 | `successful_rounds = 0` | One camera never captures within `poll_timeout_ms`. Likely a camera that doesn't respond to the shared trigger (wrong trigger mode or wiring). |
 | Inconsistent jitter (high `cross_jitter_stddev`) | USB bus arbitration or shared interrupt line causing variable priority. Dedicate a USB controller per camera. |

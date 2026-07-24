@@ -32,7 +32,7 @@ Registry: `t07-buffer-overwrite` in [test_registry.cpp](../../../source/backend/
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `buffer_count` | 2 | count | Number of buffers to allocate |
 | `variant_a_triggers` | 100 | count | Triggers to send in Variant A |
 | `variant_a_interval_ms` | 100 | ms | Interval between triggers in Variant A |
@@ -43,7 +43,7 @@ Registry: `t07-buffer-overwrite` in [test_registry.cpp](../../../source/backend/
 ## Output Metrics
 
 | Key | Unit | Description |
-|-----|------|-------------|
+| ----- | ------ | ------------- |
 | `triggers_A` | count | Number of triggers sent in Variant A |
 | `frames_available_A` | count | Frames available after all triggers in Variant A |
 | `triggers_B` | count | Number of triggers sent in Variant B |
@@ -52,7 +52,7 @@ Registry: `t07-buffer-overwrite` in [test_registry.cpp](../../../source/backend/
 
 ## Report Details
 
-```
+```text
 Variant A: buffers=2 triggers=100 available=2
 Variant B: buffers=2 triggers=200 available=2 errors=1
 ```
@@ -60,7 +60,7 @@ Variant B: buffers=2 triggers=200 available=2 errors=1
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| ------ | --------- |
 | **Pass** | error_flag_total ≤ 0 (max_error_flags threshold) |
 | **Warn** | error_flag_total > 0 — some frames had V4L2_BUF_FLAG_ERROR |
 
@@ -75,7 +75,7 @@ Variant B: buffers=2 triggers=200 available=2 errors=1
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | "Session setup failed" | Cannot open device or allocate buffers |
 | `frames_available = 0` for both variants | Driver discards all buffers on queue overflow |
 | Very high `error_flag_total` | Driver detects all overwritten frames as errors |

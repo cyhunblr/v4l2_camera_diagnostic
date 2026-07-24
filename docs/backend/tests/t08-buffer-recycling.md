@@ -32,7 +32,7 @@ Registry: `t08-buffer-recycling` in [test_registry.cpp](../../../source/backend/
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `reps_per_delay` | 10 | count | Repetitions at each delay value |
 | `capture_timeout_ms` | 100 | ms | Timeout for each capture attempt |
 | `inter_rep_interval_ms` | 100 | ms | Delay between repetitions |
@@ -40,7 +40,7 @@ Registry: `t08-buffer-recycling` in [test_registry.cpp](../../../source/backend/
 ## Output Metrics
 
 | Key | Unit | Description |
-|-----|------|-------------|
+| ----- | ------ | ------------- |
 | `hits_delay_0ms` | count | Successful second captures at 0ms delay |
 | `hits_delay_1ms` | count | Successful second captures at 1ms delay |
 | `hits_delay_5ms` | count | Successful second captures at 5ms delay |
@@ -57,7 +57,7 @@ Registry: `t08-buffer-recycling` in [test_registry.cpp](../../../source/backend/
 
 ## Report Details
 
-```
+```text
 delay=0ms hits=10/10 mean=33ms
 delay=1ms hits=10/10 mean=33ms
 delay=5ms hits=10/10 mean=34ms
@@ -75,7 +75,7 @@ delay=100ms hits=0/10
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| ------ | --------- |
 | **Pass** | No cliff found (cliff_delay = -1) OR cliff_delay ≥ 50ms (min_safe_cliff_delay_ms threshold) |
 | **Warn** | cliff_delay < 50ms — application must requeue buffers quickly or risk misses |
 
@@ -91,7 +91,7 @@ delay=100ms hits=0/10
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | "Session setup failed" | Cannot open device or start streaming |
 | `cliff_delay_ms = 0` | Driver has extremely tight buffer timing or a race condition |
 | All delays show misses | Trigger or capture path is unreliable (not a recycling issue) |

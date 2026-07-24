@@ -31,7 +31,7 @@ Registry: `t11-dmabuf-cache-sync` in [test_registry.cpp](../../../source/backend
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `sample_count` | 20 | frames | Number of frames to compare |
 | `compare_bytes` | 64 | bytes | Number of leading bytes compared per frame |
 | `capture_timeout_ms` | 100 | ms | Poll timeout for each capture attempt |
@@ -39,7 +39,7 @@ Registry: `t11-dmabuf-cache-sync` in [test_registry.cpp](../../../source/backend
 ## Output Metrics
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `frames_tested` | count | Number of frames successfully compared |
 | `match_without_sync` | count | Frames where DMA read matched mmap without sync |
 | `match_with_sync` | count | Frames where DMA read matched mmap after sync |
@@ -52,7 +52,7 @@ This test does not emit explicit detail lines beyond the metrics. The summary me
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| -------- | ----------- |
 | **Pass** | `match_with_sync / frames_tested >= min_match_ratio` (default: 1.0 = all frames must match) |
 | **Fail** | Match ratio with sync is below threshold — cache coherency failure |
 | **Fail** | No frames were compared (`frames_tested == 0`) |
@@ -70,7 +70,7 @@ This test does not emit explicit detail lines beyond the metrics. The summary me
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | "DMABUF session failed" | Driver does not support DMABUF export, or device is busy |
 | "No frames compared" | All capture attempts timed out — trigger not firing or camera not responding |
 | Coherency failure (match_with_sync < tested) | Kernel DMA mapping bug, incorrect cache attributes on buffer allocation |

@@ -27,27 +27,28 @@ Registry: `t03-no-streamon` in [test_registry.cpp](../../../source/backend/core/
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| --- | ------- | ---- | ----------- |
 | `buffer_count` | 2 | count | Number of buffers to request from the driver |
 | `poll_timeout_ms` | 50 | ms | Timeout for the poll() call |
 
 ## Output Metrics
 
 | Key | Unit | Description |
-|-----|------|-------------|
+| ----- | ------ | ------------- |
 | `poll_returned` | count | Return value from `poll(50ms)` without STREAMON; expected 0 (timeout) |
 | `dqbuf_failed` | bool | Whether DQBUF correctly failed without STREAMON (1=correct, 0=violation) |
 | `dqbuf_errno` | errno | errno from the DQBUF attempt; expected EAGAIN (11) or EINVAL (22) |
 
 ## Report Details
 
-```
+```text
 poll(50ms) returned 0 (expected 0)
 DQBUF returned -1, errno=11 (Resource temporarily unavailable)
 ```
 
 Or on failure:
-```
+
+```text
 poll(50ms) returned 1 (expected 0)
 DQBUF unexpectedly succeeded, sequence=0
 ```
@@ -55,7 +56,7 @@ DQBUF unexpectedly succeeded, sequence=0
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| -------- | ----------- |
 | **Pass** | poll returns 0 AND DQBUF fails with EAGAIN or EINVAL |
 | **Warn** | DQBUF correctly fails but poll returned non-zero (driver signals readiness it shouldn't) |
 | **Fail** | DQBUF succeeded without STREAMON — V4L2 state machine violation |
@@ -71,7 +72,7 @@ DQBUF unexpectedly succeeded, sequence=0
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | "Failed to open device" | Wrong device path or permission denied |
 | "VIDIOC_REQBUFS failed" | Driver cannot allocate memory buffers (memory pressure or unsupported backend) |
 | DQBUF succeeded | Kernel driver bug — frames queued/delivered without STREAMON |

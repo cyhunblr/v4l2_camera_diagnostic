@@ -31,7 +31,7 @@ Registry: `t22-sustained-capture` in [test_registry.cpp](../../../source/backend
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `duration_sec` | 60 | s | Total test duration. |
 | `window_sec` | 10 | s | Length of each statistical window. |
 | `sample_interval_ms` | 100 | ms | Delay between capture attempts (≈ 10 Hz). |
@@ -42,7 +42,7 @@ Registry: `t22-sustained-capture` in [test_registry.cpp](../../../source/backend
 ### Aggregate metrics
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `frames_captured` | count | Total successful frames over the entire duration. |
 | `success_rate_pct` | % | `frames_captured / (frames_captured + misses) × 100`. |
 | `max_consecutive_miss` | count | Longest streak of consecutive failed captures. |
@@ -51,7 +51,7 @@ Registry: `t22-sustained-capture` in [test_registry.cpp](../../../source/backend
 ### Latency statistics (`latency_*`)
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `latency_mean` | ms | Mean capture latency across all successful frames. |
 | `latency_stddev` | ms | Standard deviation of capture latency. |
 | `latency_min` | ms | Minimum capture latency observed. |
@@ -63,7 +63,7 @@ Registry: `t22-sustained-capture` in [test_registry.cpp](../../../source/backend
 
 Per-window lines with the format:
 
-```
+```text
 Win0 0-10s: n=98 mean=12ms stddev=3 miss=2
 Win1 10-20s: n=100 mean=11ms stddev=2 miss=0
 Win2 20-30s: n=99 mean=13ms stddev=4 miss=1
@@ -75,15 +75,15 @@ Each line shows frame count, mean latency, standard deviation, and miss count fo
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
-| **Pass** | `success_rate_pct ≥ pass_rate_pct` AND `|latency_drift_ms| < pass_drift_ms` |
-| **Warn** | `success_rate_pct ≥ warn_rate_pct` AND `|latency_drift_ms| < warn_drift_ms` |
-| **Fail** | `success_rate_pct < warn_rate_pct` OR `|latency_drift_ms| ≥ warn_drift_ms` |
+| -------- | ----------- |
+| **Pass** | `success_rate_pct ≥ pass_rate_pct` AND `\|latency_drift_ms\| < pass_drift_ms` |
+| **Warn** | `success_rate_pct ≥ warn_rate_pct` AND `\|latency_drift_ms\| < warn_drift_ms` |
+| **Fail** | `success_rate_pct < warn_rate_pct` OR `\|latency_drift_ms\| ≥ warn_drift_ms` |
 
 Default thresholds:
 
 | Threshold | Default |
-|-----------|---------|
+| ----------- | --------- |
 | `pass_rate_pct` | 95.0 |
 | `warn_rate_pct` | 80.0 |
 | `pass_drift_ms` | 1.0 |
@@ -103,7 +103,7 @@ Default thresholds:
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | High success rate but `latency_drift_ms` exceeds threshold | Thermal throttling — sensor or SoC reducing clock speed under sustained load. Add heatsink or reduce ambient temperature. |
 | Low success rate across all windows uniformly | Trigger timing mismatch or insufficient USB bandwidth for sustained rate. |
 | Success rate degrades in later windows | Memory leak or driver resource exhaustion — buffers not being recycled correctly over time. |

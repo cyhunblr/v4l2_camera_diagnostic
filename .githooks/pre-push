@@ -3,3 +3,4 @@ set -eu
 
 repo_root=$(git rev-parse --show-toplevel)
 "$repo_root/scripts/dev/check-cpp-format.sh"
+"$repo_root/scripts/dev/check-md-lint.sh"

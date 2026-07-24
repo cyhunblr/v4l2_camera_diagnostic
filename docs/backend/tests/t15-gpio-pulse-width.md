@@ -36,7 +36,7 @@ Registry: `t15-gpio-pulse-width` in [test_registry.cpp](../../../source/backend/
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `samples_per_width` | 8 | count | Captures per pulse width level |
 | `warmup_count` | 5 | count | Warmup captures before sweep |
 | `poll_timeout_ms` | 500 | ms | Maximum wait for frame after trigger |
@@ -46,7 +46,7 @@ Registry: `t15-gpio-pulse-width` in [test_registry.cpp](../../../source/backend/
 ### Per-width metrics (for each pulse width N ∈ {1, 2, 3, 5, 7, 10, 13, 15, 20, 25, 30})
 
 | Metric Key Pattern | Unit | Description |
-|-------------------|------|-------------|
+| ------------------- | ------ | ------------- |
 | `hits_{N}ms` | count | Number of successful captures at width N ms |
 | `lat_high_avg_{N}ms` | ms | Mean latency measured from the rising (HIGH) edge |
 | `lat_low_avg_{N}ms` | ms | Mean latency measured from the falling (LOW) edge |
@@ -54,13 +54,13 @@ Registry: `t15-gpio-pulse-width` in [test_registry.cpp](../../../source/backend/
 ### Aggregate metrics (only when full-hit widths exist)
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `range_h` | ms | Average within-level range of HIGH-referenced latency |
 | `range_l` | ms | Average within-level range of LOW-referenced latency |
 
 ## Report Details
 
-```
+```text
 1ms: hits=8/8 lat_HIGH=34ms lat_LOW=33ms
 2ms: hits=8/8 lat_HIGH=34ms lat_LOW=32ms
 3ms: hits=8/8 lat_HIGH=35ms lat_LOW=32ms
@@ -73,7 +73,7 @@ Edge detection: rising
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| ------ | --------- |
 | **Pass** | Sweep completes (regardless of edge detection result) |
 | **Fail** | Session setup fails |
 
@@ -91,7 +91,7 @@ This test always passes if it can run — it is a characterization test. The edg
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | "Session setup failed" | GPIO trigger hardware not connected or device busy |
 | 0 hits at all widths | Trigger pin not connected, wrong GPIO line, or camera not in external trigger mode |
 | Inconsistent hit counts | Electrical noise on the trigger line, or pulse too close to the minimum filter threshold |

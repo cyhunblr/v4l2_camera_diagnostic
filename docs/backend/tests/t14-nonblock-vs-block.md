@@ -33,7 +33,7 @@ Registry: `t14-nonblock-vs-block` in [test_registry.cpp](../../../source/backend
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `sample_count` | 30 | count | Number of captures per mode |
 | `spin_deadline_ms` | 100 | ms | Maximum spin time in non-blocking mode before giving up |
 | `poll_timeout_ms` | 200 | ms | Poll timeout used for blocking mode warmup |
@@ -44,7 +44,7 @@ Registry: `t14-nonblock-vs-block` in [test_registry.cpp](../../../source/backend
 ### Non-blocking mode metrics
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `nonblock_latency_mean` | ms | Mean latency in non-blocking spin mode |
 | `nonblock_latency_stddev` | ms | Standard deviation |
 | `nonblock_latency_min` | ms | Minimum latency |
@@ -57,7 +57,7 @@ Registry: `t14-nonblock-vs-block` in [test_registry.cpp](../../../source/backend
 ### Blocking mode metrics
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `block_latency_mean` | ms | Mean latency in blocking DQBUF mode |
 | `block_latency_stddev` | ms | Standard deviation |
 | `block_latency_min` | ms | Minimum latency |
@@ -73,7 +73,7 @@ No explicit detail lines are emitted. The summary states capture success counts 
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| ------ | --------- |
 | **Pass** | At least one frame captured in either mode |
 | **Fail** | No frames captured in either mode |
 
@@ -91,7 +91,7 @@ This test is informational — it does not apply thresholds on the latency diffe
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | "NON_BLOCK session failed" | Device busy or cannot allocate buffers |
 | "BLOCK session open/start failed" | Device state not properly reset between phases |
 | No frames in non-blocking mode | Trigger not firing; spin deadline too short for actual pipeline latency |

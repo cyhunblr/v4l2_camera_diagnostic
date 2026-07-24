@@ -28,7 +28,7 @@ Registry: `t06-multi-buffer` in [test_registry.cpp](../../../source/backend/core
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `sample_count` | 20 | count | Frames to capture per buffer count (when trigger available) |
 | `max_buffers` | 5 | count | Maximum buffer count to test |
 | `warmup_count` | 3 | count | Warmup frames per configuration |
@@ -38,7 +38,7 @@ Registry: `t06-multi-buffer` in [test_registry.cpp](../../../source/backend/core
 ## Output Metrics
 
 | Key | Unit | Description |
-|-----|------|-------------|
+| ----- | ------ | ------------- |
 | `granted_for_1` | count | Buffers granted when 1 requested |
 | `granted_for_2` | count | Buffers granted when 2 requested |
 | `granted_for_3` | count | Buffers granted when 3 requested |
@@ -48,7 +48,8 @@ Registry: `t06-multi-buffer` in [test_registry.cpp](../../../source/backend/core
 ## Report Details
 
 With trigger available:
-```
+
+```text
 count=1 granted=2 mean=34ms miss=0/20
 count=2 granted=2 mean=33ms miss=0/20
 count=3 granted=3 mean=33ms miss=0/20
@@ -57,7 +58,8 @@ count=5 granted=5 mean=33ms miss=0/20
 ```
 
 Without trigger:
-```
+
+```text
 count=1 granted=2 (GPIO unavailable, capture skipped)
 count=2 granted=2 (GPIO unavailable, capture skipped)
 ```
@@ -65,7 +67,7 @@ count=2 granted=2 (GPIO unavailable, capture skipped)
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| ------ | --------- |
 | **Pass** | Always passes (informational test) — the probe completes regardless of results |
 
 ## Interpretation Guide
@@ -80,7 +82,7 @@ count=2 granted=2 (GPIO unavailable, capture skipped)
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | "open failed" for a buffer count | Device node permissions or driver error |
 | "REQBUFS failed" | Driver cannot allocate any buffers (memory exhaustion or incompatible type) |
 | "start failed" | Driver refuses to stream with the requested buffer count |

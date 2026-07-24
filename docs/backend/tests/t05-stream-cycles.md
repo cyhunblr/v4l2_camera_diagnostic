@@ -25,7 +25,7 @@ Registry: `t05-stream-cycles` in [test_registry.cpp](../../../source/backend/cor
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `full_cycles` | 20 | count | Number of full open/start/capture/close cycles |
 | `rapid_cycles` | 50 | count | Number of rapid start/capture/stop cycles |
 | `full_warmup` | 3 | count | Warmup frames per full cycle |
@@ -35,7 +35,7 @@ Registry: `t05-stream-cycles` in [test_registry.cpp](../../../source/backend/cor
 ## Output Metrics
 
 | Key | Unit | Description |
-|-----|------|-------------|
+| ----- | ------ | ------------- |
 | `full_cycles_success` | count | Full cycles that completed without error |
 | `full_cycle_failures` | count | Full cycles that failed |
 | `rapid_cycles_ok` | count | Rapid cycles where a frame was captured |
@@ -50,14 +50,15 @@ Registry: `t05-stream-cycles` in [test_registry.cpp](../../../source/backend/cor
 ## Report Details
 
 Summary line format:
-```
+
+```text
 Full: 20/20 OK. Rapid: 48/50 captured.
 ```
 
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| -------- | ----------- |
 | **Pass** | full_failures ≤ 0 AND rapid success % ≥ 90% |
 | **Warn** | full_failures ≤ 2 AND rapid success % ≥ 70% |
 | **Fail** | full_failures > 2 OR rapid success % < 70% |
@@ -73,7 +74,7 @@ Full: 20/20 OK. Rapid: 48/50 captured.
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | Increasing full_cycle_failures | Kernel resource leak — buffers or file descriptors not released properly |
 | rapid_cycles_ok ≪ rapid_cycles_total | Driver needs >10ms between STREAMOFF and the next open/start |
 | first_frame_latency degrades over time | Memory fragmentation or DMA channel exhaustion |

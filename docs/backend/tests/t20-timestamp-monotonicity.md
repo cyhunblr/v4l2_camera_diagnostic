@@ -31,7 +31,7 @@ Registry: `t20-timestamp-monotonicity` in [test_registry.cpp](../../../source/ba
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `sample_count` | 100 | count | Number of frames to capture. |
 | `capture_timeout_ms` | 100 | ms | Per-frame poll timeout. |
 | `sample_interval_ms` | 100 | ms | Delay between consecutive captures. |
@@ -41,7 +41,7 @@ Registry: `t20-timestamp-monotonicity` in [test_registry.cpp](../../../source/ba
 ### Inter-frame delta statistics (`delta_*`)
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `delta_mean` | ms | Mean time between consecutive buffer timestamps. |
 | `delta_stddev` | ms | Standard deviation of inter-frame deltas. |
 | `delta_min` | ms | Minimum inter-frame delta observed. |
@@ -52,7 +52,7 @@ Registry: `t20-timestamp-monotonicity` in [test_registry.cpp](../../../source/ba
 ### Wall-to-buffer offset statistics (`wall_buf_offset_*`)
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `wall_buf_offset_mean` | ms | Mean offset between wall clock and buffer timestamp. |
 | `wall_buf_offset_stddev` | ms | Standard deviation of the wall-buffer offset. |
 | `wall_buf_offset_min` | ms | Minimum wall-buffer offset. |
@@ -63,7 +63,7 @@ Registry: `t20-timestamp-monotonicity` in [test_registry.cpp](../../../source/ba
 ### Anomaly count
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ---------- | ---- | ----------- |
 | `non_monotonic` | count | Number of frames where timestamp did not increase vs. predecessor. |
 
 ## Report Details
@@ -73,7 +73,7 @@ No explicit detail lines are pushed. All analysis is captured in the metrics abo
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| ------ | --------- |
 | **Pass** | `non_monotonic ≤ max_non_monotonic` (default: 0) |
 | **Fail** | `non_monotonic > max_non_monotonic` |
 
@@ -91,7 +91,7 @@ Default threshold: `max_non_monotonic = 0` — any single non-monotonic timestam
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | `non_monotonic > 0` | Driver assigns timestamps from a non-monotonic source (e.g. `CLOCK_REALTIME` with NTP step); or camera firmware resets its internal counter. |
 | `delta_min` negative | Same root cause as non-monotonic; timestamps went backwards. |
 | `delta_max` >> `delta_mean` | One frame was severely delayed (USB bus contention, thermal throttle, or sensor AE adjustment causing a long exposure). |

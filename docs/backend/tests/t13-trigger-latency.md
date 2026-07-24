@@ -31,7 +31,7 @@ Registry: `t13-trigger-latency` in [test_registry.cpp](../../../source/backend/c
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `sample_count` | 50 | count | Number of trigger/capture attempts |
 | `warmup_count` | 5 | count | Warmup captures before measurement |
 | `capture_timeout_ms` | 100 | ms | Poll timeout per capture attempt |
@@ -40,7 +40,7 @@ Registry: `t13-trigger-latency` in [test_registry.cpp](../../../source/backend/c
 ## Output Metrics
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `frames_captured` | count | Number of successful captures |
 | `frames_missed` | count | Number of timed-out capture attempts |
 | `latency_mean` | ms | Mean trigger-to-DQBUF latency |
@@ -54,7 +54,7 @@ Registry: `t13-trigger-latency` in [test_registry.cpp](../../../source/backend/c
 
 No explicit detail lines are emitted beyond the summary. The log output includes per-sample progress and a full histogram:
 
-```
+```text
 Sample 10/50: lat=33ms (running mean=34 stddev=2ms)
 Sample 20/50: lat=35ms (running mean=34 stddev=3ms)
 ...
@@ -63,7 +63,7 @@ Sample 20/50: lat=35ms (running mean=34 stddev=3ms)
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| ------ | --------- |
 | **Pass** | At least one frame was captured successfully |
 | **Fail** | All capture attempts timed out (zero frames captured) |
 
@@ -81,7 +81,7 @@ This test does not apply warn/fail thresholds on latency values — it is primar
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | All frames missed | Trigger not connected, wrong GPIO pin, or camera not in external trigger mode |
 | Very high latency (> 100 ms) | Long integration time configured, or camera in free-run mode ignoring triggers |
 | Bimodal distribution | Alternating between fresh captures and stale buffer dequeues |

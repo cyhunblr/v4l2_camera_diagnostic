@@ -33,7 +33,7 @@ Registry: `t18-resolution-sweep` in [test_registry.cpp](../../../source/backend/
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| --- | ------- | ---- | ----------- |
 | `sample_count` | 15 | count | Captures per resolution |
 | `throughput_reps` | 30 | count | Memcpy repetitions for throughput benchmark |
 
@@ -42,13 +42,13 @@ Registry: `t18-resolution-sweep` in [test_registry.cpp](../../../source/backend/
 ### Summary metric
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ---------- | ---- | ----------- |
 | `resolution_count` | count | Total number of resolutions enumerated |
 
 ### Per-resolution metrics (for each resolution WxH)
 
 | Metric Key Pattern | Unit | Description |
-|-------------------|------|-------------|
+| ------------------- | ------ | ------------- |
 | `{W}x{H}_latency_mean` | ms | Mean trigger-to-DQBUF latency at this resolution |
 | `{W}x{H}_latency_p95` | ms | 95th percentile latency at this resolution |
 | `{W}x{H}_throughput_mbps` | MB/s | Memcpy throughput at this resolution |
@@ -57,27 +57,29 @@ Example metric keys: `1920x1280_latency_mean`, `1920x1280_latency_p95`, `1920x12
 
 ## Report Details
 
-```
+```text
 1920x1280: mean=34ms p95=37ms throughput=4521MB/s
 1280x720: mean=22ms p95=24ms throughput=5102MB/s
 640x480: mean=12ms p95=14ms throughput=7845MB/s
 ```
 
 If a resolution fails:
-```
+
+```text
 3840x2160: S_FMT failed — skipped
 1280x720: session failed — VIDIOC_REQBUFS: Cannot allocate memory
 ```
 
 If no frames captured at a resolution:
-```
+
+```text
 1920x1080: no frames captured throughput=3200MB/s
 ```
 
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| -------- | ----------- |
 | **Pass** | At least one resolution was successfully tested |
 | **Warn** | Device enumerates frame sizes but all S_FMT or session starts failed |
 | **Warn** | Device does not enumerate any frame sizes for the current pixel format |
@@ -96,7 +98,7 @@ This test does not apply thresholds on latency or throughput — it is a charact
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | "Cannot open device" | Device busy, permissions, or invalid path |
 | "Device does not enumerate any frame sizes" | Driver does not implement VIDIOC_ENUM_FRAMESIZES for this pixel format |
 | "S_FMT failed" for most resolutions | Driver only supports specific fixed resolutions not in the enumerated list |

@@ -31,7 +31,7 @@ No configurable parameters.
 ## Output Metrics
 
 | Key | Unit | Description |
-|-----|------|-------------|
+| ----- | ------ | ------------- |
 | `backend_mmap` | bool | Whether MMAP backend is supported |
 | `backend_userptr` | bool | Whether USERPTR backend is supported |
 | `backend_dmabuf` | bool | Whether DMABUF backend is supported |
@@ -42,7 +42,7 @@ No configurable parameters.
 
 ## Report Details
 
-```
+```text
 mmap: supported (VIDIOC_REQBUFS granted 4 buffers)
 userptr: unsupported (VIDIOC_REQBUFS returned EINVAL)
 dmabuf: supported (VIDIOC_REQBUFS granted 4 buffers)
@@ -56,7 +56,7 @@ Format: YUYV (YUYV 4:2:2, single-planar)
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| -------- | ----------- |
 | **Pass** | Device supports capture, streaming, and the selected memory backend |
 | **Warn** | Device supports capture/streaming but the selected backend was rejected by VIDIOC_REQBUFS |
 | **Fail** | Device does not expose required V4L2 capture and streaming capabilities, or `query_device()` fails entirely |
@@ -71,7 +71,7 @@ Format: YUYV (YUYV 4:2:2, single-planar)
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | "Failed to query V4L2 device" | Device node doesn't exist or permissions are wrong |
 | `supports_capture = 0` | Wrong `/dev/video*` node selected (subdev, metadata, etc.) |
 | `selected_backend_supported = 0` | Driver doesn't support the chosen backend; try MMAP |

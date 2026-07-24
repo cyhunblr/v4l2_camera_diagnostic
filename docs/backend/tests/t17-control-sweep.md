@@ -31,7 +31,7 @@ Registry: `t17-control-sweep` in [test_registry.cpp](../../../source/backend/cor
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `warmup_count` | 8 | count | Warmup captures per combination |
 | `sample_count` | 20 | count | Captures per combination for latency measurement |
 | `capture_timeout_ms` | 200 | ms | Poll timeout per capture attempt |
@@ -41,7 +41,7 @@ Registry: `t17-control-sweep` in [test_registry.cpp](../../../source/backend/cor
 ### Inventory metrics
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `control_count` | count | Total number of non-disabled V4L2 controls |
 | `writable_count` | count | Number of writable (non-read-only) controls |
 | `isx021_found` | bool | 1.0 if ISX021-specific controls (LED_LEVEL, BYPASS, WINDOW_INTEG) are present |
@@ -51,7 +51,7 @@ Registry: `t17-control-sweep` in [test_registry.cpp](../../../source/backend/cor
 For each combination of ll∈{0,1}, bp∈{0,1}, wi∈{0,1}:
 
 | Metric Key Pattern | Unit | Description |
-|-------------------|------|-------------|
+| ------------------ | ---- | ----------- |
 | `ll{0\|1}_bp{0\|1}_wi{0\|1}_mean_ms` | ms | Mean capture latency for this control combination |
 
 Example metric keys: `ll0_bp0_wi0_mean_ms`, `ll0_bp0_wi1_mean_ms`, `ll0_bp1_wi0_mean_ms`, ..., `ll1_bp1_wi1_mean_ms`
@@ -60,7 +60,7 @@ Example metric keys: `ll0_bp0_wi0_mean_ms`, `ll0_bp0_wi1_mean_ms`, `ll0_bp1_wi0_
 
 ### Control inventory (one line per control)
 
-```
+```text
 exposure_absolute [0x009a0902] min=1 max=10000 step=1 def=166 cur=166
 gain [0x009a0914] min=0 max=255 step=1 def=0 cur=0
 isx021_led_level [0x009a206d] min=0 max=1 step=1 def=0 cur=0
@@ -70,7 +70,7 @@ isx021_window_integ [0x009a2068] min=0 max=1 step=1 def=0 cur=0 [RO]
 
 ### ISX021 sweep results
 
-```
+```text
 ll0_bp0_wi0: n=20 mean=34.5ms
 ll0_bp0_wi1: n=18 mean=36.2ms
 ll0_bp1_wi0: n=20 mean=33.1ms
@@ -80,7 +80,7 @@ ll0_bp1_wi0: n=20 mean=33.1ms
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| ------ | --------- |
 | **Pass** | Control enumeration succeeds (with or without ISX021 sweep) |
 | **Fail** | Cannot open the device |
 
@@ -98,7 +98,7 @@ This test always passes if the device can be opened. It is a characterization/in
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | "Cannot open device" | Device busy, permissions issue, or invalid path |
 | 0 controls enumerated | Driver does not implement VIDIOC_QUERYCTRL, or camera has no configurable controls |
 | ISX021 controls found but sweep captures fail | Control state puts sensor in an incompatible mode; STREAMON succeeds but no frames arrive |

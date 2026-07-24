@@ -31,7 +31,7 @@ Registry: `t19-sequence-continuity` in [test_registry.cpp](../../../source/backe
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `sample_count` | 100 | count | Number of frames to capture. |
 | `capture_timeout_ms` | 100 | ms | Per-frame poll timeout. |
 | `sample_interval_ms` | 100 | ms | Delay between consecutive captures. |
@@ -39,7 +39,7 @@ Registry: `t19-sequence-continuity` in [test_registry.cpp](../../../source/backe
 ## Output Metrics
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `frames_captured` | count | Total frames successfully received. |
 | `dropped_frames` | count | Sum of all sequence gaps (total missing frames). |
 | `max_gap` | count | Largest single sequence jump (frames missing in one burst). |
@@ -48,7 +48,7 @@ Registry: `t19-sequence-continuity` in [test_registry.cpp](../../../source/backe
 
 ## Report Details
 
-```
+```text
 Sequence range: 1042 → 1141
 ```
 
@@ -57,7 +57,7 @@ Shows the first and last `v4l2_buffer.sequence` values in the capture window.
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| -------- | ----------- |
 | **Pass** | `dropped_frames == 0` AND `duplicates == 0` AND `ts_non_monotonic == 0` |
 | **Warn** | Any anomaly present but `dropped_frames ≤ max_dropped_frames` AND `ts_non_monotonic ≤ max_non_monotonic` |
 | **Fail** | `dropped_frames > max_dropped_frames` OR `ts_non_monotonic > max_non_monotonic` |
@@ -76,7 +76,7 @@ Default thresholds: `max_dropped_frames = 5`, `max_non_monotonic = 0`.
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | High `dropped_frames` with steady latency | Application not re-queuing buffers; increase buffer count or reduce processing time. |
 | `max_gap` equals total `dropped_frames` | One large burst of drops — check for a competing process monopolising USB bandwidth at that moment. |
 | `duplicates > 0` | Driver/firmware regression; camera reset mid-stream; or a hardware issue where the sensor restarts its counter. |

@@ -36,7 +36,7 @@ Registry: `t24-max-fps` in [test_registry.cpp](../../../source/backend/core/src/
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `duration_sec` | 10 | s | Total timed capture duration. |
 | `warmup_frames` | 20 | count | Frames captured during warmup (no timing). |
 | `poll_timeout_ms` | 100 | ms | Per-capture poll timeout. |
@@ -46,7 +46,7 @@ Registry: `t24-max-fps` in [test_registry.cpp](../../../source/backend/core/src/
 ### Rate metrics
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `sustained_fps` | fps | Total frames received / elapsed seconds. The headline throughput number. |
 | `max_window_fps` | fps | Peak frame rate observed in any 1-second sliding window. |
 | `send_rate` | fps | Trigger sends per second achieved. |
@@ -58,7 +58,7 @@ Registry: `t24-max-fps` in [test_registry.cpp](../../../source/backend/core/src/
 ### Latency statistics (`latency_*`)
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `latency_mean` | ms | Mean capture latency for successful frames. |
 | `latency_stddev` | ms | Standard deviation of capture latency. |
 | `latency_min` | ms | Minimum capture latency. |
@@ -68,7 +68,7 @@ Registry: `t24-max-fps` in [test_registry.cpp](../../../source/backend/core/src/
 
 ## Report Details
 
-```
+```text
 Duration: 10s
 Sustained FPS: 28
 Peak window FPS: 31
@@ -78,7 +78,7 @@ Drop rate: 3%
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| -------- | ----------- |
 | **Pass** | `drop_pct < 5%` |
 | **Warn** | `drop_pct < 20%` |
 | **Fail** | `drop_pct ≥ 20%` |
@@ -95,7 +95,7 @@ Drop rate: 3%
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | `drop_pct` > 20% | Trigger rate exceeds what the sensor + driver can deliver. The sensor's maximum frame rate is lower than the test's trigger rate. |
 | `sustained_fps` far below expected | USB bandwidth saturation (especially with high-resolution uncompressed); try a lower resolution or MJPEG. |
 | `max_window_fps` = 0 or very low | Camera not responding to triggers at all; verify trigger wiring and that the sensor is in triggered (external sync) mode. |

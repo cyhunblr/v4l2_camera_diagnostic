@@ -28,7 +28,7 @@ Registry: `t10-memory-throughput` in [test_registry.cpp](../../../source/backend
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| --- | ------- | ---- | ----------- |
 | `benchmark_reps` | 100 | count | Number of memcpy repetitions per benchmark variant |
 
 ## Output Metrics
@@ -36,7 +36,7 @@ Registry: `t10-memory-throughput` in [test_registry.cpp](../../../source/backend
 ### Fixed metrics
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ---------- | ---- | ----------- |
 | `frame_size_bytes` | bytes | Size of a single device buffer (frame) |
 
 ### Primary buffer metrics (mmap or dmabuf-as-mmap)
@@ -44,7 +44,7 @@ Registry: `t10-memory-throughput` in [test_registry.cpp](../../../source/backend
 The prefix is `mmap` when the backend is Dmabuf, or the backend name (e.g. `mmap`) otherwise.
 
 | Metric Key Pattern | Unit | Description |
-|-------------------|------|-------------|
+| ------------------- | ------ | ------------- |
 | `{prefix}_full_mbps` | MB/s | Full-frame memcpy throughput |
 | `{prefix}_4k_mbps` | MB/s | 4 KB memcpy throughput |
 | `{prefix}_64k_mbps` | MB/s | 64 KB memcpy throughput |
@@ -52,7 +52,7 @@ The prefix is `mmap` when the backend is Dmabuf, or the backend name (e.g. `mmap
 ### DMA buffer metrics (only when dmabuf mapping available)
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `dmabuf_full_mbps` | MB/s | Full-frame memcpy from DMA pointer |
 | `dmabuf_4k_mbps` | MB/s | 4 KB memcpy from DMA pointer |
 | `dmabuf_64k_mbps` | MB/s | 64 KB memcpy from DMA pointer |
@@ -60,7 +60,7 @@ The prefix is `mmap` when the backend is Dmabuf, or the backend name (e.g. `mmap
 
 ## Report Details
 
-```
+```text
 Buffer size: 3686400 bytes
 mmap_full: 4521 MB/s
 mmap_4k: 12043 MB/s
@@ -73,7 +73,7 @@ dmabuf_64k: 5421 MB/s
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| ------ | --------- |
 | **Pass** | Benchmark completes successfully on at least the primary buffer |
 | **Fail** | Buffer setup fails or no mapped buffer data is available |
 
@@ -90,7 +90,7 @@ This test does not use warn/fail thresholds on throughput values — it is an in
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | "Buffer setup failed" | Device busy, insufficient memory, or invalid backend for this driver |
 | "No mapped buffers available" | Driver allocated buffers but mmap returned NULL (kernel/driver bug) |
 | Missing dmabuf metrics | Backend is not Dmabuf or driver does not export DMA-BUF file descriptors |

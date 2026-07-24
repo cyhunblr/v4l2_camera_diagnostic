@@ -30,7 +30,7 @@ Registry: `t26-cold-start` in [test_registry.cpp](../../../source/backend/core/s
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `cycles` | 10 | count | Number of independent open→capture→close cycles. |
 | `max_frames_per_cycle` | 30 | count | Maximum frames captured per cycle to search for stabilisation. |
 | `stability_threshold_pct` | 15.0 | % | Allowable deviation from steady-state mean to consider a frame "stable". |
@@ -38,7 +38,7 @@ Registry: `t26-cold-start` in [test_registry.cpp](../../../source/backend/core/s
 ## Output Metrics
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `warmup_mean_frames` | count | Mean number of frames before latency stabilises (averaged over all cycles). |
 | `warmup_max_frames` | count | Worst-case warmup — the cycle with the most frames before reaching stability. |
 | `cycles_completed` | count | Number of cycles where a session was successfully opened and frames captured. |
@@ -47,7 +47,7 @@ Registry: `t26-cold-start` in [test_registry.cpp](../../../source/backend/core/s
 
 Per-cycle lines showing the warmup frame count:
 
-```
+```text
 cycle  1: warmup=3 frames
 cycle  2: warmup=2 frames
 cycle  3: warmup=4 frames
@@ -57,14 +57,14 @@ cycle  4: warmup=3 frames
 
 If a cycle fails to open, a detail line reports the error:
 
-```
+```text
 cycle  5: session failed — Cannot open device: Device or resource busy
 ```
 
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| -------- | ----------- |
 | **Pass** | `warmup_mean_frames ≤ 3` — "Fast warm-up" |
 | **Pass** | `warmup_mean_frames ≤ 10` — "Moderate warm-up" |
 | **Warn** | `warmup_mean_frames > 10` — "Slow warm-up" |
@@ -84,7 +84,7 @@ Note: This test does not have threshold-based Pass/Fail from the threshold regis
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | `warmup_mean_frames` equals `max_frames_per_cycle` | Camera never reaches stable latency within 30 frames. Increase `max_frames_per_cycle`, loosen `stability_threshold_pct`, or investigate sensor auto-exposure oscillation. |
 | All cycles fail ("session failed") | Device not releasing resources between cycles; driver may need time between close and re-open. Could also be a permission issue or device removed. |
 | High variance in warmup counts | Non-deterministic sensor behaviour (auto-exposure convergence depends on scene content at start); test under controlled lighting for repeatable results. |

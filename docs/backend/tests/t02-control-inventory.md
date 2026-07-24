@@ -32,7 +32,7 @@ No configurable parameters.
 ## Output Metrics
 
 | Key | Unit | Description |
-|-----|------|-------------|
+| --- | ---- | ----------- |
 | `control_count` | count | Total number of non-disabled controls enumerated |
 | `writable_count` | count | Number of controls that are not read-only |
 
@@ -40,12 +40,13 @@ No configurable parameters.
 
 Each control produces one detail line in this format:
 
-```
+```text
 <name> [0x<hex_id>] min=<min> max=<max> step=<step> default=<default> current=<current> [RO]
 ```
 
 Examples:
-```
+
+```text
 Brightness [0x00980900] min=0 max=255 step=1 default=128 current=128
 Exposure (Absolute) [0x009a0902] min=1 max=10000 step=1 default=166 current=166 [RO]
 ```
@@ -53,7 +54,7 @@ Exposure (Absolute) [0x009a0902] min=1 max=10000 step=1 default=166 current=166 
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| ------ | --------- |
 | **Pass** | Device was opened and controls were enumerated successfully (always passes if device opens) |
 | **Fail** | Cannot open device (permission error or invalid path) |
 
@@ -67,7 +68,7 @@ Exposure (Absolute) [0x009a0902] min=1 max=10000 step=1 default=166 current=166 
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | "Cannot open device" | Device node missing or insufficient permissions |
 | `control_count = 0` | Driver does not implement the control framework (very old or minimal driver) |
 | Missing expected ISX021 controls | Wrong device node, or sensor not fully initialized by firmware |

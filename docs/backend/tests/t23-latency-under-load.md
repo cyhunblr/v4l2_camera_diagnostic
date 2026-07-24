@@ -35,7 +35,7 @@ Registry: `t23-latency-under-load` in [test_registry.cpp](../../../source/backen
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `sample_count` | 30 | count | Frames captured in each phase (baseline and load). |
 | `load_threads` | 4 | count | Number of CPU-saturating threads during load phase. |
 | `baseline_timeout_ms` | 100 | ms | Poll timeout for baseline captures. |
@@ -47,7 +47,7 @@ Registry: `t23-latency-under-load` in [test_registry.cpp](../../../source/backen
 ### Baseline latency statistics (`baseline_latency_*`)
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `baseline_latency_mean` | ms | Mean latency during idle system. |
 | `baseline_latency_stddev` | ms | Standard deviation of baseline latency. |
 | `baseline_latency_min` | ms | Minimum baseline latency. |
@@ -59,7 +59,7 @@ Registry: `t23-latency-under-load` in [test_registry.cpp](../../../source/backen
 ### Under-load latency statistics (`load_latency_*`)
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `load_latency_mean` | ms | Mean latency under CPU stress. |
 | `load_latency_stddev` | ms | Standard deviation of load latency. |
 | `load_latency_min` | ms | Minimum load latency. |
@@ -71,7 +71,7 @@ Registry: `t23-latency-under-load` in [test_registry.cpp](../../../source/backen
 ### Delta metrics
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `delta_mean_ms` | ms | `load_latency_mean − baseline_latency_mean`. |
 | `delta_p95_ms` | ms | `load_latency_p95 − baseline_latency_p95`. The primary verdict metric. |
 
@@ -82,7 +82,7 @@ No explicit detail lines are pushed. The summary message reports the p95 delta a
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| -------- | ----------- |
 | **Pass** | `delta_p95_ms < pass_delta_p95_ms` |
 | **Warn** | `delta_p95_ms < warn_delta_p95_ms` |
 | **Fail** | `delta_p95_ms ≥ warn_delta_p95_ms` |
@@ -91,7 +91,7 @@ No explicit detail lines are pushed. The summary message reports the p95 delta a
 Default thresholds:
 
 | Threshold | Default |
-|-----------|---------|
+| --------- | ------- |
 | `pass_delta_p95_ms` | 5.0 |
 | `warn_delta_p95_ms` | 20.0 |
 
@@ -107,7 +107,7 @@ Default thresholds:
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | `delta_p95_ms` > 20 ms | Camera interrupt handler or DMA completion shares CPU with stress threads. Pin camera IRQ to a dedicated core or raise its priority. |
 | `load_captures = 0` | Capture thread starved entirely; all polls timed out. Increase `load_timeout_ms` or assign the capture thread RT priority (`SCHED_FIFO`). |
 | `baseline_latency` already high (> 30 ms) | Pipeline overhead even without load; the delta may look small but absolute latency is problematic. Address baseline first. |

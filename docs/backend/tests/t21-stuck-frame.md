@@ -30,7 +30,7 @@ Registry: `t21-stuck-frame` in [test_registry.cpp](../../../source/backend/core/
 ## Parameters
 
 | Key | Default | Unit | Description |
-|-----|---------|------|-------------|
+| ----- | --------- | ------ | ------------- |
 | `sample_count` | 50 | count | Maximum frames to capture and compare. |
 | `compare_bytes` | 4096 | bytes | Number of leading bytes compared between consecutive frames. |
 | `capture_timeout_ms` | 100 | ms | Per-frame poll timeout. |
@@ -38,7 +38,7 @@ Registry: `t21-stuck-frame` in [test_registry.cpp](../../../source/backend/core/
 ## Output Metrics
 
 | Metric Key | Unit | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `frames_tested` | count | Frames successfully captured and compared (may be less than `sample_count` if some captures time out). |
 | `identical_pairs` | count | Number of consecutive frame pairs with identical content in the comparison window. |
 | `max_identical_run` | count | Longest consecutive streak of identical frames. |
@@ -50,7 +50,7 @@ No explicit detail lines are pushed. The summary message describes the outcome.
 ## Verdict Logic
 
 | Status | Condition |
-|--------|-----------|
+| -------- | ----------- |
 | **Pass** | `identical_pairs == 0` — every frame is unique. |
 | **Warn** | `identical_pairs > 0` but `max_identical_run < max_identical_run` threshold. |
 | **Fail** | `max_identical_run ≥ max_identical_run` threshold (default: 5), or fewer than 2 frames captured. |
@@ -68,7 +68,7 @@ Default threshold: `max_identical_run = 5`.
 ## Failure Modes
 
 | Symptom | Likely Cause |
-|---------|--------------|
+| --------- | -------------- |
 | `max_identical_run` ≥ threshold | Sensor/ISP frozen. Possible firmware hang, clock loss to sensor, or I²C communication failure preventing new frame production. |
 | `identical_pairs` equals `frames_tested - 1` | Camera is completely stuck for the entire capture window. Power-cycle or driver reload required. |
 | `frames_tested` much less than `sample_count` | Many capture timeouts; the camera is intermittently delivering frames. May precede a full stuck condition. |
