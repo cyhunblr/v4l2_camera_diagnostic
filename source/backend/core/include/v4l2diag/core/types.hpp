@@ -66,6 +66,8 @@ struct CameraRunResult {
   std::string trigger_channel_id;
   std::string trigger_description;
   TriggerMode trigger_mode = TriggerMode::FreeRun;
+  double trigger_rate_hz = 30.0;
+  double pulse_width_ms = 13.0;
   std::vector<MemoryBackend> memory_backends;
   std::vector<TestResult> tests;
 };

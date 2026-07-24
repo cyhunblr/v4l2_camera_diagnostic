@@ -2476,6 +2476,8 @@ CameraRunResult DiagnosticRunner::run_camera(const RunConfig::CameraConfig &came
   camera_result.profile_id = camera.profile_id;
   camera_result.trigger_channel_id = camera.trigger_channel_id;
   camera_result.trigger_mode = config.trigger_mode;
+  camera_result.trigger_rate_hz = profile.defaults.trigger_rate_hz;
+  camera_result.pulse_width_ms = profile.defaults.pulse_width_ms;
   camera_result.memory_backends = config.memory_backends;
 
   std::unique_ptr<TriggerSource> trigger;

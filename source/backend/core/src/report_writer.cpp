@@ -96,6 +96,8 @@ void write_json(const RunResult &result, const std::string &path) {
     out << "      \"trigger_mode\": \"" << to_string(camera.trigger_mode) << "\",\n";
     out << "      \"trigger_channel_id\": \"" << json_escape(camera.trigger_channel_id) << "\",\n";
     out << "      \"trigger_description\": \"" << json_escape(camera.trigger_description) << "\",\n";
+    out << "      \"trigger_rate_hz\": " << camera.trigger_rate_hz << ",\n";
+    out << "      \"pulse_width_ms\": " << camera.pulse_width_ms << ",\n";
     out << "      \"memory_backends\": [";
     for (std::size_t bi = 0; bi < camera.memory_backends.size(); ++bi) {
       if (bi) {
@@ -297,6 +299,12 @@ table.overview .summary-text { color: #475569; }
     if (!result.cameras[0].trigger_description.empty()) {
       out << "<div class=\"meta-item\"><div class=\"label\">Trigger Channel</div><div class=\"value\">"
           << html_escape(result.cameras[0].trigger_description) << "</div></div>";
+    }
+    if (result.cameras[0].trigger_mode != TriggerMode::FreeRun) {
+      out << "<div class=\"meta-item\"><div class=\"label\">Trigger Rate</div><div class=\"value\">"
+          << std::to_string(static_cast<int>(result.cameras[0].trigger_rate_hz)) << " Hz</div></div>";
+      out << "<div class=\"meta-item\"><div class=\"label\">Pulse Width</div><div class=\"value\">"
+          << std::to_string(static_cast<int>(result.cameras[0].pulse_width_ms)) << " ms</div></div>";
     }
   }
   out << "</div></div>";
