@@ -14,7 +14,13 @@ export function ConfirmDialog({ dialog, onClose }: Props) {
         <p>{dialog.message}</p>
         <div className="dialog-actions">
           <button className="dialog-cancel" onClick={onClose}>Cancel</button>
-          <button className={`dialog-confirm ${dialog.variant}`} onClick={() => { dialog.onConfirm(); onClose(); }}>
+          <button className={`dialog-confirm ${dialog.variant}`} onClick={() => {
+            try {
+              dialog.onConfirm();
+            } finally {
+              onClose();
+            }
+          }}>
             {dialog.confirmLabel}
           </button>
         </div>

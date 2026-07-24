@@ -87,7 +87,11 @@ function channelTitle(channel: TriggerChannel) {
 
 function channelMetadata(channel: TriggerChannel) {
   if (channel.type === "hardware" && channel.gpio) {
-    return channel.gpio?.description || "";
+    const identity = `gpiochip${channel.gpio.chip_id} · line ${channel.gpio.line_number}`;
+    const description = channel.gpio.description && channel.gpio.description !== channel.name
+      ? channel.gpio.description
+      : "";
+    return description ? `${identity} · ${description}` : identity;
   }
   const selector = channel.control_device;
   return selector?.kind === "capture"
@@ -129,6 +133,12 @@ export function ProfileSelectionPage({
   const [controlDevices, setControlDevices] = useState<ControlDevice[]>([]);
 
   const selectedProfile = profiles.find((p) => p.id === singleProfileId);
+  const [triggerRateDraft, setTriggerRateDraft] = useState(String(selectedProfile?.defaults.trigger_rate_hz ?? 30));
+  const [pulseWidthDraft, setPulseWidthDraft] = useState(String(selectedProfile?.defaults.pulse_width_ms ?? 13));
+  useEffect(() => {
+    setTriggerRateDraft(String(selectedProfile?.defaults.trigger_rate_hz ?? 30));
+    setPulseWidthDraft(String(selectedProfile?.defaults.pulse_width_ms ?? 13));
+  }, [selectedProfile?.id, selectedProfile?.defaults.trigger_rate_hz, selectedProfile?.defaults.pulse_width_ms]);
   const [profileId, setProfileId] = useState("");
   const [profileName, setProfileName] = useState("");
   const [description, setDescription] = useState("");
@@ -280,6 +290,28 @@ export function ProfileSelectionPage({
         const json = await response.json();
         throw new Error(json.error ?? "Failed to save routing defaults.");
       }
+    }
+    await onProfilesChanged();
+    onError(null);
+  }
+
+  async function applyTriggerTiming() {
+    if (!selectedProfile) return;
+    const rate = Number(triggerRateDraft);
+    const pulse = Number(pulseWidthDraft);
+    if (!Number.isFinite(rate) || rate <= 0) {
+      onError("Trigger rate must be a number greater than 0.");
+      return;
+    }
+    if (!Number.isFinite(pulse) || pulse <= 0) {
+      onError("Pulse width must be a number greater than 0.");
+      return;
+    }
+    const updated = { ...selectedProfile, defaults: { ...selectedProfile.defaults, trigger_rate_hz: rate, pulse_width_ms: pulse } };
+    const response = await api.updateProfile(updated);
+    if (!response.ok) {
+      const json = await response.json();
+      throw new Error(json.error ?? "Failed to update trigger timing.");
     }
     await onProfilesChanged();
     onError(null);
@@ -538,25 +570,24 @@ export function ProfileSelectionPage({
             <label>
               Trigger Rate
               <div className="input-with-unit">
-                <input type="number" min="1" max="1000" step="1" value={selectedProfile?.defaults.trigger_rate_hz ?? 30} onChange={(e) => {
-                  if (!selectedProfile) return;
-                  const updated = { ...selectedProfile, defaults: { ...selectedProfile.defaults, trigger_rate_hz: Number(e.target.value) } };
-                  api.updateProfile(updated).then(() => onProfilesChanged());
-                }} />
+                <input type="number" min="1" max="1000" step="1" value={triggerRateDraft}
+                       onChange={(e) => setTriggerRateDraft(e.target.value)} />
                 <span className="unit">Hz</span>
               </div>
             </label>
             <label>
               Pulse Width
               <div className="input-with-unit">
-                <input type="number" min="1" max="100" step="0.5" value={selectedProfile?.defaults.pulse_width_ms ?? 13} onChange={(e) => {
-                  if (!selectedProfile) return;
-                  const updated = { ...selectedProfile, defaults: { ...selectedProfile.defaults, pulse_width_ms: Number(e.target.value) } };
-                  api.updateProfile(updated).then(() => onProfilesChanged());
-                }} />
+                <input type="number" min="1" max="100" step="0.5" value={pulseWidthDraft}
+                       onChange={(e) => setPulseWidthDraft(e.target.value)} />
                 <span className="unit">ms</span>
               </div>
             </label>
+            <button className="primary trigger-timing-set"
+                    disabled={!selectedProfile}
+                    onClick={() => applyTriggerTiming().catch((error: Error) => onError(error.message))}>
+              Set
+            </button>
           </div>
         </section>
       )}

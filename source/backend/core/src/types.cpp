@@ -179,7 +179,7 @@ std::string utc_timestamp() {
   std::tm tm{};
   gmtime_r(&now, &tm);
   char buffer[32];
-  std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S UTC", &tm);
+  std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &tm);
   return buffer;
 }
 

@@ -563,8 +563,13 @@ button:disabled {
 
 .trigger-timing-row {
   display: flex;
+  align-items: flex-end;
   gap: 1.5rem;
   padding: 0.5rem 0;
+}
+
+.trigger-timing-set {
+  margin-left: auto;
 }
 
 .trigger-timing-row label {

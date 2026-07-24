@@ -163,6 +163,10 @@ void write_markdown(const RunResult &result, const std::string &path) {
     if (!camera.trigger_description.empty()) {
       out << "- Trigger detail: `" << camera.trigger_description << "`\n";
     }
+    if (camera.trigger_mode != TriggerMode::FreeRun) {
+      out << "- Trigger rate: `" << std::fixed << std::setprecision(2) << camera.trigger_rate_hz << " Hz`\n";
+      out << "- Pulse width: `" << std::fixed << std::setprecision(2) << camera.pulse_width_ms << " ms`\n";
+    }
     out << "- Backends:";
     for (auto backend : camera.memory_backends) {
       out << " `" << to_string(backend) << "`";
@@ -276,6 +280,7 @@ table.overview .summary-text { color: #475569; }
                @page { margin: 15mm 10mm; size: A4; } }
 </style></head><body>
 <button class="export-pdf-btn" onclick='window.print()'>Export as PDF</button>
+<button class="export-pdf-btn" onclick='fetch("/api/dmesg").then(r=>r.text()).then(t=>{const b=new Blob([t],{type:"text/plain"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="dmesg.txt";a.click();URL.revokeObjectURL(u)}).catch(()=>alert("Failed to export dmesg"))'>Export DMESG</button>
 <div class="container">
 )";
 
@@ -301,10 +306,13 @@ table.overview .summary-text { color: #475569; }
           << html_escape(result.cameras[0].trigger_description) << "</div></div>";
     }
     if (result.cameras[0].trigger_mode != TriggerMode::FreeRun) {
-      out << "<div class=\"meta-item\"><div class=\"label\">Trigger Rate</div><div class=\"value\">"
-          << std::to_string(static_cast<int>(result.cameras[0].trigger_rate_hz)) << " Hz</div></div>";
-      out << "<div class=\"meta-item\"><div class=\"label\">Pulse Width</div><div class=\"value\">"
-          << std::to_string(static_cast<int>(result.cameras[0].pulse_width_ms)) << " ms</div></div>";
+      std::ostringstream rate_ss, pulse_ss;
+      rate_ss << std::fixed << std::setprecision(2) << result.cameras[0].trigger_rate_hz;
+      pulse_ss << std::fixed << std::setprecision(2) << result.cameras[0].pulse_width_ms;
+      out << "<div class=\"meta-item\"><div class=\"label\">Trigger Rate</div><div class=\"value\">" << rate_ss.str()
+          << " Hz</div></div>";
+      out << "<div class=\"meta-item\"><div class=\"label\">Pulse Width</div><div class=\"value\">" << pulse_ss.str()
+          << " ms</div></div>";
     }
   }
   out << "</div></div>";
