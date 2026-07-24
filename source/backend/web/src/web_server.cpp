@@ -734,26 +734,23 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
 
   if (method == "GET" && path == "/api/dmesg") {
     *content_type = "text/plain; charset=utf-8";
-    FILE *pipe = popen("dmesg 2>&1", "r");
-    if (!pipe) {
-      *status_code = MHD_HTTP_INTERNAL_SERVER_ERROR;
-      return "Failed to execute dmesg.\n";
+    // Try dmesg first, fall back to journalctl -k if permission denied.
+    const char *commands[] = {"dmesg 2>&1", "journalctl -k --no-pager 2>&1"};
+    for (const char *cmd : commands) {
+      FILE *pipe = popen(cmd, "r");
+      if (!pipe)
+        continue;
+      std::string output;
+      char buf[4096];
+      while (fgets(buf, sizeof(buf), pipe) != nullptr) {
+        output += buf;
+      }
+      if (pclose(pipe) == 0 && !output.empty()) {
+        return output;
+      }
     }
-    std::string output;
-    char buf[4096];
-    while (fgets(buf, sizeof(buf), pipe) != nullptr) {
-      output += buf;
-    }
-    const int exit_status = pclose(pipe);
-    if (exit_status != 0) {
-      *status_code = MHD_HTTP_INTERNAL_SERVER_ERROR;
-      return "dmesg failed: " + output;
-    }
-    if (output.empty()) {
-      *status_code = MHD_HTTP_NO_CONTENT;
-      return "";
-    }
-    return output;
+    *status_code = MHD_HTTP_INTERNAL_SERVER_ERROR;
+    return "Cannot read kernel log. Both dmesg and journalctl -k failed (permission denied?).\n";
   }
 
   if (method == "GET" && path == "/api/devices") {
