@@ -1,0 +1,72 @@
+name: Pull Request Check
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+concurrency:
+  group: pr-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Check PR title against Conventional Commits specification.
+  # ---------------------------------------------------------------------
+  pr-title-check:
+    name: Check PR Title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR Title
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+
+  # ---------------------------------------------------------------------
+  # Verify that the Push CI workflow passed for the PR HEAD commit.
+  # ---------------------------------------------------------------------
+  check-ci-status:
+    name: Verify Push CI Status
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Push CI Workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          echo "Checking Push CI status for PR HEAD commit: ${HEAD_SHA}"
+
+          MAX_RETRIES=60
+          RETRY_COUNT=0
+          RUN_ID=""
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            RUN_ID=$(gh run list --repo "${GITHUB_REPOSITORY}" --commit "${HEAD_SHA}" --workflow "ci.yml" --json databaseId --jq '.[0].databaseId // empty')
+            if [ -n "$RUN_ID" ]; then
+              echo "Found Push CI Run ID: ${RUN_ID}"
+              break
+            fi
+            echo "Waiting for Push CI run to register... (Attempt $((RETRY_COUNT+1))/${MAX_RETRIES})"
+            sleep 10
+            RETRY_COUNT=$((RETRY_COUNT+1))
+          done
+
+          if [ -z "$RUN_ID" ]; then
+            echo "Error: Could not find Push CI run for commit ${HEAD_SHA} after 10 minutes."
+            exit 1
+          fi
+
+          echo "Watching Push CI run ${RUN_ID}..."
+          gh run watch "${RUN_ID}" --repo "${GITHUB_REPOSITORY}" --exit-status

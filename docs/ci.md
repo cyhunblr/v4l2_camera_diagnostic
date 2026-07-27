@@ -1,10 +1,11 @@
 # Continuous Integration
 
-`v4l2-camera-diagnostic` runs a single GitHub Actions workflow,
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml), on every push and
-pull request against `main` and `develop`. It builds and tests
-software that a hosted runner can exercise. Hardware-trigger diagnostics require
-a physical rig and are documented separately as an operator checklist in [`docs/backend/hardware-validation.md`](backend/hardware-validation.md).
+`v4l2-camera-diagnostic` utilizes two GitHub Actions workflows:
+
+- [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs full compilation, linting, and testing on every branch `push`.
+- [`.github/workflows/pr.yml`](../.github/workflows/pr.yml) runs on `pull_request` events to validate the PR title (Conventional Commits format) and verify that the Push CI run for the PR HEAD commit completed successfully, preventing duplicate heavy CI runs.
+
+Hardware-trigger diagnostics require a physical rig and are documented separately as an operator checklist in [`docs/backend/hardware-validation.md`](backend/hardware-validation.md).
 
 ## Jobs
 
