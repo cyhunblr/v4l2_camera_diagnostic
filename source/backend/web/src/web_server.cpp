@@ -1432,7 +1432,7 @@ void WebServer::execute_run(std::shared_ptr<RunState> run) {
 
   append_log(run, "info", "Master camera: " + run->config.master.path, run->config.master.path);
   for (const auto &slave : run->config.slaves) {
-    append_log(run, "info", "Slave camera (t25 only): " + slave.path, slave.path);
+    append_log(run, "info", "Slave camera (t24 only): " + slave.path, slave.path);
   }
 
   ProfileRegistry profiles(options_.config_directory);

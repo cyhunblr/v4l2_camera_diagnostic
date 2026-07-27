@@ -1,4 +1,4 @@
-# t26 — Cold Start
+# t25 — Cold Start
 
 **Layer:** 7 — Stability  
 **Category:** stability  
@@ -22,9 +22,9 @@ Characterises how many frames a camera needs after a fresh open/start cycle befo
 ## Implementation
 
 Function: `run_cold_start` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t26-cold-start` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t25-cold-start` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t26-cold-start.md`
+> The source file contains `// Docs: docs/backend/tests/t25-cold-start.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

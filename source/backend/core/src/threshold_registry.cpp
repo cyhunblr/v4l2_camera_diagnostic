@@ -239,7 +239,7 @@ std::map<std::string, TestThresholds> default_test_params() {
         {"full_warmup", 3},
         {"full_captures", 5},
         {"full_timeout_ms", 150},
-        // A freshly opened session discards its first frame (see t26), so the
+        // A freshly opened session discards its first frame (see t25), so the
         // rapid loop needs a warmup frame of its own before the measured capture.
         {"rapid_warmup", 1},
         {"rapid_timeout_ms", 200},
@@ -287,8 +287,8 @@ std::map<std::string, TestThresholds> default_test_params() {
         {"baseline_timeout_ms", 100},
         {"load_timeout_ms", 200},
         {"sample_interval_ms", 200}}},
-      {"t26-cold-start", {{"cycles", 10}, {"max_frames_per_cycle", 30}, {"stability_threshold_pct", 15.0}}},
-      {"t25-multi-camera", {{"sample_count", 50}, {"poll_timeout_ms", 200}}},
+      {"t24-multi-camera", {{"sample_count", 50}, {"poll_timeout_ms", 200}}},
+      {"t25-cold-start", {{"cycles", 10}, {"max_frames_per_cycle", 30}, {"stability_threshold_pct", 15.0}}},
   };
 }
 

@@ -76,9 +76,9 @@ std::vector<TestDefinition> built_in_tests() {
        "Runs a long capture session and detects drift or sustained misses.", true, false, true, false, false, true},
       {"t23-latency-under-load", "Latency under CPU load", "stability",
        "Measures trigger-to-DQBUF latency while all CPU cores are saturated.", true, false, false, false, false, true},
-      {"t25-multi-camera", "Multi-camera contention", "stability",
+      {"t24-multi-camera", "Multi-camera contention", "stability",
        "Measures cross-device latency jitter under concurrent capture.", true, false, true, false, false, true},
-      {"t26-cold-start", "Cold-start warm-up cost", "stability",
+      {"t25-cold-start", "Cold-start warm-up cost", "stability",
        "Measures frames needed to reach steady-state latency after STREAMON.", true, false, false, false, false, true},
   };
   for (auto &test : tests) {

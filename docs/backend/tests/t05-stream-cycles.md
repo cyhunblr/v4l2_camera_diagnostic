@@ -11,7 +11,7 @@ Exercises repeated STREAMON/STREAMOFF cycles to detect resource leaks, race cond
 ## How It Works
 
 1. **Full cycles (20 iterations):** Each cycle opens the device, starts streaming with 2 buffers, warms up (3 frames), captures 5 frames, and closes. A cycle is counted as a failure if any step fails or fewer than 5 frames are captured. The first-frame latency from each cycle is recorded.
-2. **Rapid cycles (50 iterations):** Each cycle opens the device, starts streaming, warms up (1 frame), captures a single frame (200ms timeout), and closes with a short delay between cycles. This stresses the open/close path. The warmup frame is required because every iteration opens a fresh session and therefore pays the cold-start cost measured by [t26](t26-cold-start.md) — sensors that discard their first frame after STREAMON would otherwise spend it on the measured capture and score 0.
+2. **Rapid cycles (50 iterations):** Each cycle opens the device, starts streaming, warms up (1 frame), captures a single frame (200ms timeout), and closes with a short delay between cycles. This stresses the open/close path. The warmup frame is required because every iteration opens a fresh session and therefore pays the cold-start cost measured by [t25](t25-cold-start.md) — sensors that discard their first frame after STREAMON would otherwise spend it on the measured capture and score 0.
 3. Results are compared against thresholds for full failure count and rapid success percentage.
 
 ## Implementation
@@ -77,4 +77,4 @@ Full: 20/20 OK. Rapid: 48/50 captured.
 | Increasing full_cycle_failures | Kernel resource leak — buffers or file descriptors not released properly |
 | rapid_cycles_ok ≪ rapid_cycles_total | Driver needs more than `rapid_pacing_ms` between STREAMOFF and the next open/start |
 | first_frame_latency degrades over time | Memory fragmentation or DMA channel exhaustion |
-| All rapid cycles fail | Driver cannot start streaming without a longer settle period, or the sensor discards more than `rapid_warmup` frames after STREAMON — cross-check [t26](t26-cold-start.md) and raise `rapid_warmup` to match |
+| All rapid cycles fail | Driver cannot start streaming without a longer settle period, or the sensor discards more than `rapid_warmup` frames after STREAMON — cross-check [t25](t25-cold-start.md) and raise `rapid_warmup` to match |

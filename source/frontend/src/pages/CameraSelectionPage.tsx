@@ -113,7 +113,7 @@ export function CameraSelectionPage({
           <div className="panel">
             <div className="panel-title">
               <Users size={18} />
-              <h3>Slaves (t25 Multi-Camera Only)</h3>
+              <h3>Slaves (t24 Multi-Camera Only)</h3>
             </div>
             <p className="panel-hint">
               Extra cameras that watch the master&apos;s trigger pulse for cross-device jitter measurement.

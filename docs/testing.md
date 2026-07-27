@@ -145,8 +145,8 @@ Use `scripts/setup-dev-env.sh` for contributor tooling; it requires the same
 
 ## Camera Diagnostic Tests
 
-The modular runner contains 26 registered diagnostics (23 fully implemented,
-3 pending implementation). Each ID in the inventory below links to a detailed
+The modular runner contains 25 registered diagnostics, all fully implemented.
+Each ID in the inventory below links to a detailed
 reference page under [`docs/backend/tests/`](backend/tests/) covering scope,
 inputs, output metrics, interpretation guidance, and a walkthrough of the
 implementation.
@@ -234,8 +234,8 @@ Tests are grouped into 7 logical layers that run in dependency order:
 | --- | --- | --- | --- |
 | t22-sustained-capture | Sustained capture stability | stability | long-running (60 s) |
 | t23-latency-under-load | Latency under CPU load | stability | |
-| t25-multi-camera | Multi-camera contention | stability | long-running; **not yet implemented** |
-| t26-cold-start | Cold-start warm-up cost | stability | **not yet implemented** |
+| t24-multi-camera | Multi-camera contention | stability | long-running |
+| t25-cold-start | Cold-start warm-up cost | stability | |
 
 Tests marked **not yet implemented** report `Skipped` at runtime.
 A test being reported as `Skipped` is always one of the following expected
@@ -257,8 +257,6 @@ test:
 - **Missing `linux/dma-buf.h`** — `t11` additionally compiles to a `Skipped`
   result ("linux/dma-buf.h not available...") on systems without the DMA-BUF
   sync header.
-- **Not-yet-implemented tests** — `t18`, `t25`, `t26` report `Skipped`
-  with a "not yet implemented" message until their implementations land.
 
 List everything the current binary knows about, with implementation status:
 

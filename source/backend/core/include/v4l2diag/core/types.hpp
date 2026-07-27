@@ -91,12 +91,12 @@ struct RunConfig {
     std::string trigger_channel_id;
   };
 
-  // The single camera under test: the full test suite (t01..t26 minus
-  // t25) runs against this camera only.
+  // The single camera under test: the full test suite (t01..t25 minus
+  // t24) runs against this camera only.
   CameraConfig master;
-  // Extra cameras that exist solely to participate in t25-multi-camera as
+  // Extra cameras that exist solely to participate in t24-multi-camera as
   // additional watchers of the master's (or their own, if on a different
-  // physical GPIO line) trigger pulse. Empty means t25 is skipped.
+  // physical GPIO line) trigger pulse. Empty means t24 is skipped.
   std::vector<CameraConfig> slaves;
   TriggerMode trigger_mode = TriggerMode::FreeRun;
   std::vector<MemoryBackend> memory_backends;
