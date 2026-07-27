@@ -67,7 +67,7 @@ DQBUF after STREAMOFF: failed errno=22 (Invalid argument)
 - `pollhup_raised = 1`: Less common; signals the stream endpoint has disconnected.
 - `dqbuf_failed = 1`: Correct behavior — no frames should be available after STREAMOFF.
 - `restreamon_ok = 0`: The driver cannot restart streaming after STREAMOFF — critical issue for real applications.
-- `recovery_ok < 3`: Recovery works but not all frames arrive — may indicate a timing issue in the recovery path.
+- `recovery_ok < 3`: Recovery works but not all frames arrive — may indicate a timing issue in the recovery path. If recovery_ok < expected, increase `warmup_count` (5–10 recommended for slow re-init drivers like tegra-video) or `poll_timeout_ms`. Some drivers need settling time after re-STREAMON.
 
 ## Failure Modes
 

@@ -64,7 +64,7 @@ DQBUF unexpectedly succeeded, sequence=0
 ## Interpretation Guide
 
 - `poll_returned = 0` and `dqbuf_failed = 1`: Driver correctly blocks delivery before STREAMON — healthy behavior.
-- `poll_returned > 0`: The driver's poll implementation incorrectly signals data availability. This may be a spurious wakeup or a driver bug.
+- `poll_returned > 0`: The driver's poll implementation incorrectly signals data availability. This may be a spurious wakeup or a driver quirk. Some drivers (tegra-video, uvcvideo) are known to return non-zero from poll() without STREAMON; this is a driver quirk, not a V4L2 spec violation, as long as DQBUF correctly fails.
 - `dqbuf_errno = 11 (EAGAIN)`: Standard response from a non-blocking fd with no buffer ready.
 - `dqbuf_errno = 22 (EINVAL)`: Some drivers return EINVAL instead of EAGAIN when not streaming — both are acceptable.
 - `dqbuf_failed = 0`: Critical failure — driver delivers frames before STREAMON, violating the V4L2 specification.

@@ -370,6 +370,31 @@ bool validate_threshold_config(const ThresholdConfig &config, std::string *error
       }
     }
   }
+  for (const auto &test : config.params) {
+    for (const auto &kv : test.second) {
+      if (!std::isfinite(kv.second)) {
+        return fail("param '" + test.first + "." + kv.first + "' must be a finite number");
+      }
+      if (kv.second < 0.0) {
+        return fail("param '" + test.first + "." + kv.first + "' must not be negative");
+      }
+      const bool is_time =
+          kv.first.find("timeout_ms") != std::string::npos || kv.first.find("interval_ms") != std::string::npos ||
+          kv.first.find("pacing_ms") != std::string::npos || kv.first.find("recovery_ms") != std::string::npos;
+      if (is_time && kv.second > 0.0 && kv.second < 1.0) {
+        return fail("param '" + test.first + "." + kv.first + "' must be >= 1 ms");
+      }
+      if (is_time && kv.second > 30000.0) {
+        return fail("param '" + test.first + "." + kv.first + "' exceeds 30 s safety limit");
+      }
+      const bool is_count = kv.first.find("_count") != std::string::npos ||
+                            kv.first.find("_cycles") != std::string::npos ||
+                            kv.first.find("_reps") != std::string::npos;
+      if (is_count && kv.second > 10000.0) {
+        return fail("param '" + test.first + "." + kv.first + "' exceeds 10000 count limit");
+      }
+    }
+  }
   return true;
 }
 

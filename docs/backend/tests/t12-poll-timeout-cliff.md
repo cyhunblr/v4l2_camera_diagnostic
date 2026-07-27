@@ -113,6 +113,7 @@ latency figures from other tests (e.g. `t13-trigger-latency`).
 - **safety_margin 0–5 ms**: Dangerously close. Temperature changes or system load spikes could push past the cliff.
 - **safety_margin < 0**: Production timeout is below the cliff — captures will fail in production.
 - **stability_confirmed = false**: Cliff position is not repeatable — pipeline has variable latency; the cliff may shift under load.
+- **cliff_total_ms**: The true minimum trigger-to-frame timeout budget. Since `trigger.send()` blocks for the pulse width before `poll()` begins, the actual latency from the GPIO rising edge to frame receipt is `cliff_ms + pulse_width_ms`. For production, set poll timeout to at least `cliff_total_ms + safety_margin` (e.g., if cliff_total=20ms and margin=30ms, use ≥50ms).
 
 ## Failure Modes
 

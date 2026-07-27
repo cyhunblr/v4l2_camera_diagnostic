@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Measures the end-to-end latency from trigger signal emission to frame dequeue (DQBUF). This is the fundamental latency metric for triggered camera systems — it captures the full pipeline delay including sensor integration, readout, DMA transfer, and kernel buffer management. The statistical distribution of this latency informs real-time system design and timeout configuration.
+Measures the end-to-end latency from trigger signal emission to frame dequeue (DQBUF). This is the fundamental latency metric for triggered camera systems — it captures the full pipeline delay including sensor integration, readout, DMA transfer, and kernel buffer management. The latency is measured from the GPIO rising edge (the instant `send_async()` drives the pin HIGH), not from after the pulse completes. The statistical distribution of this latency informs real-time system design and timeout configuration.
 
 ## How It Works
 
