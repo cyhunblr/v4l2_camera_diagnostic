@@ -4,6 +4,7 @@ import { SelectableCard } from "../components/SelectableCard";
 import { InfoPopover } from "../components/InfoPopover";
 
 const GROUP_SELECTORS = ["implemented", "stable", "all"];
+const BACKEND_OPTIONS = ["mmap", "dmabuf", "userptr"];
 
 type Props = {
   groupedTests: Array<[string, TestDefinition[]]>;
@@ -16,6 +17,8 @@ type Props = {
   includeExperimental: boolean;
   onIncludeExperimentalChange: (value: boolean) => void;
   triggerMode: TriggerMode;
+  backends: string[];
+  onToggleBackend: (backend: string) => void;
 };
 
 export function TestSelectionPage({
@@ -28,7 +31,9 @@ export function TestSelectionPage({
   onIncludeLongChange,
   includeExperimental,
   onIncludeExperimentalChange,
-  triggerMode
+  triggerMode,
+  backends,
+  onToggleBackend
 }: Props) {
   return (
     <div className="page">
@@ -38,6 +43,23 @@ export function TestSelectionPage({
           <h2>Test Selection</h2>
         </div>
       </header>
+
+      <div className="panel">
+        <div className="panel-title">
+          <h3>Memory Backend</h3>
+        </div>
+        <div className="choice-row compact">
+          {BACKEND_OPTIONS.map((backend) => (
+            <button
+              key={backend}
+              className={backends.includes(backend) ? "selected" : ""}
+              onClick={() => onToggleBackend(backend)}
+            >
+              {backend}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="panel">
         <div className="panel-title">

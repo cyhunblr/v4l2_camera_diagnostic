@@ -1,15 +1,20 @@
 # Uninstallation
 
 ```bash
-./uninstallation.sh [--purge] [--clean] [--yes] [--dry-run]
+./uninstallation.sh [--purge] [--clean] [--yes] [--dry-run] [--debug]
 ```
 
 By default the script asks two interactive yes/no questions (skipped, and
 treated as "no", when run non-interactively without `--yes`):
 
-- *"Remove user config, cache, and state?"* — corresponds to `--purge`.
 - *"Remove local build artifacts while preserving reports?"* — corresponds
   to `--clean`.
+- *"Remove user config, cache, and state?"* — corresponds to `--purge`.
+
+`--debug` prints each command (prefixed with `+`) and lets full command output
+flow through the terminal. Without `--debug`, the uninstaller prints compact
+step-based progress and expands captured command output only when a command
+fails.
 
 ## Always removed
 
@@ -19,7 +24,7 @@ Regardless of flags, these are deleted:
 | --- | --- |
 | `~/.local/bin/v4l2-camera-diagnostic` | CLI binary |
 | `~/.local/bin/v4l2-camera-diagnostic-web` | web app binary |
-| `~/.local/share/applications/v4l2-camera-diagnostic.desktop` | desktop entry |
+| `~/.local/share/applications/v4l2-camera-diagnostic.desktop` | legacy desktop entry, if present |
 | `~/.local/share/v4l2-camera-diagnostic/web` | installed web UI assets |
 | `~/.local/share/v4l2-camera-diagnostic/docs` | installed docs copy |
 

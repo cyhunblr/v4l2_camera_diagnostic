@@ -29,10 +29,9 @@ type Props = {
   viewedRunId: string | null;
   liveSummaries: TestSummary[];
   liveReportLinks: ReportLink[];
-  liveRunStatus: string;
 };
 
-export function ResultsPage({ viewedRunId, liveSummaries, liveReportLinks, liveRunStatus }: Props) {
+export function ResultsPage({ viewedRunId, liveSummaries, liveReportLinks }: Props) {
   const [historical, setHistorical] = useState<HistoricalResult | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -76,20 +75,13 @@ export function ResultsPage({ viewedRunId, liveSummaries, liveReportLinks, liveR
   const reportLinks = viewedRunId ? historical?.reportLinks ?? [] : liveReportLinks;
 
   return (
-    <div className="page">
+    <div className="page results-page">
       <header className="topbar">
         <div>
           <p className="eyebrow">{viewedRunId ? `Run ${viewedRunId}` : "Current Run"}</p>
-          <h2>Results{!viewedRunId && ` — ${liveRunStatus}`}</h2>
+          <h2>Results</h2>
         </div>
       </header>
-      <div className="panel results-panel full-height">
-        {viewedRunId && loading ? (
-          <div className="results-empty">Loading run results...</div>
-        ) : (
-          <ResultsTable summaries={summaries} />
-        )}
-      </div>
       {reportLinks.length > 0 && (
         <div className="report-bar">
           <FileDown size={14} />
@@ -99,6 +91,13 @@ export function ResultsPage({ viewedRunId, liveSummaries, liveReportLinks, liveR
           ))}
         </div>
       )}
+      <div className="panel results-panel full-height">
+        {viewedRunId && loading ? (
+          <div className="results-empty">Loading run results...</div>
+        ) : (
+          <ResultsTable summaries={summaries} />
+        )}
+      </div>
     </div>
   );
 }

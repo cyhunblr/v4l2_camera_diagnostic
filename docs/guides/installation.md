@@ -8,12 +8,14 @@ guessed from the script source.
 ## Usage
 
 ```bash
-./installation.sh [--dry-run]
+./installation.sh [--dry-run] [--debug]
 ```
 
-`--dry-run` prints every command the script would run (prefixed with `+`)
-without executing it — use it to preview the install on an unfamiliar
-machine.
+`--dry-run` previews the install without executing file-changing commands.
+`--debug` prints each command (prefixed with `+`) and lets full command output
+flow through the terminal. Without `--debug`, the installer prints compact
+step-based progress and expands captured command output only when a command
+fails.
 
 ## What it does
 
@@ -51,16 +53,14 @@ machine.
    | `~/.local/bin/v4l2-camera-diagnostic-web` | the web application — this is what end users run |
    | `~/.local/share/v4l2-camera-diagnostic/web` | built web UI assets |
    | `~/.local/share/v4l2-camera-diagnostic/docs` | a copy of this `docs/` tree |
-   | `~/.local/share/applications/v4l2-camera-diagnostic.desktop` | desktop launcher for environments that index user applications |
 
-   As part of this step, the installer runs
-   `sudo setcap cap_syslog+ep ~/.local/bin/v4l2-camera-diagnostic-web` so the
-   web app's **Export DMESG** button can read the kernel log even on systems
-   with `kernel.dmesg_restrict=1` (the common default). **This is the one
-   point in the whole script that may prompt for your sudo password** — if
-   you decline or it fails, installation still completes, but Export DMESG
-   in the browser will show "Failed to export dmesg" until you either grant
-   the capability manually or re-run `./installation.sh`:
+5. **Grants CAP_SYSLOG** (`sudo setcap cap_syslog+ep
+   ~/.local/bin/v4l2-camera-diagnostic-web`) so the web app's **Export
+   DMESG** button can read the kernel log even on systems with
+   `kernel.dmesg_restrict=1` (the common default). If this step fails,
+   installation still completes, but Export DMESG in the browser will show
+   "Failed to export dmesg" until you either grant the capability manually
+   or re-run `./installation.sh`:
 
    ```bash
    sudo setcap cap_syslog+ep ~/.local/bin/v4l2-camera-diagnostic-web
@@ -69,7 +69,13 @@ machine.
    (No capability is needed if `kernel.dmesg_restrict` is already `0` on
    your system, or if your user is in a group with kernel-log read access.)
 
-5. **Checks `PATH`** and prints a one-line notice if `~/.local/bin` is not
+   **The sudo password itself is asked once, up front, before any step
+   runs** — the installer checks at startup whether it will need `apt-get`
+   (for missing dependencies) or `setcap` (for this step) anywhere in the
+   run, and if so prompts immediately via `sudo -v` rather than waiting
+   until one of those commands is reached partway through the build.
+
+6. **Checks `PATH`** and prints a one-line notice if `~/.local/bin` is not
    already on it.
 
 ## Launch
@@ -80,11 +86,16 @@ From a terminal:
 v4l2-camera-diagnostic-web
 ```
 
-The installer also writes a desktop launcher to
-`~/.local/share/applications/v4l2-camera-diagnostic.desktop`. Desktop
-environments that index user applications may show **V4L2 Camera Diagnostic**
-in the application menu. The launcher points at the same binary, so either
-entry point starts a local server and opens the default browser.
+This starts a local server bound to `127.0.0.1` and opens the default browser.
+For access from another trusted device on the same LAN, bind the server to all
+interfaces and open the device's LAN IP from the other browser:
+
+```bash
+v4l2-camera-diagnostic-web --host 0.0.0.0 --port 8765
+```
+
+See [`docs/frontend/web-ui.md`](../frontend/web-ui.md#lan-access) for the LAN
+access notes.
 
 ## Uninstall
 

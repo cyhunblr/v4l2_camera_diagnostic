@@ -38,6 +38,8 @@ export function Sidebar({
   theme,
   onToggleTheme
 }: Props) {
+  const resultsDisabled = isRunning;
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -66,7 +68,13 @@ export function Sidebar({
         </button>
 
         <div className="nav-divider" />
-        <button type="button" className={activePage === "results" ? "active" : ""} onClick={() => onNavigate("results")}>
+        <button
+          type="button"
+          className={activePage === "results" ? "active" : ""}
+          onClick={() => onNavigate("results")}
+          disabled={resultsDisabled}
+          title={resultsDisabled ? "Results are available after the run finishes." : undefined}
+        >
           <History size={16} /> Results
         </button>
       </nav>
@@ -80,7 +88,7 @@ export function Sidebar({
         <option value="dashboard">Dashboard</option>
         {CONFIGURE_ITEMS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
         <option value="output">Live Output</option>
-        <option value="results">Results</option>
+        <option value="results" disabled={resultsDisabled}>Results</option>
       </select>
 
       <div className="sidebar-run-controls">

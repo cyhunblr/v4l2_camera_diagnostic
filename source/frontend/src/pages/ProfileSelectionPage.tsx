@@ -23,10 +23,14 @@ import {
   TriggerMode
 } from "../types";
 
-const BACKEND_OPTIONS = ["mmap", "dmabuf", "userptr"];
-
 type CameraNodeData = { title: string; path: string; metadata: string };
 type ChannelNodeData = { title: string; channelId: string; metadata: string; profile: string; mode: "hardware" | "software" };
+type PendingImport = {
+  profile: Profile;
+  mode: "original" | "new";
+  idDraft: string;
+  nameDraft: string;
+};
 
 function CameraNode({ data }: NodeProps<Node<CameraNodeData>>) {
   return (
@@ -72,8 +76,7 @@ type Props = {
   onAssignmentsChange: (assignments: CameraAssignment[]) => void;
   onProfilesChanged: () => Promise<void>;
   onError: (message: string | null) => void;
-  backends: string[];
-  onToggleBackend: (backend: string) => void;
+  onSuccess: (message: string) => void;
   requestConfirm: (state: Omit<ConfirmDialogState, "onConfirm"> & { onConfirm: () => void }) => void;
 };
 
@@ -109,6 +112,10 @@ function compatibleChannels(profile: Profile, mode: TriggerMode) {
   return mode === "free-run" ? [] : profile.trigger_channels.filter((channel) => channel.type === mode);
 }
 
+function sanitizeProfileId(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+}
+
 export function ProfileSelectionPage({
   devices,
   profiles,
@@ -122,19 +129,22 @@ export function ProfileSelectionPage({
   onAssignmentsChange,
   onProfilesChanged,
   onError,
-  backends,
-  onToggleBackend,
+  onSuccess,
   requestConfirm
 }: Props) {
   const [compactRouting, setCompactRouting] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
   const [controlDevices, setControlDevices] = useState<ControlDevice[]>([]);
 
   const selectedProfile = profiles.find((p) => p.id === singleProfileId);
   const [triggerRateDraft, setTriggerRateDraft] = useState(String(selectedProfile?.defaults.trigger_rate_hz ?? 30));
   const [pulseWidthDraft, setPulseWidthDraft] = useState(String(selectedProfile?.defaults.pulse_width_ms ?? 13));
+  const timingDirty = Boolean(selectedProfile) &&
+    (Number(triggerRateDraft) !== selectedProfile?.defaults.trigger_rate_hz ||
+      Number(pulseWidthDraft) !== selectedProfile?.defaults.pulse_width_ms);
   useEffect(() => {
     setTriggerRateDraft(String(selectedProfile?.defaults.trigger_rate_hz ?? 30));
     setPulseWidthDraft(String(selectedProfile?.defaults.pulse_width_ms ?? 13));
@@ -235,7 +245,10 @@ export function ProfileSelectionPage({
   function applySingleProfile(id: string) {
     onSingleProfileChange(id);
     const profile = profiles.find((item) => item.id === id);
-    if (!profile) return;
+    if (!profile) {
+      onAssignmentsChange(devices.map((device) => ({ path: device.path, profile_id: "", trigger_channel_id: "" })));
+      return;
+    }
     const channels = compatibleChannels(profile, triggerMode);
     onAssignmentsChange(devices.map((device) => {
       const binding = profile.camera_bindings.find((item) => matcherMatches(device, item.camera));
@@ -244,6 +257,14 @@ export function ProfileSelectionPage({
         : channels.length === 1 ? channels[0].id : "";
       return { path: device.path, profile_id: profile.id, trigger_channel_id: selectedChannel };
     }));
+  }
+
+  function handleSelectedProfileChange(id: string) {
+    if (assignmentMode === "single") {
+      applySingleProfile(id);
+      return;
+    }
+    onSingleProfileChange(id);
   }
 
   function connect(connection: Connection) {
@@ -271,10 +292,15 @@ export function ProfileSelectionPage({
 
   function resetRouting() {
     onAssignmentsChange(devices.map((device) => ({ path: device.path, profile_id: "", trigger_channel_id: "" })));
+    onSuccess("Routing cleared.");
   }
 
-  async function saveRoutingDefaults() {
+  async function saveRouting() {
     const updates = profiles.filter((profile) => assignments.some((assignment) => assignment.profile_id === profile.id));
+    if (updates.length === 0) {
+      onError("Assign at least one camera before saving routing.");
+      return;
+    }
     for (const profile of updates) {
       const newBindings = assignments
         .filter((assignment) => assignment.profile_id === profile.id)
@@ -288,11 +314,12 @@ export function ProfileSelectionPage({
       const response = await api.updateProfile({ ...profile, camera_bindings: newBindings });
       if (!response.ok) {
         const json = await response.json();
-        throw new Error(json.error ?? "Failed to save routing defaults.");
+        throw new Error(json.error ?? "Failed to save routing.");
       }
     }
     await onProfilesChanged();
     onError(null);
+    onSuccess(updates.length === 1 ? `Routing saved to ${updates[0].name}.` : `Routing saved to ${updates.length} profiles.`);
   }
 
   async function applyTriggerTiming() {
@@ -315,6 +342,7 @@ export function ProfileSelectionPage({
     }
     await onProfilesChanged();
     onError(null);
+    onSuccess(`Trigger timing saved to ${selectedProfile.name}.`);
   }
 
   function selectedControl(controlId = fireControlId) {
@@ -370,7 +398,7 @@ export function ProfileSelectionPage({
       camera_match: { driver: "", card: "", bus_info: "" },
       defaults: {
         trigger_mode: triggerMode,
-        memory_backends: backends,
+        memory_backends: [],
         test_selectors: ["implemented"],
         report_formats: ["json", "html"],
         trigger_rate_hz: 30,
@@ -388,6 +416,7 @@ export function ProfileSelectionPage({
     onSingleProfileChange(profile.id);
     setShowCreate(false);
     onError(null);
+    onSuccess(`Profile ${profile.name} created.`);
   }
 
   async function removeSelectedProfile() {
@@ -400,6 +429,7 @@ export function ProfileSelectionPage({
     resetRouting();
     setPendingDelete(false);
     await onProfilesChanged();
+    onSuccess("Profile deleted.");
   }
 
   async function testSelectedRouting() {
@@ -413,6 +443,7 @@ export function ProfileSelectionPage({
     const json = await response.json();
     if (!response.ok) throw new Error(json.error ?? "Software trigger test failed.");
     onError(null);
+    onSuccess("Software trigger fired.");
   }
 
   async function handleExportProfile() {
@@ -427,19 +458,61 @@ export function ProfileSelectionPage({
     a.download = `${singleProfileId}.profile.json`;
     a.click();
     URL.revokeObjectURL(url);
+    onSuccess("Profile exported.");
   }
 
   async function handleImportProfile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const text = await file.text();
-    const res = await api.importProfile(text);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as Profile;
+      setPendingImport({
+        profile: parsed,
+        mode: "original",
+        idDraft: sanitizeProfileId(`${parsed.id || "imported-profile"}-copy`),
+        nameDraft: parsed.name ? `${parsed.name} copy` : "Imported profile"
+      });
+      onError(null);
+    } catch {
+      onError("Import failed. The selected file is not valid JSON.");
+    } finally {
+      e.target.value = "";
+    }
+  }
+
+  async function savePendingImport() {
+    if (!pendingImport) return;
+    const originalId = sanitizeProfileId(pendingImport.profile.id);
+    const nextProfile = pendingImport.mode === "new"
+      ? {
+          ...pendingImport.profile,
+          id: sanitizeProfileId(pendingImport.idDraft),
+          name: pendingImport.nameDraft.trim()
+        }
+      : {
+          ...pendingImport.profile,
+          id: originalId
+        };
+    if (!nextProfile.id || !nextProfile.name) {
+      onError("Profile ID and name are required.");
+      return;
+    }
+    const exists = profiles.some((profile) => profile.id === nextProfile.id);
+    if (pendingImport.mode === "new" && exists) {
+      onError("A profile with this ID already exists.");
+      return;
+    }
+    const res = exists ? await api.updateProfile(nextProfile) : await api.createProfile(nextProfile);
     if (!res.ok) {
       const json = await res.json();
       throw new Error(json.error ?? "Import failed.");
     }
     await onProfilesChanged();
-    e.target.value = "";
+    onSingleProfileChange(nextProfile.id);
+    setPendingImport(null);
+    onError(null);
+    onSuccess(exists ? `Profile ${nextProfile.name} updated.` : `Profile ${nextProfile.name} imported.`);
   }
 
   const writableControls = controlDevices.find((device) => device.path === controlDevicePath)?.controls
@@ -466,11 +539,33 @@ export function ProfileSelectionPage({
           <button className={assignmentMode === "single" ? "selected" : ""} onClick={() => onAssignmentModeChange("single")}>Single profile</button>
           <button className={assignmentMode === "per-camera" ? "selected" : ""} onClick={() => onAssignmentModeChange("per-camera")}>Per camera</button>
         </div>
-        {triggerMode !== "free-run" && assignmentMode === "single" && (
-          <select value={singleProfileId} onChange={(event) => applySingleProfile(event.target.value)}>
+        {triggerMode !== "free-run" && (
+          <select value={singleProfileId} onChange={(event) => handleSelectedProfileChange(event.target.value)}>
             <option value="">Select profile</option>
             {visibleProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
           </select>
+        )}
+        {triggerMode !== "free-run" && (
+          <div className="trigger-timing-compact" aria-label="Trigger timing">
+            <span className="timing-label">Timing</span>
+            <label>
+              <input type="number" min="1" max="1000" step="1" value={triggerRateDraft}
+                     disabled={!selectedProfile}
+                     onChange={(e) => setTriggerRateDraft(e.target.value)} />
+              <span>Hz</span>
+            </label>
+            <label>
+              <input type="number" min="1" max="100" step="0.5" value={pulseWidthDraft}
+                     disabled={!selectedProfile}
+                     onChange={(e) => setPulseWidthDraft(e.target.value)} />
+              <span>ms</span>
+            </label>
+            <button className="icon-text-button timing-save"
+                    disabled={!selectedProfile || !timingDirty}
+                    onClick={() => applyTriggerTiming().catch((error: Error) => onError(error.message))}>
+              <Save size={14} /> Apply
+            </button>
+          </div>
         )}
         <button className="icon-text-button" onClick={() => setShowCreate(true)} disabled={triggerMode === "free-run"}>
           <Plus size={16} /> New profile
@@ -493,6 +588,50 @@ export function ProfileSelectionPage({
           <button onClick={() => setPendingDelete(false)}>Cancel</button>
           <button className="danger-button" onClick={() => removeSelectedProfile().catch((error: Error) => onError(error.message))}>Delete</button>
         </section>
+      )}
+
+      {pendingImport && (
+        <div className="dialog-overlay">
+          <section className="dialog import-dialog" role="dialog" aria-label="Import profile">
+            <h3>Import Profile</h3>
+            <p>Choose how to save {pendingImport.profile.name || pendingImport.profile.id || "this profile"}.</p>
+            <div className="import-mode-row">
+              <button
+                className={pendingImport.mode === "original" ? "selected" : ""}
+                onClick={() => setPendingImport({ ...pendingImport, mode: "original" })}
+              >
+                Use file name
+              </button>
+              <button
+                className={pendingImport.mode === "new" ? "selected" : ""}
+                onClick={() => setPendingImport({ ...pendingImport, mode: "new" })}
+              >
+                Save as new
+              </button>
+            </div>
+            {pendingImport.mode === "original" ? (
+              <div className="import-summary">
+                <strong>{pendingImport.profile.name || pendingImport.profile.id}</strong>
+                <span>
+                  {profiles.some((profile) => profile.id === sanitizeProfileId(pendingImport.profile.id))
+                    ? "This will update the existing profile with the same ID."
+                    : "This will import the profile with the ID from the file."}
+                </span>
+              </div>
+            ) : (
+              <div className="profile-form-grid import-fields">
+                <label>Profile ID<input value={pendingImport.idDraft} onChange={(event) => setPendingImport({ ...pendingImport, idDraft: sanitizeProfileId(event.target.value) })} /></label>
+                <label>Name<input value={pendingImport.nameDraft} onChange={(event) => setPendingImport({ ...pendingImport, nameDraft: event.target.value })} /></label>
+              </div>
+            )}
+            <div className="dialog-actions">
+              <button className="dialog-cancel" onClick={() => setPendingImport(null)}>Cancel</button>
+              <button className="dialog-confirm primary" onClick={() => savePendingImport().catch((error: Error) => onError(error.message))}>
+                {pendingImport.mode === "original" ? "Save" : "Save new"}
+              </button>
+            </div>
+          </section>
+        </div>
       )}
 
       {showCreate && (
@@ -556,45 +695,11 @@ export function ProfileSelectionPage({
         <footer className="routing-footer">
           <span>{routedCount} cameras routed · {Math.max(0, devices.length - routedCount)} unassigned</span>
           <div>
-            <button onClick={() => requestConfirm({ title: "Reset Routing", message: "Reset all camera routing to defaults?", confirmLabel: "Reset", variant: "danger", onConfirm: resetRouting })}>Reset</button>
+            <button onClick={() => requestConfirm({ title: "Reset Routing", message: "Clear all camera routing assignments?", confirmLabel: "Reset", variant: "danger", onConfirm: resetRouting })}>Reset</button>
             {triggerMode === "software" && <button onClick={() => testSelectedRouting().catch((error: Error) => onError(error.message))} disabled={!assignments.some((item) => item.trigger_channel_id)}>Test trigger</button>}
-            <button onClick={() => requestConfirm({ title: "Save Routing", message: "Save current routing configuration as profile default?", confirmLabel: "Save", variant: "primary", onConfirm: () => saveRoutingDefaults().catch((error: Error) => onError(error.message)) })} disabled={triggerMode === "free-run"}><Save size={16} /> Save as profile default</button>
+            <button onClick={() => requestConfirm({ title: "Save Routing", message: "Save current routing configuration to the selected profile(s)?", confirmLabel: "Save", variant: "primary", onConfirm: () => saveRouting().catch((error: Error) => onError(error.message)) })} disabled={triggerMode === "free-run" || !assignments.some((item) => item.trigger_channel_id)}><Save size={16} /> Save routing</button>
           </div>
         </footer>
-      </section>
-
-      {triggerMode !== "free-run" && (
-        <section className="panel">
-          <div className="panel-title"><h3>Trigger Timing</h3></div>
-          <div className="trigger-timing-row">
-            <label>
-              Trigger Rate
-              <div className="input-with-unit">
-                <input type="number" min="1" max="1000" step="1" value={triggerRateDraft}
-                       onChange={(e) => setTriggerRateDraft(e.target.value)} />
-                <span className="unit">Hz</span>
-              </div>
-            </label>
-            <label>
-              Pulse Width
-              <div className="input-with-unit">
-                <input type="number" min="1" max="100" step="0.5" value={pulseWidthDraft}
-                       onChange={(e) => setPulseWidthDraft(e.target.value)} />
-                <span className="unit">ms</span>
-              </div>
-            </label>
-            <button className="primary trigger-timing-set"
-                    disabled={!selectedProfile}
-                    onClick={() => applyTriggerTiming().catch((error: Error) => onError(error.message))}>
-              Set
-            </button>
-          </div>
-        </section>
-      )}
-
-      <section className="panel">
-        <div className="panel-title"><h3>Memory Backend</h3></div>
-        <div className="choice-row">{BACKEND_OPTIONS.map((backend) => <button key={backend} className={backends.includes(backend) ? "selected" : ""} onClick={() => onToggleBackend(backend)}>{backend}</button>)}</div>
       </section>
     </div>
   );

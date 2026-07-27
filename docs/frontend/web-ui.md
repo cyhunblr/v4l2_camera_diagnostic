@@ -32,7 +32,7 @@ Only use this on a trusted network. The web UI can start diagnostics, access loc
 
 ## Report Storage
 
-Generated reports and the Dashboard's run history (`runs-index.json`) are written under a stable, absolute directory — not the process's current working directory — so they persist across launches regardless of how the app is started (desktop icon, terminal, different working directory):
+Generated reports and the Dashboard's run history (`runs-index.json`) are written under a stable, absolute directory — not the process's current working directory — so they persist across launches regardless of how the app is started (terminal, service wrapper, different working directory):
 
 ```text
 $XDG_DATA_HOME/v4l2-camera-diagnostic/reports
@@ -48,22 +48,27 @@ Use `--report-root DIR` to override this location. `uninstallation.sh` never del
 
 ## Main Features
 
-- discovered camera list
+- discovered camera list, with single-camera or master/slave multi-camera selection
 - hardware, software, and free-run trigger modes
 - visual camera-to-channel routing
 - local profile creation, update, and removal
-- memory backend selection
-- test selection
+- test selection (includes memory backend selection)
 - report format selection
 - run progress
-- Live Output panel
-- report download links
+- Live Output panel — the main screen to watch during a run
+- Results panel with report download links
+
+## Camera Selection
+
+Choose **Single camera** to run the full diagnostic suite against one camera,
+or **Multi-camera** to also pick slave cameras that only participate in the
+t25 multi-camera cross-jitter test. The selected master is excluded from the
+slave list automatically.
 
 ## Profile Management
 
 Profiles are local machine configuration. The Profiles view can create and
-remove profiles, discover controls on video and subdevice nodes, and save
-camera-to-channel routing as profile defaults.
+remove profiles, and discover controls on video and subdevice nodes.
 
 Every run selects exactly one trigger mode. In hardware or software mode,
 camera nodes on the left connect to compatible profile channels on the right.
@@ -73,7 +78,8 @@ not require routing.
 
 ## Live Output
 
-The Live Output panel shows runtime log lines from diagnostic runs. It supports:
+The Live Output panel is the main screen to watch while a run is in progress:
+it shows runtime log lines from the diagnostic run and supports:
 
 - info, warning, and error severity labels
 - severity filtering
@@ -88,3 +94,11 @@ GET /api/runs/{id}/logs?after=<offset>
 ```
 
 Future versions may add Server-Sent Events or WebSocket streaming.
+
+## Results
+
+The Results view is disabled in the sidebar while a run is in progress — it
+becomes available once the run finishes. It shows the run's report download
+links (JSON/Markdown/HTML/PDF) at the top, followed by a per-test results
+table that scrolls internally so the page itself doesn't grow with the
+number of tests.

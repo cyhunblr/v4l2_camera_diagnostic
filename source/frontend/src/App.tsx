@@ -18,6 +18,11 @@ import { CameraAssignment, Device, PageId, Profile, TestDefinition, TestSummary,
 
 const GROUP_SELECTORS = ["all", "implemented", "stable"];
 
+type ToastState = {
+  message: string;
+  tone: "error" | "success" | "info";
+};
+
 export default function App() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -39,7 +44,7 @@ export default function App() {
   const [autoScroll, setAutoScroll] = useState(true);
   const [activePage, setActivePage] = useState<PageId>("dashboard");
   const [viewedRunId, setViewedRunId] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(getInitialTheme());
   const outputRef = useRef<HTMLDivElement | null>(null);
 
@@ -55,7 +60,15 @@ export default function App() {
     actionInProgress,
     startRun,
     stopRun
-  } = useRunPolling(setErrorMessage);
+  } = useRunPolling(showError);
+
+  function showError(message: string | null) {
+    setToast(message ? { message, tone: "error" } : null);
+  }
+
+  function showSuccess(message: string) {
+    setToast({ message, tone: "success" });
+  }
 
   async function loadBasics() {
     try {
@@ -65,7 +78,7 @@ export default function App() {
         api.getTests()
       ]);
       if (!deviceRes.ok || !profileRes.ok || !testRes.ok) {
-        setErrorMessage("Failed to load device metadata from server.");
+        showError("Failed to load device metadata from server.");
         return;
       }
       const deviceJson = await deviceRes.json();
@@ -74,9 +87,9 @@ export default function App() {
       setDevices(deviceJson.devices ?? []);
       setProfiles(profileJson.profiles ?? []);
       setTests(testJson.tests ?? []);
-      setErrorMessage(null);
+      showError(null);
     } catch {
-      setErrorMessage("Cannot connect to diagnostic server. Is it running?");
+      showError("Cannot connect to diagnostic server. Is it running?");
     }
   }
 
@@ -86,8 +99,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (singleProfileId && profiles.some((profile) => profile.id === singleProfileId)) return;
-    setSingleProfileId(profiles[0]?.id ?? "");
+    if (singleProfileId && !profiles.some((profile) => profile.id === singleProfileId)) {
+      setSingleProfileId("");
+    }
   }, [profiles, singleProfileId]);
 
   const involvedPaths = useMemo(
@@ -204,11 +218,11 @@ export default function App() {
 
   function requestStart() {
     if (!masterPath) {
-      setErrorMessage("Select a camera to test before starting a run.");
+      showError("Select a camera to test before starting a run.");
       return;
     }
     if (triggerMode !== "free-run" && cameraAssignments.some((assignment) => !assignment.profile_id || !assignment.trigger_channel_id)) {
-      setErrorMessage("Route every selected camera to a compatible trigger channel.");
+      showError("Route every selected camera to a compatible trigger channel.");
       setActivePage("profiles");
       return;
     }
@@ -300,9 +314,8 @@ export default function App() {
             assignments={cameraAssignments}
             onAssignmentsChange={setCameraAssignments}
             onProfilesChanged={loadBasics}
-            onError={setErrorMessage}
-            backends={backends}
-            onToggleBackend={(backend) => toggleListValue(backend, backends, setBackends)}
+            onError={showError}
+            onSuccess={showSuccess}
             requestConfirm={requestConfirm}
           />
         )}
@@ -319,6 +332,8 @@ export default function App() {
             includeExperimental={includeExperimental}
             onIncludeExperimentalChange={setIncludeExperimental}
             triggerMode={triggerMode}
+            backends={backends}
+            onToggleBackend={(backend) => toggleListValue(backend, backends, setBackends)}
           />
         )}
 
@@ -326,7 +341,7 @@ export default function App() {
           <ThresholdConfigPage
             selectedThresholdId={selectedThresholdId}
             onSelectedChange={setSelectedThresholdId}
-            onError={setErrorMessage}
+            onError={showError}
           />
         )}
 
@@ -358,12 +373,11 @@ export default function App() {
             viewedRunId={viewedRunId}
             liveSummaries={testSummaries}
             liveReportLinks={reportLinks}
-            liveRunStatus={runStatus}
           />
         )}
       </section>
 
-      <Toast message={errorMessage} onDismiss={() => setErrorMessage(null)} />
+      <Toast message={toast?.message ?? null} tone={toast?.tone ?? "error"} onDismiss={() => setToast(null)} />
       <ConfirmDialog dialog={confirmDialog} onClose={closeConfirm} />
     </main>
   );

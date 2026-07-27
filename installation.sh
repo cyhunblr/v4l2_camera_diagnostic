@@ -9,15 +9,28 @@ WEB_SHARE="${APP_SHARE}/web"
 DOC_SHARE="${APP_SHARE}/docs"
 DESKTOP_DIR="${INSTALL_PREFIX}/share/applications"
 DRY_RUN=0
+DEBUG=0
+STEP_TOTAL=5
+STEP_CURRENT=0
+USE_COLOR=0
+
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  USE_COLOR=1
+fi
 
 for arg in "$@"; do
   case "${arg}" in
     --dry-run) DRY_RUN=1 ;;
+    --debug) DEBUG=1 ;;
     --help|-h)
       cat <<USAGE
-Usage: ./installation.sh [--dry-run]
+Usage: ./installation.sh [--dry-run] [--debug]
 
 Builds and installs V4L2 Camera Diagnostic for the current user.
+
+Options:
+  --dry-run Preview the install without executing file-changing commands.
+  --debug   Show every command and full command output.
 USAGE
       exit 0
       ;;
@@ -28,15 +41,104 @@ USAGE
   esac
 done
 
-run() {
-  echo "+ $*"
-  if [[ "${DRY_RUN}" -eq 0 ]]; then
-    "$@"
+color() {
+  local code="$1"
+  shift
+  if [[ "${USE_COLOR}" -eq 1 ]]; then
+    printf '\033[%sm%s\033[0m' "${code}" "$*"
+  else
+    printf '%s' "$*"
   fi
+}
+
+step_begin() {
+  STEP_CURRENT=$((STEP_CURRENT + 1))
+  printf '[%d/%d] %s ... ' "${STEP_CURRENT}" "${STEP_TOTAL}" "$1"
+}
+
+step_ok() {
+  color "32" "ok"
+  echo
+}
+
+step_skip() {
+  color "33" "skipped"
+  echo
+}
+
+step_fail() {
+  color "31" "failed"
+  echo
+}
+
+# Runs a command. Under --debug, prints "+ command" and lets its real output
+# flow through live. Otherwise captures stdout+stderr to a temp file and only
+# dumps it (indented) if the command fails, so the happy path stays quiet.
+run() {
+  if [[ "${DEBUG}" -eq 1 ]]; then
+    echo "+ $*"
+    if [[ "${DRY_RUN}" -eq 0 ]]; then
+      "$@"
+    fi
+    return
+  fi
+
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    echo "+ $*"
+    return
+  fi
+
+  local output
+  output="$(mktemp)"
+  if "$@" >"${output}" 2>&1; then
+    rm -f "${output}"
+    return 0
+  fi
+
+  local status=$?
+  echo
+  echo "Command failed (${status}): $*" >&2
+  sed 's/^/  /' "${output}" >&2
+  rm -f "${output}"
+  return "${status}"
 }
 
 need_command() {
   command -v "$1" >/dev/null 2>&1
+}
+
+deps_missing() {
+  for cmd in cmake pkg-config xdg-open; do
+    if ! need_command "${cmd}"; then
+      return 0
+    fi
+  done
+  if ! pkg-config --exists libmicrohttpd jsoncpp libgpiod 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+# Requests the sudo password up front, once, before any step runs — rather
+# than letting it appear unpredictably wherever the first sudo-requiring
+# command happens to live (apt-get for missing deps, or setcap at the end).
+prime_sudo() {
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    return
+  fi
+  local need_sudo=0
+  if deps_missing && need_command apt-get; then
+    need_sudo=1
+  fi
+  if need_command setcap; then
+    need_sudo=1
+  fi
+  if [[ "${need_sudo}" -eq 1 ]]; then
+    echo "This installer needs sudo to install missing system packages and/or"
+    echo "grant the web app permission to read the kernel log (for Export DMESG)."
+    sudo -v
+    echo
+  fi
 }
 
 install_deps_apt() {
@@ -49,7 +151,6 @@ install_deps_apt() {
     libjsoncpp-dev
     xdg-utils
   )
-  echo "Checking Debian/Ubuntu dependencies..."
   if ! need_command apt-get; then
     echo "apt-get was not found. Install dependencies manually: ${packages[*]}" >&2
     return
@@ -59,53 +160,38 @@ install_deps_apt() {
 }
 
 ensure_dependencies() {
-  local missing=0
-  for cmd in cmake pkg-config xdg-open; do
-    if ! need_command "${cmd}"; then
-      missing=1
-    fi
-  done
-
-  if ! pkg-config --exists libmicrohttpd jsoncpp libgpiod 2>/dev/null; then
-    missing=1
-  fi
-
-  if [[ "${missing}" -eq 1 ]]; then
+  if deps_missing; then
     install_deps_apt
+  else
+    return 2
   fi
 }
 
 ensure_nvm() {
   local nvm_dir="${NVM_DIR:-$HOME/.nvm}"
 
-  # Already loaded.
   if command -v nvm &>/dev/null; then
     return 0
   fi
 
-  # Source nvm if it exists but hasn't been loaded yet.
   if [[ -s "${nvm_dir}/nvm.sh" ]]; then
     # shellcheck source=/dev/null
     \. "${nvm_dir}/nvm.sh"
     return 0
   fi
 
-  # Install nvm from the official installer.
-  echo "nvm not found. Installing nvm..."
   local nvm_install_url="https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh"
-  echo "+ curl -fsSL ${nvm_install_url} | bash"
   if [[ "${DRY_RUN}" -eq 0 ]]; then
     if need_command curl; then
-      curl -fsSL "${nvm_install_url}" | bash
+      run bash -c "curl -fsSL '${nvm_install_url}' | bash"
     elif need_command wget; then
-      wget -qO- "${nvm_install_url}" | bash
+      run bash -c "wget -qO- '${nvm_install_url}' | bash"
     else
       echo "ERROR: Neither curl nor wget found. Cannot install nvm." >&2
       exit 1
     fi
   fi
 
-  # Source nvm after installation.
   if [[ -s "${nvm_dir}/nvm.sh" ]]; then
     # shellcheck source=/dev/null
     \. "${nvm_dir}/nvm.sh"
@@ -116,34 +202,19 @@ ensure_nvm() {
   exit 1
 }
 
-activate_nvm() {
-  local nvm_dir="${NVM_DIR:-$HOME/.nvm}"
-  if [[ -s "${nvm_dir}/nvm.sh" ]]; then
-    # shellcheck source=/dev/null
-    \. "${nvm_dir}/nvm.sh"
-    return 0
-  fi
-  return 1
-}
-
 build_frontend() {
-  local dist_dir="${ROOT_DIR}/source/frontend/dist"
-
   if [[ ! -f "${ROOT_DIR}/source/frontend/package.json" ]]; then
-    return
+    return 2
   fi
 
-  # Ensure nvm is installed and loaded so we can use a compatible Node version.
   ensure_nvm
 
   local node_major
   node_major=$(node -e "process.stdout.write(String(process.versions.node.split('.')[0]))" 2>/dev/null || echo "0")
 
   if [[ "${node_major}" -lt 12 ]]; then
-    # System Node is too old. Use nvm to get a compatible version.
-    echo "Node ${node_major} detected (< 12): activating Node 18 via nvm..."
     nvm install 18 >/dev/null
-    nvm use 18
+    nvm use 18 >/dev/null
   fi
 
   pushd "${ROOT_DIR}/source/frontend" >/dev/null
@@ -166,17 +237,6 @@ install_files() {
   run install -m 0755 "${BUILD_DIR}/v4l2-camera-diagnostic" "${INSTALL_PREFIX}/bin/v4l2-camera-diagnostic"
   run install -m 0755 "${BUILD_DIR}/v4l2-camera-diagnostic-web" "${INSTALL_PREFIX}/bin/v4l2-camera-diagnostic-web"
 
-  # Grant CAP_SYSLOG so the web binary can read dmesg even when
-  # kernel.dmesg_restrict=1 (common on hardened systems). This may prompt
-  # for a sudo password if the cached credential from an earlier apt-get
-  # step (or none was needed, e.g. all dependencies were already present)
-  # has expired.
-  if command -v setcap >/dev/null 2>&1; then
-    echo "Granting CAP_SYSLOG to v4l2-camera-diagnostic-web (may prompt for sudo password)..."
-    sudo setcap cap_syslog+ep "${INSTALL_PREFIX}/bin/v4l2-camera-diagnostic-web" || \
-      echo "Warning: could not set CAP_SYSLOG. Export DMESG may fail if kernel.dmesg_restrict=1."
-  fi
-
   run rm -rf "${WEB_SHARE}"
   run mkdir -p "${WEB_SHARE}"
   run cp -R "${ROOT_DIR}/source/frontend/dist/." "${WEB_SHARE}/"
@@ -186,7 +246,9 @@ install_files() {
   run cp -R "${ROOT_DIR}/docs/." "${DOC_SHARE}/"
 
   local desktop_file="${DESKTOP_DIR}/v4l2-camera-diagnostic.desktop"
-  echo "Writing desktop entry: ${desktop_file}"
+  if [[ "${DEBUG}" -eq 1 ]]; then
+    echo "+ write desktop entry: ${desktop_file}"
+  fi
   if [[ "${DRY_RUN}" -eq 0 ]]; then
     cat >"${desktop_file}" <<DESKTOP
 [Desktop Entry]
@@ -201,7 +263,26 @@ DESKTOP
   fi
 }
 
-ensure_path_notice() {
+# Grants CAP_SYSLOG so the web binary can read dmesg even when
+# kernel.dmesg_restrict=1 (common on hardened systems). Returns 2 (skipped)
+# if setcap isn't available, 1 (failed, non-fatal) if granting it fails.
+grant_dmesg_capability() {
+  if ! need_command setcap; then
+    return 2
+  fi
+  if [[ "${DEBUG}" -eq 1 ]]; then
+    echo "+ sudo setcap cap_syslog+ep ${INSTALL_PREFIX}/bin/v4l2-camera-diagnostic-web"
+  fi
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    return
+  fi
+  if ! sudo setcap cap_syslog+ep "${INSTALL_PREFIX}/bin/v4l2-camera-diagnostic-web" 2>/dev/null; then
+    echo "Warning: could not set CAP_SYSLOG. Export DMESG may fail if kernel.dmesg_restrict=1." >&2
+    return 1
+  fi
+}
+
+path_notice() {
   case ":${PATH}:" in
     *":${INSTALL_PREFIX}/bin:"*) ;;
     *)
@@ -213,12 +294,46 @@ ensure_path_notice() {
   esac
 }
 
-ensure_dependencies
-build_frontend
-build_cpp
-install_files
-ensure_path_notice
+run_step() {
+  local label="$1"
+  shift
+  step_begin "${label}"
+  local status=0
+  if "$@"; then
+    status=0
+  else
+    status=$?
+  fi
+  if [[ "${status}" -eq 0 ]]; then
+    step_ok
+  elif [[ "${status}" -eq 2 ]]; then
+    step_skip
+  else
+    step_fail
+    return "${status}"
+  fi
+}
+
+if [[ "${DEBUG}" -eq 1 ]]; then
+  echo "V4L2 Camera Diagnostic installer [debug]"
+else
+  echo "V4L2 Camera Diagnostic installer"
+fi
+echo
+
+prime_sudo
+
+run_step "Checking/installing system dependencies" ensure_dependencies
+run_step "Building web UI" build_frontend
+run_step "Building C++ project" build_cpp
+run_step "Installing files" install_files
+run_step "Granting CAP_SYSLOG for Export DMESG" grant_dmesg_capability
+path_notice
 
 echo
-echo "Installation complete."
-echo "Launch with: ${INSTALL_PREFIX}/bin/v4l2-camera-diagnostic-web"
+if [[ "${DRY_RUN}" -eq 1 ]]; then
+  echo "Dry run complete. No files were changed."
+else
+  echo "Installation complete."
+  echo "Launch with: ${INSTALL_PREFIX}/bin/v4l2-camera-diagnostic-web"
+fi

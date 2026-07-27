@@ -39,9 +39,9 @@ v4l2-camera-diagnostic-web
 ```
 
 This starts a local server and opens your browser automatically at
-`http://127.0.0.1:8765`. The installer also writes a desktop launcher under
-`~/.local/share/applications`; desktop environments that index that directory
-can show **V4L2 Camera Diagnostic** in the application menu.
+`http://127.0.0.1:8765`. For access from another trusted device on the same
+network, launch with `--host 0.0.0.0` and open the device's LAN IP from the
+other browser; see the web UI guide for details.
 
 From the browser you can discover cameras, select hardware, V4L2 software, or
 free-run triggering, route cameras to profile channels, choose tests and
