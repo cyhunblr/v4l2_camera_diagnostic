@@ -13,6 +13,8 @@ DEBUG=0
 STEP_TOTAL=5
 STEP_CURRENT=0
 USE_COLOR=0
+SPINNER_PID=""
+STEP_LABEL=""
 
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
   USE_COLOR=1
@@ -53,22 +55,57 @@ color() {
 
 step_begin() {
   STEP_CURRENT=$((STEP_CURRENT + 1))
-  printf '[%d/%d] %s ... ' "${STEP_CURRENT}" "${STEP_TOTAL}" "$1"
+  STEP_LABEL="$1"
+  if can_spinner; then
+    start_spinner
+  else
+    printf '[%d/%d] %s ... ' "${STEP_CURRENT}" "${STEP_TOTAL}" "${STEP_LABEL}"
+  fi
 }
 
 step_ok() {
-  color "32" "ok"
-  echo
+  step_done "$(color "32" "ok")"
 }
 
 step_skip() {
-  color "33" "skipped"
-  echo
+  step_done "$(color "33" "skipped")"
 }
 
 step_fail() {
-  color "31" "failed"
-  echo
+  step_done "$(color "31" "failed")"
+}
+
+can_spinner() {
+  [[ "${DEBUG}" -eq 0 && "${DRY_RUN}" -eq 0 && -t 1 ]]
+}
+
+start_spinner() {
+  local frames=('-' '\' '|' '/')
+  local frame=0
+  while true; do
+    printf '\r\033[K[%d/%d] %s %s' "${STEP_CURRENT}" "${STEP_TOTAL}" "${STEP_LABEL}" "${frames[frame]}"
+    frame=$(((frame + 1) % ${#frames[@]}))
+    sleep 0.12
+  done &
+  SPINNER_PID="$!"
+}
+
+stop_spinner() {
+  if [[ -n "${SPINNER_PID}" ]]; then
+    kill "${SPINNER_PID}" 2>/dev/null || true
+    wait "${SPINNER_PID}" 2>/dev/null || true
+    SPINNER_PID=""
+  fi
+}
+
+step_done() {
+  local status_text="$1"
+  stop_spinner
+  if can_spinner; then
+    printf '\r\033[K[%d/%d] %s %s\n' "${STEP_CURRENT}" "${STEP_TOTAL}" "${STEP_LABEL}" "${status_text}"
+  else
+    printf '%s\n' "${status_text}"
+  fi
 }
 
 # Runs a command. Under --debug, prints "+ command" and lets its real output
@@ -162,8 +199,6 @@ install_deps_apt() {
 ensure_dependencies() {
   if deps_missing; then
     install_deps_apt
-  else
-    return 2
   fi
 }
 

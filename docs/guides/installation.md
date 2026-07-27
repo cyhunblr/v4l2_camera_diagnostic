@@ -14,8 +14,8 @@ guessed from the script source.
 `--dry-run` previews the install without executing file-changing commands.
 `--debug` prints each command (prefixed with `+`) and lets full command output
 flow through the terminal. Without `--debug`, the installer prints compact
-step-based progress and expands captured command output only when a command
-fails.
+step-based progress with a spinner for active work and expands captured
+command output only when a command fails.
 
 ## What it does
 
