@@ -243,7 +243,15 @@ std::map<std::string, TestThresholds> default_test_params() {
         // rapid loop needs a warmup frame of its own before the measured capture.
         {"rapid_warmup", 1},
         {"rapid_timeout_ms", 200},
-        {"rapid_pacing_ms", 60}}},
+        // Where sensors share a deserializer and fsync source, STREAMON
+        // re-initialises the whole camera group over I2C — that needs far more
+        // settle time than the frame interval alone suggests.
+        {"rapid_pacing_ms", 250},
+        // Safety valve for both loops: stop cycling once STREAMON keeps
+        // failing, rather than driving the VI channel through repeated
+        // timeout-and-reset.
+        {"max_consecutive_start_failures", 3},
+        {"recovery_ms", 1000}}},
       {"t06-multi-buffer",
        {{"sample_count", 20},
         {"max_buffers", 5},
