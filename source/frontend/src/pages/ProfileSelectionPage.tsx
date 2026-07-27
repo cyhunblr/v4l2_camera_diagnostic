@@ -236,8 +236,9 @@ export function ProfileSelectionPage({
       target: `channel:${target.profile.id}:${target.channel.id}`,
       sourceHandle: "camera-output",
       targetHandle: "channel-input",
-      type: "smoothstep",
+      type: "default",
       animated: false,
+      interactionWidth: 18,
       style: { stroke: triggerMode === "software" ? "#f59e0b" : "#3b82f6", strokeWidth: 2.5 }
     }];
   }), [assignments, devices, triggerMode, visibleChannels]);
