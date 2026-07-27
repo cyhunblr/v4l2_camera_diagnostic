@@ -2,7 +2,7 @@
 
 **Layer:** 4 — Polling / timeout  
 **Category:** polling  
-**Trigger required:** yes  
+**Trigger modes:** Hardware | Software | FreeRun  
 
 ## Purpose
 

@@ -2,7 +2,7 @@
 
 **Layer:** 5 — Latency  
 **Category:** controls  
-**Trigger required:** yes  
+**Trigger modes:** Hardware | Software | FreeRun  
 
 ## Purpose
 

@@ -531,15 +531,12 @@ void run_nonblock_vs_block(const std::string &camera_path, MemoryBackend backend
 void run_format_comparison(const std::string &camera_path, MemoryBackend backend, TriggerSource &trigger, TestResult &r,
                            const LogFn &log, const TestThresholds &tp) {
   const int SAMPLES = static_cast<int>(tpv(tp, "t16-format-comparison", "sample_count"));
-  const int width = static_cast<int>(tpv(tp, "t16-format-comparison", "width"));
-  const int height = static_cast<int>(tpv(tp, "t16-format-comparison", "height"));
   const int throughput_reps = static_cast<int>(tpv(tp, "t16-format-comparison", "throughput_reps"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
-  static const char *fmts[] = {"YUYV", "UYVY"};
-  emit(log, camera_path, "t06", "Format comparison: YUYV vs UYVY (" + std::to_string(SAMPLES) + " samples each)...");
 
-  int ctrl_fd = ::open(camera_path.c_str(), O_RDWR | O_NONBLOCK);
-  if (ctrl_fd < 0) {
+  // Open device to enumerate formats and save original
+  int enum_fd = ::open(camera_path.c_str(), O_RDWR | O_NONBLOCK);
+  if (enum_fd < 0) {
     r.status = TestStatus::Fail;
     r.summary = "Cannot open device: " + std::string(strerror(errno));
     return;
@@ -547,35 +544,67 @@ void run_format_comparison(const std::string &camera_path, MemoryBackend backend
   struct v4l2_format orig;
   memset(&orig, 0, sizeof(orig));
   orig.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  const bool has_orig = (ioctl(ctrl_fd, VIDIOC_G_FMT, &orig) == 0);
+  const bool has_orig = (ioctl(enum_fd, VIDIOC_G_FMT, &orig) == 0);
 
-  for (int fi = 0; fi < 2; fi++) {
-    const char *fn = fmts[fi];
-    const uint32_t fourcc = static_cast<uint32_t>(fn[0]) | (static_cast<uint32_t>(fn[1]) << 8) |
-                            (static_cast<uint32_t>(fn[2]) << 16) | (static_cast<uint32_t>(fn[3]) << 24);
+  // Enumerate all single-planar capture formats
+  struct FormatEntry {
+    uint32_t pixelformat;
+    std::string name;
+  };
+  std::vector<FormatEntry> formats;
+  for (uint32_t idx = 0; idx < 128; idx++) {
+    struct v4l2_fmtdesc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.index = idx;
+    desc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(enum_fd, VIDIOC_ENUM_FMT, &desc) < 0)
+      break;
+    std::string name = fourcc_to_string(desc.pixelformat);
+    // Skip NV* multi-planar formats (NV12, NV21, NV16, etc.)
+    if (name.size() >= 2 && name[0] == 'N' && name[1] == 'V')
+      continue;
+    formats.push_back({desc.pixelformat, name});
+  }
+  ::close(enum_fd);
+
+  if (formats.empty()) {
+    r.status = TestStatus::Warn;
+    r.summary = "No testable formats enumerated.";
+    return;
+  }
+
+  emit(log, camera_path, "t06",
+       "Format comparison: " + std::to_string(formats.size()) + " formats x " + std::to_string(SAMPLES) +
+           " samples each...");
+
+  int tested = 0;
+  for (const auto &entry : formats) {
     struct v4l2_format fmt;
     memset(&fmt, 0, sizeof(fmt));
     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    fmt.fmt.pix.width = width;
-    fmt.fmt.pix.height = height;
-    fmt.fmt.pix.pixelformat = fourcc;
+    fmt.fmt.pix.width = orig.fmt.pix.width;
+    fmt.fmt.pix.height = orig.fmt.pix.height;
+    fmt.fmt.pix.pixelformat = entry.pixelformat;
     fmt.fmt.pix.field = V4L2_FIELD_NONE;
-    if (ioctl(ctrl_fd, VIDIOC_S_FMT, &fmt) < 0) {
-      r.details.push_back(std::string(fn) + ": S_FMT failed");
-      continue;
-    }
-    r.details.push_back(std::string(fn) + ": sizeimage=" + std::to_string(fmt.fmt.pix.sizeimage));
 
     V4lSession s;
     std::string err;
-    s.open(camera_path, &err);
-    ioctl(s.fd(), VIDIOC_S_FMT, &fmt);
+    if (!s.open(camera_path, &err)) {
+      r.details.push_back(entry.name + ": open failed: " + err);
+      continue;
+    }
+    if (ioctl(s.fd(), VIDIOC_S_FMT, &fmt) < 0) {
+      r.details.push_back(entry.name + ": S_FMT failed");
+      continue;
+    }
+    r.details.push_back(entry.name + ": sizeimage=" + std::to_string(fmt.fmt.pix.sizeimage));
+
     if (!s.start(2, backend, &err)) {
-      r.details.push_back(std::string(fn) + ": start failed: " + err);
+      r.details.push_back(entry.name + ": start failed: " + err);
       continue;
     }
     if (s.last_streamon_attempts() > 1) {
-      r.details.push_back(std::string(fn) + ": STREAMON succeeded after " + std::to_string(s.last_streamon_attempts()) +
+      r.details.push_back(entry.name + ": STREAMON succeeded after " + std::to_string(s.last_streamon_attempts()) +
                           " attempts (first error: " + s.last_streamon_first_error() + ")");
     }
     s.warmup(trigger, 5, 200, nullptr, pulse_ns);
@@ -604,18 +633,32 @@ void run_format_comparison(const std::string &camera_path, MemoryBackend backend
       V4lSession::sleep_ms(200);
     }
     if (!lat.empty()) {
-      std::string prefix = std::string(fn);
+      tested++;
+      std::string prefix = entry.name;
       std::transform(prefix.begin(), prefix.end(), prefix.begin(), ::tolower);
       push_stats_metrics_brief(r.metrics, prefix + "_latency", compute_stats(lat));
-      r.metrics.push_back(metric(prefix + "_throughput_mbps", "MB/s", mbps, std::string(fn) + " memcpy throughput."));
+      r.metrics.push_back(metric(prefix + "_throughput_mbps", "MB/s", mbps, entry.name + " memcpy throughput."));
     }
   }
 
-  if (has_orig)
-    ioctl(ctrl_fd, VIDIOC_S_FMT, &orig);
-  ::close(ctrl_fd);
-  r.status = TestStatus::Pass;
-  r.summary = "Format comparison complete. See metrics for per-format latency and throughput.";
+  if (has_orig) {
+    int restore_fd = ::open(camera_path.c_str(), O_RDWR | O_NONBLOCK);
+    if (restore_fd >= 0) {
+      ioctl(restore_fd, VIDIOC_S_FMT, &orig);
+      ::close(restore_fd);
+    }
+  }
+  r.metrics.push_back(
+      metric("format_count", "count", static_cast<double>(formats.size()), "Formats enumerated (excl. NV*)."));
+  r.metrics.push_back(metric("formats_tested", "count", static_cast<double>(tested), "Formats successfully tested."));
+  if (tested == 0) {
+    r.status = TestStatus::Warn;
+    r.summary = "Could not test any format (all sessions failed).";
+  } else {
+    r.status = TestStatus::Pass;
+    r.summary = "Format comparison complete. Tested " + std::to_string(tested) + "/" + std::to_string(formats.size()) +
+                " formats.";
+  }
 }
 
 // Docs: docs/backend/tests/t12-poll-timeout-cliff.md
@@ -2048,6 +2091,10 @@ void run_resolution_sweep(const std::string &camera_path, MemoryBackend backend,
     return;
   }
 
+  // Close enumeration fd before opening per-resolution sessions
+  ::close(fd);
+  fd = -1;
+
   r.metrics.push_back(
       metric("resolution_count", "count", static_cast<double>(resolutions.size()), "Resolutions tested."));
 
@@ -2055,22 +2102,26 @@ void run_resolution_sweep(const std::string &camera_path, MemoryBackend backend,
   for (const auto &res : resolutions) {
     std::string label = std::to_string(res.width) + "x" + std::to_string(res.height);
 
-    // Set format
+    // Set format via the session's own fd
     struct v4l2_format fmt {};
     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     fmt.fmt.pix.width = res.width;
     fmt.fmt.pix.height = res.height;
     fmt.fmt.pix.pixelformat = orig_fmt.fmt.pix.pixelformat;
     fmt.fmt.pix.field = V4L2_FIELD_NONE;
-    if (ioctl(fd, VIDIOC_S_FMT, &fmt) < 0) {
-      r.details.push_back(label + ": S_FMT failed — skipped");
-      continue;
-    }
 
     // Open a fresh session at this resolution
     V4lSession s;
     std::string err;
-    if (!s.open(camera_path, &err) || !s.start(2, backend, &err)) {
+    if (!s.open(camera_path, &err)) {
+      r.details.push_back(label + ": session failed — " + err);
+      continue;
+    }
+    if (ioctl(s.fd(), VIDIOC_S_FMT, &fmt) < 0) {
+      r.details.push_back(label + ": S_FMT failed — skipped");
+      continue;
+    }
+    if (!s.start(2, backend, &err)) {
       r.details.push_back(label + ": session failed — " + err);
       continue;
     }
@@ -2122,8 +2173,13 @@ void run_resolution_sweep(const std::string &camera_path, MemoryBackend backend,
   }
 
   // Restore original format
-  ioctl(fd, VIDIOC_S_FMT, &orig_fmt);
-  ::close(fd);
+  {
+    int restore_fd = ::open(camera_path.c_str(), O_RDWR | O_NONBLOCK);
+    if (restore_fd >= 0) {
+      ioctl(restore_fd, VIDIOC_S_FMT, &orig_fmt);
+      ::close(restore_fd);
+    }
+  }
 
   if (tested == 0) {
     r.status = TestStatus::Warn;

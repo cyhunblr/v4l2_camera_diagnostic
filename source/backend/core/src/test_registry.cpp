@@ -87,6 +87,8 @@ std::vector<TestDefinition> built_in_tests() {
   for (auto &test : tests) {
     if (test.id == "t07-buffer-overwrite" || test.id == "t13-trigger-latency") {
       test.trigger_mode_mask = 0x01 | 0x02;  // Hardware + Software only
+    } else if (test.id == "t08-buffer-recycling") {
+      test.trigger_mode_mask = 0x04;  // FreeRun only
     } else if (test.id == "t15-gpio-pulse-width") {
       test.trigger_mode_mask = 0x01;  // Hardware only
     }

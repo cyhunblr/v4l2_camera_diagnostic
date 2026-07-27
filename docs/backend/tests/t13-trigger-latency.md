@@ -2,7 +2,7 @@
 
 **Layer:** 5 — Latency  
 **Category:** latency  
-**Trigger required:** yes  
+**Trigger modes:** Hardware | Software  
 
 ## Purpose
 

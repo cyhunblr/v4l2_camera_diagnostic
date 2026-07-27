@@ -2,7 +2,7 @@
 
 **Layer:** 3 — Buffer & memory  
 **Category:** buffering  
-**Trigger required:** yes  
+**Trigger modes:** Hardware | Software  
 
 ## Purpose
 

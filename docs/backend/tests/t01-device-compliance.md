@@ -2,7 +2,7 @@
 
 **Layer:** 1 — Discovery  
 **Category:** discovery  
-**Trigger required:** no  
+**Trigger modes:** Hardware | Software | FreeRun  
 
 ## Purpose
 

@@ -2,7 +2,7 @@
 
 **Layer:** 2 — State-machine correctness  
 **Category:** stream-state  
-**Trigger required:** no  
+**Trigger modes:** Hardware | Software | FreeRun  
 
 ## Purpose
 

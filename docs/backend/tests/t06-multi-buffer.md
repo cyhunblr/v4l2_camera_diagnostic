@@ -2,7 +2,7 @@
 
 **Layer:** 3 — Buffer & memory  
 **Category:** buffering  
-**Trigger required:** no  
+**Trigger modes:** Hardware | Software | FreeRun  
 
 ## Purpose
 

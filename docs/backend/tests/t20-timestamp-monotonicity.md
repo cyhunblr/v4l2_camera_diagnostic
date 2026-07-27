@@ -2,7 +2,7 @@
 
 **Layer:** 6 — Integrity  
 **Category:** metadata  
-**Trigger required:** yes  
+**Trigger modes:** Hardware | Software | FreeRun  
 
 ## Purpose
 

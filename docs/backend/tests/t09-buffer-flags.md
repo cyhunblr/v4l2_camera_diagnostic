@@ -2,7 +2,7 @@
 
 **Layer:** 3 — Buffer & memory  
 **Category:** metadata  
-**Trigger required:** yes  
+**Trigger modes:** Hardware | Software | FreeRun  
 
 ## Purpose
 

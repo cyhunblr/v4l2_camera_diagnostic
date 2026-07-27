@@ -255,7 +255,7 @@ std::map<std::string, TestThresholds> default_test_params() {
       {"t14-nonblock-vs-block",
        {{"sample_count", 30}, {"spin_deadline_ms", 100}, {"poll_timeout_ms", 200}, {"sample_interval_ms", 200}}},
       {"t15-gpio-pulse-width", {{"samples_per_width", 8}, {"warmup_count", 5}, {"poll_timeout_ms", 500}}},
-      {"t16-format-comparison", {{"sample_count", 20}, {"throughput_reps", 50}, {"width", 1920}, {"height", 1280}}},
+      {"t16-format-comparison", {{"sample_count", 20}, {"throughput_reps", 50}}},
       {"t17-control-sweep", {{"warmup_count", 8}, {"sample_count", 20}, {"capture_timeout_ms", 200}}},
       {"t18-resolution-sweep", {{"sample_count", 15}, {"throughput_reps", 30}}},
       {"t19-sequence-continuity", {{"sample_count", 100}, {"capture_timeout_ms", 100}, {"sample_interval_ms", 100}}},
