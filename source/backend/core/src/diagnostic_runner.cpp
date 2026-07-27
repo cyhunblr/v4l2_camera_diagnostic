@@ -394,6 +394,7 @@ void run_nonblock_vs_block(const std::string &camera_path, MemoryBackend backend
   const long spin_deadline_ms = static_cast<long>(tpv(tp, "t14-nonblock-vs-block", "spin_deadline_ms"));
   const int poll_timeout_ms = static_cast<int>(tpv(tp, "t14-nonblock-vs-block", "poll_timeout_ms"));
   const int sample_interval_ms = static_cast<int>(tpv(tp, "t14-nonblock-vs-block", "sample_interval_ms"));
+  const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t14-nonblock-vs-block", "warmup_count"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t14",
        "Running NON_BLOCK vs BLOCK comparison (" + std::to_string(SAMPLES) + " samples each)...");
@@ -408,7 +409,7 @@ void run_nonblock_vs_block(const std::string &camera_path, MemoryBackend backend
       r.summary = "NON_BLOCK session failed: " + err;
       return;
     }
-    s.warmup(trigger, 5, 200, nullptr, pulse_ns);
+    s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
     std::vector<int> spins;
     for (int i = 0; i < SAMPLES; i++) {
       s.drain();
@@ -533,6 +534,8 @@ void run_format_comparison(const std::string &camera_path, MemoryBackend backend
                            const LogFn &log, const TestThresholds &tp) {
   const int SAMPLES = static_cast<int>(tpv(tp, "t16-format-comparison", "sample_count"));
   const int throughput_reps = static_cast<int>(tpv(tp, "t16-format-comparison", "throughput_reps"));
+  const int CAPTURE_TIMEOUT_MS = static_cast<int>(tpv(tp, "t16-format-comparison", "capture_timeout_ms"));
+  const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t16-format-comparison", "warmup_count"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
 
   // Open device to enumerate formats and save original
@@ -561,9 +564,6 @@ void run_format_comparison(const std::string &camera_path, MemoryBackend backend
     if (ioctl(enum_fd, VIDIOC_ENUM_FMT, &desc) < 0)
       break;
     std::string name = fourcc_to_string(desc.pixelformat);
-    // Skip NV* multi-planar formats (NV12, NV21, NV16, etc.)
-    if (name.size() >= 2 && name[0] == 'N' && name[1] == 'V')
-      continue;
     formats.push_back({desc.pixelformat, name});
   }
   ::close(enum_fd);
@@ -608,12 +608,12 @@ void run_format_comparison(const std::string &camera_path, MemoryBackend backend
       r.details.push_back(entry.name + ": STREAMON succeeded after " + std::to_string(s.last_streamon_attempts()) +
                           " attempts (first error: " + s.last_streamon_first_error() + ")");
     }
-    s.warmup(trigger, 5, 200, nullptr, pulse_ns);
+    s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
     std::vector<double> lat;
     double mbps = 0.0;
     for (int i = 0; i < SAMPLES; i++) {
-      auto f = s.capture(trigger, 100, true, true, pulse_ns);
+      auto f = s.capture(trigger, CAPTURE_TIMEOUT_MS, true, true, pulse_ns);
       if (f.success) {
         lat.push_back(f.latency_ms);
         if (lat.size() == 1 && f.index < s.buffer_count()) {
@@ -649,8 +649,7 @@ void run_format_comparison(const std::string &camera_path, MemoryBackend backend
       ::close(restore_fd);
     }
   }
-  r.metrics.push_back(
-      metric("format_count", "count", static_cast<double>(formats.size()), "Formats enumerated (excl. NV*)."));
+  r.metrics.push_back(metric("format_count", "count", static_cast<double>(formats.size()), "Formats enumerated."));
   r.metrics.push_back(metric("formats_tested", "count", static_cast<double>(tested), "Formats successfully tested."));
   if (tested == 0) {
     r.status = TestStatus::Warn;
@@ -669,6 +668,7 @@ void run_poll_timeout_cliff(const std::string &camera_path, MemoryBackend backen
   const int PROBE_FRAMES = static_cast<int>(tpv(tp, "t12-poll-timeout-cliff", "probe_frames"));
   const int STABILITY_ROUNDS = static_cast<int>(tpv(tp, "t12-poll-timeout-cliff", "stability_rounds"));
   const int STABILITY_FRAMES = static_cast<int>(tpv(tp, "t12-poll-timeout-cliff", "stability_frames"));
+  const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t12-poll-timeout-cliff", "warmup_count"));
   const double PROD_MS = thv(th, "t12-poll-timeout-cliff", "production_timeout_ms");
   const double SAFE_MARGIN_THRESHOLD = thv(th, "t12-poll-timeout-cliff", "safe_margin_ms");
   const uint64_t pulse_ns = pulse_ns_from(tp);
@@ -681,7 +681,7 @@ void run_poll_timeout_cliff(const std::string &camera_path, MemoryBackend backen
     r.summary = "Session setup failed: " + err;
     return;
   }
-  s.warmup(trigger, 10, 200, nullptr, pulse_ns);
+  s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
   // Helper: probe a timeout value, return hit count out of PROBE_FRAMES
   auto probe = [&](int tms) -> int {
@@ -858,6 +858,7 @@ void run_sequence_continuity(const std::string &camera_path, MemoryBackend backe
   const int NUM = static_cast<int>(tpv(tp, "t19-sequence-continuity", "sample_count"));
   const int capture_timeout_ms = static_cast<int>(tpv(tp, "t19-sequence-continuity", "capture_timeout_ms"));
   const int sample_interval_ms = static_cast<int>(tpv(tp, "t19-sequence-continuity", "sample_interval_ms"));
+  const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t19-sequence-continuity", "warmup_count"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t19", "Sequence continuity: capturing " + std::to_string(NUM) + " frames...");
   V4lSession s;
@@ -867,7 +868,7 @@ void run_sequence_continuity(const std::string &camera_path, MemoryBackend backe
     r.summary = "Session setup failed: " + err;
     return;
   }
-  s.warmup(trigger, 5, 200, nullptr, pulse_ns);
+  s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
   std::vector<uint32_t> seqs;
   std::vector<double> ts_us;
@@ -928,6 +929,7 @@ void run_sustained_capture(const std::string &camera_path, MemoryBackend backend
   const int WINDOW_SEC = static_cast<int>(tpv(tp, "t22-sustained-capture", "window_sec"));
   const int INTERVAL_MS = static_cast<int>(tpv(tp, "t22-sustained-capture", "sample_interval_ms"));
   const int CAPTURE_TIMEOUT_MS = static_cast<int>(tpv(tp, "t22-sustained-capture", "capture_timeout_ms"));
+  const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t22-sustained-capture", "warmup_count"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t22",
        "Sustained capture: " + std::to_string(DURATION_SEC) + " seconds @ windows of " + std::to_string(WINDOW_SEC) +
@@ -940,7 +942,7 @@ void run_sustained_capture(const std::string &camera_path, MemoryBackend backend
     r.summary = "Session setup failed: " + err;
     return;
   }
-  s.warmup(trigger, 5, 200, nullptr, pulse_ns);
+  s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
   const auto t_start = std::chrono::steady_clock::now();
   std::vector<double> all_lat;
@@ -1095,6 +1097,7 @@ void run_buffer_recycling(const std::string &camera_path, MemoryBackend backend,
   const int REPS = static_cast<int>(tpv(tp, "t08-buffer-recycling", "reps_per_delay"));
   const int CAPTURE_TIMEOUT_MS = static_cast<int>(tpv(tp, "t08-buffer-recycling", "capture_timeout_ms"));
   const int INTER_REP_INTERVAL_MS = static_cast<int>(tpv(tp, "t08-buffer-recycling", "inter_rep_interval_ms"));
+  const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t08-buffer-recycling", "warmup_count"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t08",
        "Buffer recycling: testing " + std::to_string(N) + " delay values x " + std::to_string(REPS) + " reps...");
@@ -1106,7 +1109,7 @@ void run_buffer_recycling(const std::string &camera_path, MemoryBackend backend,
     r.summary = "Session setup failed: " + err;
     return;
   }
-  s.warmup(trigger, 5, 200, nullptr, pulse_ns);
+  s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
   int cliff_delay = -1;
   for (int d = 0; d < N; d++) {
@@ -1382,6 +1385,7 @@ void run_buffer_flags(const std::string &camera_path, MemoryBackend backend, Tri
   const int NUM = static_cast<int>(tpv(tp, "t09-buffer-flags", "sample_count"));
   const int CAPTURE_TIMEOUT_MS = static_cast<int>(tpv(tp, "t09-buffer-flags", "capture_timeout_ms"));
   const int SAMPLE_INTERVAL_MS = static_cast<int>(tpv(tp, "t09-buffer-flags", "sample_interval_ms"));
+  const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t09-buffer-flags", "warmup_count"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t09", "Buffer flag analysis: capturing " + std::to_string(NUM) + " frames...");
   V4lSession s;
@@ -1391,7 +1395,7 @@ void run_buffer_flags(const std::string &camera_path, MemoryBackend backend, Tri
     r.summary = "Session setup failed: " + err;
     return;
   }
-  s.warmup(trigger, 5, 200, nullptr, pulse_ns);
+  s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
   int flag_error = 0, flag_keyframe = 0, flag_ts_mono = 0, flag_ts_copy = 0, flag_soe = 0, flag_eof = 0;
   uint32_t all_or = 0;
@@ -1449,6 +1453,7 @@ void run_timestamp_monotonicity(const std::string &camera_path, MemoryBackend ba
   const int NUM = static_cast<int>(tpv(tp, "t20-timestamp-monotonicity", "sample_count"));
   const int CAPTURE_TIMEOUT_MS = static_cast<int>(tpv(tp, "t20-timestamp-monotonicity", "capture_timeout_ms"));
   const int SAMPLE_INTERVAL_MS = static_cast<int>(tpv(tp, "t20-timestamp-monotonicity", "sample_interval_ms"));
+  const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t20-timestamp-monotonicity", "warmup_count"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t20", "Timestamp monotonicity: capturing " + std::to_string(NUM) + " frames...");
   V4lSession s;
@@ -1458,7 +1463,7 @@ void run_timestamp_monotonicity(const std::string &camera_path, MemoryBackend ba
     r.summary = "Session setup failed: " + err;
     return;
   }
-  s.warmup(trigger, 5, 200, nullptr, pulse_ns);
+  s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
   std::vector<double> buf_ts, wall_ts;
   for (int i = 0; i < NUM; i++) {
@@ -1671,6 +1676,7 @@ void run_dmabuf_cache_sync(const std::string &camera_path, TriggerSource &trigge
   const int NUM = static_cast<int>(tpv(tp, "t11-dmabuf-cache-sync", "sample_count"));
   const size_t CMP = static_cast<size_t>(tpv(tp, "t11-dmabuf-cache-sync", "compare_bytes"));
   const int CAPTURE_TIMEOUT_MS = static_cast<int>(tpv(tp, "t11-dmabuf-cache-sync", "capture_timeout_ms"));
+  const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t11-dmabuf-cache-sync", "warmup_count"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t11", "DMA_BUF_IOCTL_SYNC cache coherency: " + std::to_string(NUM) + " frames...");
   V4lSession s;
@@ -1680,7 +1686,7 @@ void run_dmabuf_cache_sync(const std::string &camera_path, TriggerSource &trigge
     r.summary = "DMABUF session failed: " + err;
     return;
   }
-  s.warmup(trigger, 5, 200, nullptr, pulse_ns);
+  s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
   int tested = 0, match_nosync = 0, match_sync = 0;
   for (int i = 0; i < NUM; i++) {
@@ -2009,6 +2015,7 @@ void run_stuck_frame(const std::string &camera_path, MemoryBackend backend, Trig
   const int NUM = static_cast<int>(tpv(tp, "t21-stuck-frame", "sample_count"));
   const size_t CMP = static_cast<size_t>(tpv(tp, "t21-stuck-frame", "compare_bytes"));
   const int CAPTURE_TIMEOUT_MS = static_cast<int>(tpv(tp, "t21-stuck-frame", "capture_timeout_ms"));
+  const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t21-stuck-frame", "warmup_count"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t21", "Stuck frame detection: comparing " + std::to_string(NUM) + " consecutive frames...");
 
@@ -2023,7 +2030,7 @@ void run_stuck_frame(const std::string &camera_path, MemoryBackend backend, Trig
     r.details.push_back("STREAMON succeeded after " + std::to_string(s.last_streamon_attempts()) +
                         " attempts (first error: " + s.last_streamon_first_error() + ")");
   }
-  s.warmup(trigger, 5, 200, nullptr, pulse_ns);
+  s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
   std::vector<uint8_t> prev(CMP, 0);
   int identical = 0, max_run = 0, cur_run = 0, tested = 0;
@@ -2084,6 +2091,7 @@ void run_latency_under_load(const std::string &camera_path, MemoryBackend backen
   const int BASELINE_TIMEOUT_MS = static_cast<int>(tpv(tp, "t23-latency-under-load", "baseline_timeout_ms"));
   const int LOAD_TIMEOUT_MS = static_cast<int>(tpv(tp, "t23-latency-under-load", "load_timeout_ms"));
   const int SAMPLE_INTERVAL_MS = static_cast<int>(tpv(tp, "t23-latency-under-load", "sample_interval_ms"));
+  const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t23-latency-under-load", "warmup_count"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t23",
        "Latency under CPU load: baseline " + std::to_string(SAMPLES) + " samples, then " +
@@ -2099,7 +2107,7 @@ void run_latency_under_load(const std::string &camera_path, MemoryBackend backen
       r.summary = "Baseline session failed: " + err;
       return;
     }
-    s.warmup(trigger, 5, 200, nullptr, pulse_ns);
+    s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
     for (int i = 0; i < SAMPLES; i++) {
       auto f = s.capture(trigger, BASELINE_TIMEOUT_MS, true, true, pulse_ns);
       if (f.success)
@@ -2132,7 +2140,7 @@ void run_latency_under_load(const std::string &camera_path, MemoryBackend backen
     V4lSession s;
     std::string err;
     if (s.open(camera_path, &err) && s.start(2, backend, &err)) {
-      s.warmup(trigger, 5, 200, nullptr, pulse_ns);
+      s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
       for (int i = 0; i < SAMPLES; i++) {
         auto f = s.capture(trigger, LOAD_TIMEOUT_MS, true, true, pulse_ns);
         if (f.success)
@@ -2220,6 +2228,8 @@ void run_resolution_sweep(const std::string &camera_path, MemoryBackend backend,
                           const LogFn &log, const TestThresholds &tp) {
   const int SAMPLES = static_cast<int>(tpv(tp, "t18-resolution-sweep", "sample_count"));
   const int THROUGHPUT_REPS = static_cast<int>(tpv(tp, "t18-resolution-sweep", "throughput_reps"));
+  const int CAPTURE_TIMEOUT_MS = static_cast<int>(tpv(tp, "t18-resolution-sweep", "capture_timeout_ms"));
+  const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t18-resolution-sweep", "warmup_count"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t18", "Resolution sweep: enumerating frame sizes and measuring...");
 
@@ -2325,12 +2335,12 @@ void run_resolution_sweep(const std::string &camera_path, MemoryBackend backend,
       r.details.push_back(label + ": session failed — " + err);
       continue;
     }
-    s.warmup(trigger, 3, 200, nullptr, pulse_ns);
+    s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
     // Capture samples
     std::vector<double> latencies;
     for (int i = 0; i < SAMPLES; i++) {
-      auto f = s.capture(trigger, 200, true, true, pulse_ns);
+      auto f = s.capture(trigger, CAPTURE_TIMEOUT_MS, true, true, pulse_ns);
       if (f.success)
         latencies.push_back(f.latency_ms);
       V4lSession::sleep_ms(200);
@@ -2396,6 +2406,8 @@ void run_cold_start(const std::string &camera_path, MemoryBackend backend, Trigg
   const int CYCLES = static_cast<int>(tpv(tp, "t25-cold-start", "cycles"));
   const int MAX_FRAMES_PER_CYCLE = static_cast<int>(tpv(tp, "t25-cold-start", "max_frames_per_cycle"));
   const double STABILITY_THRESHOLD_PCT = tpv(tp, "t25-cold-start", "stability_threshold_pct");
+  const int CAPTURE_TIMEOUT_MS = static_cast<int>(tpv(tp, "t25-cold-start", "capture_timeout_ms"));
+  const int INTER_FRAME_INTERVAL_MS = static_cast<int>(tpv(tp, "t25-cold-start", "inter_frame_interval_ms"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t25", "Cold-start analysis: " + std::to_string(CYCLES) + " fresh cycles...");
 
@@ -2417,12 +2429,12 @@ void run_cold_start(const std::string &camera_path, MemoryBackend backend, Trigg
     // Capture frames sequentially, tracking latency from the very first frame
     std::vector<double> latencies;
     for (int i = 0; i < MAX_FRAMES_PER_CYCLE; i++) {
-      auto f = s.capture(trigger, 200, true, true, pulse_ns);
+      auto f = s.capture(trigger, CAPTURE_TIMEOUT_MS, true, true, pulse_ns);
       if (f.success)
         latencies.push_back(f.latency_ms);
       else
         latencies.push_back(-1.0);  // Mark miss
-      V4lSession::sleep_ms(100);
+      V4lSession::sleep_ms(INTER_FRAME_INTERVAL_MS);
     }
 
     // Find warmup point: first frame N where all subsequent frames up to end
@@ -2519,6 +2531,7 @@ void run_multi_camera(const std::vector<MultiCamParticipant> &participants, Memo
                       const LogFn &log, const TestThresholds &tp) {
   const int SAMPLES = static_cast<int>(tpv(tp, "t24-multi-camera", "sample_count"));
   const int POLL_TIMEOUT = static_cast<int>(tpv(tp, "t24-multi-camera", "poll_timeout_ms"));
+  const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t24-multi-camera", "warmup_count"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(
       log, participants[0].camera_path, "t24",
@@ -2536,7 +2549,7 @@ void run_multi_camera(const std::vector<MultiCamParticipant> &participants, Memo
   }
   // Warmup all
   for (size_t i = 0; i < participants.size(); i++)
-    sessions[i].warmup(*participants[i].trigger, 5, 200, nullptr, pulse_ns);
+    sessions[i].warmup(*participants[i].trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
   // Dedup participants sharing the SAME physical trigger (same chip:line
   // resolves to the same shared_ptr via TriggerRegistry) so a shared line

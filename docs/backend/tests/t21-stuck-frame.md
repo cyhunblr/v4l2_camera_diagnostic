@@ -34,6 +34,7 @@ Registry: `t21-stuck-frame` in [test_registry.cpp](../../../source/backend/core/
 | `sample_count` | 50 | count | Maximum frames to capture and compare. |
 | `compare_bytes` | 4096 | bytes | Number of leading bytes compared between consecutive frames. |
 | `capture_timeout_ms` | 100 | ms | Per-frame poll timeout. |
+| `warmup_count` | 5 | count | Warmup frames before measurement begins. |
 
 ## Output Metrics
 

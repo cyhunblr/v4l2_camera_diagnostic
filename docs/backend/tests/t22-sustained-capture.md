@@ -36,6 +36,7 @@ Registry: `t22-sustained-capture` in [test_registry.cpp](../../../source/backend
 | `window_sec` | 10 | s | Length of each statistical window. |
 | `sample_interval_ms` | 100 | ms | Delay between capture attempts (≈ 10 Hz). |
 | `capture_timeout_ms` | 100 | ms | Per-frame poll timeout. |
+| `warmup_count` | 5 | count | Warmup frames before sustained capture begins. |
 
 ## Output Metrics
 

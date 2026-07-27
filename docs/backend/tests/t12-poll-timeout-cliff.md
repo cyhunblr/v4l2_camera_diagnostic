@@ -31,6 +31,7 @@ Registry: `t12-poll-timeout-cliff` in [test_registry.cpp](../../../source/backen
 | `probe_frames` | 10 | count | Frames per probe at each timeout value |
 | `stability_rounds` | 5 | count | Rounds of stability confirmation |
 | `stability_frames` | 10 | count | Frames per stability round |
+| `warmup_count` | 10 | count | Warmup frames before adaptive search begins |
 
 ## Output Metrics
 

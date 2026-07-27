@@ -34,6 +34,8 @@ Registry: `t25-cold-start` in [test_registry.cpp](../../../source/backend/core/s
 | `cycles` | 10 | count | Number of independent open→capture→close cycles. |
 | `max_frames_per_cycle` | 30 | count | Maximum frames captured per cycle to search for stabilisation. |
 | `stability_threshold_pct` | 15.0 | % | Allowable deviation from steady-state mean to consider a frame "stable". |
+| `capture_timeout_ms` | 500 | ms | Safety timeout per capture attempt (prevents hang). |
+| `inter_frame_interval_ms` | 100 | ms | Delay between consecutive frame captures within a cycle. |
 
 ## Output Metrics
 

@@ -36,6 +36,8 @@ Registry: `t18-resolution-sweep` in [test_registry.cpp](../../../source/backend/
 | --- | ------- | ---- | ----------- |
 | `sample_count` | 15 | count | Captures per resolution |
 | `throughput_reps` | 30 | count | Memcpy repetitions for throughput benchmark |
+| `capture_timeout_ms` | 500 | ms | Safety timeout per capture attempt (prevents hang) |
+| `warmup_count` | 3 | count | Warmup frames per resolution before measurement |
 
 ## Output Metrics
 

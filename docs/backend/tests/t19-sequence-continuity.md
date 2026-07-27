@@ -35,6 +35,7 @@ Registry: `t19-sequence-continuity` in [test_registry.cpp](../../../source/backe
 | `sample_count` | 100 | count | Number of frames to capture. |
 | `capture_timeout_ms` | 100 | ms | Per-frame poll timeout. |
 | `sample_interval_ms` | 100 | ms | Delay between consecutive captures. |
+| `warmup_count` | 5 | count | Warmup frames before measurement begins. |
 
 ## Output Metrics
 

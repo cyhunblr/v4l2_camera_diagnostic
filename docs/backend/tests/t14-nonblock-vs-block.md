@@ -38,6 +38,7 @@ Registry: `t14-nonblock-vs-block` in [test_registry.cpp](../../../source/backend
 | `spin_deadline_ms` | 100 | ms | Maximum spin time in non-blocking mode before giving up |
 | `poll_timeout_ms` | 200 | ms | Poll timeout used for blocking mode warmup |
 | `sample_interval_ms` | 200 | ms | Delay between consecutive samples |
+| `warmup_count` | 5 | count | Warmup frames before measurement begins |
 
 ## Output Metrics
 

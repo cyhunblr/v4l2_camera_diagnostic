@@ -36,6 +36,7 @@ Registry: `t08-buffer-recycling` in [test_registry.cpp](../../../source/backend/
 | `reps_per_delay` | 10 | count | Repetitions at each delay value |
 | `capture_timeout_ms` | 100 | ms | Timeout for each capture attempt |
 | `inter_rep_interval_ms` | 100 | ms | Delay between repetitions |
+| `warmup_count` | 5 | count | Warmup frames before measurement begins |
 
 ## Output Metrics
 

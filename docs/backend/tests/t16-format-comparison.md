@@ -33,8 +33,8 @@ Registry: `t16-format-comparison` in [test_registry.cpp](../../../source/backend
 | ----- | --------- | ------ | ------------- |
 | `sample_count` | 20 | count | Captures per format |
 | `throughput_reps` | 50 | count | Memcpy repetitions for throughput benchmark |
-| `width` | 1920 | px | Capture width for format test |
-| `height` | 1280 | px | Capture height for format test |
+| `capture_timeout_ms` | 500 | ms | Safety timeout per capture attempt (prevents hang) |
+| `warmup_count` | 5 | count | Warmup frames before measurement begins |
 
 ## Output Metrics
 

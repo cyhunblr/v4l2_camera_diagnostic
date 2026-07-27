@@ -41,6 +41,7 @@ Registry: `t23-latency-under-load` in [test_registry.cpp](../../../source/backen
 | `baseline_timeout_ms` | 100 | ms | Poll timeout for baseline captures. |
 | `load_timeout_ms` | 200 | ms | Poll timeout for under-load captures (extended to accommodate jitter). |
 | `sample_interval_ms` | 200 | ms | Delay between consecutive captures in both phases. |
+| `warmup_count` | 5 | count | Warmup frames before each capture phase (baseline and load). |
 
 ## Output Metrics
 

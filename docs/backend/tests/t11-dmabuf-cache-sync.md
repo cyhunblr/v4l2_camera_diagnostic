@@ -35,6 +35,7 @@ Registry: `t11-dmabuf-cache-sync` in [test_registry.cpp](../../../source/backend
 | `sample_count` | 20 | frames | Number of frames to compare |
 | `compare_bytes` | 64 | bytes | Number of leading bytes compared per frame |
 | `capture_timeout_ms` | 100 | ms | Poll timeout for each capture attempt |
+| `warmup_count` | 5 | count | Warmup frames before measurement begins |
 
 ## Output Metrics
 

@@ -35,6 +35,7 @@ Registry: `t24-multi-camera` in [test_registry.cpp](../../../source/backend/core
 | --- | ------- | ---- | ----------- |
 | `sample_count` | 50 | count | Number of trigger-and-capture rounds. |
 | `poll_timeout_ms` | 200 | ms | Per-camera poll timeout within each round. |
+| `warmup_count` | 5 | count | Warmup frames per camera before measurement begins. |
 
 ## Output Metrics
 

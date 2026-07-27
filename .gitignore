@@ -25,3 +25,4 @@ source/frontend/test-results/
 # Agent
 .claude/
 .codex/
+.agents/

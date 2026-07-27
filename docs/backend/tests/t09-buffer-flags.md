@@ -37,6 +37,7 @@ Registry: `t09-buffer-flags` in [test_registry.cpp](../../../source/backend/core
 | `sample_count` | 50 | count | Number of frames to capture and analyze |
 | `capture_timeout_ms` | 100 | ms | Timeout for each capture attempt |
 | `sample_interval_ms` | 100 | ms | Delay between captures |
+| `warmup_count` | 5 | count | Warmup frames before measurement begins |
 
 ## Output Metrics
 
