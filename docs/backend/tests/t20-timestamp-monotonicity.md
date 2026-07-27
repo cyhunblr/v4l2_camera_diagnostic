@@ -51,6 +51,8 @@ Registry: `t20-timestamp-monotonicity` in [test_registry.cpp](../../../source/ba
 
 ### Wall-to-buffer offset statistics (`wall_buf_offset_*`)
 
+> `t_recv` is sampled from `CLOCK_REALTIME` while the driver stamps buffers with `CLOCK_MONOTONIC` (see `V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC` in [t09](t09-buffer-flags.md)). The two clocks sit on different epochs, so the offset is computed with that epoch gap measured and subtracted out — leaving the actual dequeue delay rather than decades of clock difference.
+
 | Metric Key | Unit | Description |
 | ----------- | ------ | ------------- |
 | `wall_buf_offset_mean` | ms | Mean offset between wall clock and buffer timestamp. |

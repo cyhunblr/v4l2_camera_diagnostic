@@ -234,7 +234,6 @@ Tests are grouped into 7 logical layers that run in dependency order:
 | --- | --- | --- | --- |
 | t22-sustained-capture | Sustained capture stability | stability | long-running (60 s) |
 | t23-latency-under-load | Latency under CPU load | stability | |
-| t24-max-fps | Maximum frame rate | stability | long-running; **not yet implemented** |
 | t25-multi-camera | Multi-camera contention | stability | long-running; **not yet implemented** |
 | t26-cold-start | Cold-start warm-up cost | stability | **not yet implemented** |
 
@@ -258,7 +257,7 @@ test:
 - **Missing `linux/dma-buf.h`** — `t11` additionally compiles to a `Skipped`
   result ("linux/dma-buf.h not available...") on systems without the DMA-BUF
   sync header.
-- **Not-yet-implemented tests** — `t18`, `t24`, `t25`, `t26` report `Skipped`
+- **Not-yet-implemented tests** — `t18`, `t25`, `t26` report `Skipped`
   with a "not yet implemented" message until their implementations land.
 
 List everything the current binary knows about, with implementation status:

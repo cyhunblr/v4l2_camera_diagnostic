@@ -327,7 +327,15 @@ run_step "Checking/installing system dependencies" ensure_dependencies
 run_step "Building web UI" build_frontend
 run_step "Building C++ project" build_cpp
 run_step "Installing files" install_files
-run_step "Granting CAP_SYSLOG for Export DMESG" grant_dmesg_capability
+
+if ! run_step "Granting CAP_SYSLOG for Export DMESG" grant_dmesg_capability; then
+  echo
+  echo "CAP_SYSLOG could not be granted, so Export DMESG may not work." >&2
+  echo "Rolling back this install with ./uninstallation.sh --yes ..." >&2
+  "${ROOT_DIR}/uninstallation.sh" --yes
+  exit 1
+fi
+
 path_notice
 
 echo

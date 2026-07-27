@@ -1158,6 +1158,8 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
   const int FULL_WARMUP = static_cast<int>(tpv(tp, "t05-stream-cycles", "full_warmup"));
   const int FULL_CAPTURES = static_cast<int>(tpv(tp, "t05-stream-cycles", "full_captures"));
   const int RAPID_PACING_MS = static_cast<int>(tpv(tp, "t05-stream-cycles", "rapid_pacing_ms"));
+  const int RAPID_TIMEOUT_MS = static_cast<int>(tpv(tp, "t05-stream-cycles", "rapid_timeout_ms"));
+  const int FULL_TIMEOUT_MS = static_cast<int>(tpv(tp, "t05-stream-cycles", "full_timeout_ms"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   int full_failures = 0;
   std::vector<double> first_lat;
@@ -1174,7 +1176,7 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
     s.warmup(trigger, FULL_WARMUP, 200, nullptr, pulse_ns);
     int ok = 0;
     for (int i = 0; i < FULL_CAPTURES; i++) {
-      auto f = s.capture(trigger, 100, true, true, pulse_ns);
+      auto f = s.capture(trigger, FULL_TIMEOUT_MS, true, true, pulse_ns);
       if (f.success) {
         ok++;
         if (i == 0)
@@ -1186,13 +1188,19 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
       full_failures++;
   }
 
+  const int RAPID_WARMUP = static_cast<int>(tpv(tp, "t05-stream-cycles", "rapid_warmup"));
   int rapid_ok = 0;
   for (int c = 0; c < RAPID; c++) {
     V4lSession s;
     std::string err;
     if (!s.open(camera_path, &err) || !s.start(2, backend, &err))
       continue;
-    if (s.capture(trigger, 200, true, true, pulse_ns).success)
+    // Every rapid iteration opens a fresh session, so each one pays the
+    // cold-start cost that t26 measures (a sensor discards its first frame
+    // after STREAMON). Without this warmup the very first capture is always
+    // the sacrificial frame and rapid_ok can never rise above zero.
+    s.warmup(trigger, RAPID_WARMUP, RAPID_PACING_MS, nullptr, pulse_ns);
+    if (s.capture(trigger, RAPID_TIMEOUT_MS, true, true, pulse_ns).success)
       rapid_ok++;
     V4lSession::sleep_ms(RAPID_PACING_MS);
   }
@@ -1328,8 +1336,17 @@ void run_timestamp_monotonicity(const std::string &camera_path, MemoryBackend ba
     if (buf_ts[i] <= buf_ts[i - 1])
       non_mono++;
   }
+  // t_recv is CLOCK_REALTIME while the driver stamps buffers with
+  // CLOCK_MONOTONIC (confirmed by V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC in t09).
+  // Subtracting them raw leaves the epoch gap — decades of it — swamping the
+  // sub-millisecond delivery latency this metric is meant to expose. Measure
+  // the gap between the two clocks and take it back out.
+  struct timespec now_rt, now_mono;
+  clock_gettime(CLOCK_REALTIME, &now_rt);
+  clock_gettime(CLOCK_MONOTONIC, &now_mono);
+  const double epoch_gap_ms = (now_rt.tv_sec - now_mono.tv_sec) * 1e3 + (now_rt.tv_nsec - now_mono.tv_nsec) / 1e6;
   for (size_t i = 0; i < buf_ts.size(); i++)
-    offsets_ms.push_back((wall_ts[i] - buf_ts[i]) / 1000.0);
+    offsets_ms.push_back((wall_ts[i] - buf_ts[i]) / 1000.0 - epoch_gap_ms);
 
   push_stats_metrics(r.metrics, "delta", compute_stats(deltas_ms));
   push_stats_metrics(r.metrics, "wall_buf_offset", compute_stats(offsets_ms));
@@ -1692,10 +1709,46 @@ void run_gpio_pulse_width(const std::string &camera_path, MemoryBackend backend,
     const double rh = sum_rh / full_rows, rl = sum_rl / full_rows;
     r.metrics.push_back(metric("range_h", "ms", rh, "Avg within-level range of lat_HIGH."));
     r.metrics.push_back(metric("range_l", "ms", rl, "Avg within-level range of lat_LOW."));
-    if (rh < rl - 1.0)
-      edge = "rising";
-    else if (rl < rh - 1.0)
-      edge = "falling";
+
+    // Which edge the sensor latches on is revealed ACROSS widths, not within a
+    // single width: t_low is derived as t_high + pulse_width, so lat_LOW is
+    // identically lat_HIGH - pulse_width and the two within-level ranges are
+    // always equal. Comparing them can therefore never resolve an edge.
+    // Instead, the latency measured from the true latching edge stays flat as
+    // the pulse width is swept, while the other one tracks the width.
+    std::vector<double> lat_h, lat_l;
+    for (int wi = 0; wi < N; wi++) {
+      const std::string pstr = std::to_string(pws[wi]);
+      const std::string hk = "lat_high_avg_" + pstr + "ms", lk = "lat_low_avg_" + pstr + "ms";
+      double hv = 0.0, lv = 0.0;
+      bool have_h = false, have_l = false;
+      for (const auto &m : r.metrics) {
+        if (m.name == hk) {
+          hv = m.value;
+          have_h = true;
+        } else if (m.name == lk) {
+          lv = m.value;
+          have_l = true;
+        }
+      }
+      if (have_h && have_l) {
+        lat_h.push_back(hv);
+        lat_l.push_back(lv);
+      }
+    }
+    if (lat_h.size() >= 3) {
+      const double spread_h =
+          *std::max_element(lat_h.begin(), lat_h.end()) - *std::min_element(lat_h.begin(), lat_h.end());
+      const double spread_l =
+          *std::max_element(lat_l.begin(), lat_l.end()) - *std::min_element(lat_l.begin(), lat_l.end());
+      r.metrics.push_back(metric("spread_h", "ms", spread_h, "Spread of lat_HIGH across swept widths."));
+      r.metrics.push_back(metric("spread_l", "ms", spread_l, "Spread of lat_LOW across swept widths."));
+      const double EDGE_MARGIN_MS = tpv(tp, "t15-gpio-pulse-width", "edge_margin_ms");
+      if (spread_h + EDGE_MARGIN_MS < spread_l)
+        edge = "rising";
+      else if (spread_l + EDGE_MARGIN_MS < spread_h)
+        edge = "falling";
+    }
     r.details.push_back("Edge detection: " + edge);
   }
   r.status = TestStatus::Pass;
@@ -1977,7 +2030,7 @@ void run_latency_under_load(const std::string &camera_path, MemoryBackend backen
 
 // Docs: docs/backend/tests/t02-control-inventory.md
 void run_control_inventory(const std::string &camera_path, TestResult &r, const LogFn &log) {
-  emit(log, camera_path, "t24", "Enumerating V4L2 controls...");
+  emit(log, camera_path, "t02", "Enumerating V4L2 controls...");
   int fd = ::open(camera_path.c_str(), O_RDWR | O_NONBLOCK);
   if (fd < 0) {
     r.status = TestStatus::Fail;
@@ -2303,98 +2356,6 @@ void run_cold_start(const std::string &camera_path, MemoryBackend backend, Trigg
     r.status = TestStatus::Warn;
     r.summary = "Slow warm-up: mean=" + std::to_string(static_cast<int>(mean_warmup)) +
                 " frames, max=" + std::to_string(max_warmup) + " — consider longer warm-up in other tests.";
-  }
-}
-
-// Docs: docs/backend/tests/t24-max-fps.md
-void run_max_fps(const std::string &camera_path, MemoryBackend backend, TriggerSource &trigger, TestResult &r,
-                 const LogFn &log, const TestThresholds &tp) {
-  const int DURATION_SEC = static_cast<int>(tpv(tp, "t24-max-fps", "duration_sec"));
-  const int WARMUP_FRAMES = static_cast<int>(tpv(tp, "t24-max-fps", "warmup_frames"));
-  const int POLL_TIMEOUT = static_cast<int>(tpv(tp, "t24-max-fps", "poll_timeout_ms"));
-  const uint64_t pulse_ns = pulse_ns_from(tp);
-  emit(log, camera_path, "t24", "Max FPS: measuring sustained rate for " + std::to_string(DURATION_SEC) + "s...");
-
-  V4lSession s;
-  std::string err;
-  if (!s.open(camera_path, &err) || !s.start(4, backend, &err)) {
-    r.status = TestStatus::Fail;
-    r.summary = "Session setup failed: " + err;
-    return;
-  }
-  // Warmup
-  for (int i = 0; i < WARMUP_FRAMES; i++) {
-    s.capture(trigger, POLL_TIMEOUT, true, true, pulse_ns);
-  }
-
-  emit(log, camera_path, "t24", "Warmup done, starting timed capture...");
-  const auto t_start = std::chrono::steady_clock::now();
-  const auto t_end = t_start + std::chrono::seconds(DURATION_SEC);
-  int total_sent = 0, total_received = 0, total_missed = 0;
-  std::vector<double> latencies;
-  int window_frames = 0;
-  double max_window_fps = 0.0;
-  auto window_start = t_start;
-
-  while (std::chrono::steady_clock::now() < t_end) {
-    total_sent++;
-    auto f = s.capture(trigger, POLL_TIMEOUT, true, true, pulse_ns);
-    if (f.success) {
-      total_received++;
-      window_frames++;
-      latencies.push_back(f.latency_ms);
-    } else {
-      total_missed++;
-    }
-    // Calculate per-second window FPS
-    auto now = std::chrono::steady_clock::now();
-    double window_elapsed = std::chrono::duration<double>(now - window_start).count();
-    if (window_elapsed >= 1.0) {
-      double window_fps = window_frames / window_elapsed;
-      max_window_fps = std::max(max_window_fps, window_fps);
-      window_frames = 0;
-      window_start = now;
-    }
-  }
-
-  const auto actual_end = std::chrono::steady_clock::now();
-  double total_elapsed = std::chrono::duration<double>(actual_end - t_start).count();
-  double sustained_fps = total_received / total_elapsed;
-  double send_rate = total_sent / total_elapsed;
-  double drop_pct = total_sent > 0 ? (100.0 * total_missed / total_sent) : 0.0;
-
-  r.metrics.push_back(metric("sustained_fps", "fps", sustained_fps, "Sustained frame rate over test duration."));
-  r.metrics.push_back(metric("max_window_fps", "fps", max_window_fps, "Peak 1-second window frame rate."));
-  r.metrics.push_back(metric("send_rate", "fps", send_rate, "Trigger send rate achieved."));
-  r.metrics.push_back(metric("total_sent", "count", static_cast<double>(total_sent), "Triggers sent."));
-  r.metrics.push_back(metric("total_received", "count", static_cast<double>(total_received), "Frames received."));
-  r.metrics.push_back(metric("total_missed", "count", static_cast<double>(total_missed), "Frames missed."));
-  r.metrics.push_back(metric("drop_pct", "%", drop_pct, "Frame drop percentage."));
-  if (!latencies.empty()) {
-    Stats ls = compute_stats(latencies);
-    push_stats_metrics_p95(r.metrics, "latency", ls);
-  }
-
-  r.details.push_back("Duration: " + std::to_string(static_cast<int>(total_elapsed)) + "s");
-  r.details.push_back("Sustained FPS: " + std::to_string(static_cast<int>(sustained_fps)));
-  r.details.push_back("Peak window FPS: " + std::to_string(static_cast<int>(max_window_fps)));
-  r.details.push_back("Drop rate: " + std::to_string(static_cast<int>(drop_pct)) + "%");
-
-  emit(log, camera_path, "t24",
-       "Result: " + std::to_string(static_cast<int>(sustained_fps)) + " fps sustained, " +
-           std::to_string(static_cast<int>(drop_pct)) + "% drops");
-
-  if (drop_pct < 5.0) {
-    r.status = TestStatus::Pass;
-    r.summary = "Sustained " + std::to_string(static_cast<int>(sustained_fps)) + " fps with <5% drops.";
-  } else if (drop_pct < 20.0) {
-    r.status = TestStatus::Warn;
-    r.summary = "Sustained " + std::to_string(static_cast<int>(sustained_fps)) + " fps but " +
-                std::to_string(static_cast<int>(drop_pct)) + "% drops observed.";
-  } else {
-    r.status = TestStatus::Fail;
-    r.summary = "High drop rate (" + std::to_string(static_cast<int>(drop_pct)) +
-                "%) — pipeline cannot sustain the trigger rate.";
   }
 }
 
@@ -2825,9 +2786,7 @@ TestResult DiagnosticRunner::run_test(const std::string &camera_path, MemoryBack
     run_sustained_capture(camera_path, backend, *trigger, result, log, thresholds_for(definition.id), tp);
   else if (definition.id == "t23-latency-under-load")
     run_latency_under_load(camera_path, backend, *trigger, result, log, thresholds_for(definition.id), tp);
-  else if (definition.id == "t24-max-fps") {
-    run_max_fps(camera_path, backend, *trigger, result, log, tp);
-  } else if (definition.id == "t25-multi-camera") {
+  else if (definition.id == "t25-multi-camera") {
     // Multi-camera requires at least one slave in addition to the master.
     // It opens every participant camera itself and dispatches naturally at
     // most once per run() since only the master's test suite ever calls

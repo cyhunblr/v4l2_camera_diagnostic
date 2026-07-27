@@ -20,10 +20,12 @@ Sweeps GPIO trigger pulse widths from 1 ms to 30 ms to characterize the camera's
       - On success, records latency from HIGH edge and latency from LOW edge.
    b. Computes per-width statistics: hit count, mean latency from HIGH, mean latency from LOW.
 3. Across all widths that achieved 100% hits, computes the average within-level range for both HIGH-referenced and LOW-referenced latencies.
-4. Determines the likely trigger edge:
-   - If HIGH range < LOW range − 1 ms → **rising edge** trigger.
-   - If LOW range < HIGH range − 1 ms → **falling edge** trigger.
+4. Determines the likely trigger edge by comparing how much each reference's mean latency moves **across** the swept widths (`spread_h` vs `spread_l`):
+   - If HIGH spread + `edge_margin_ms` < LOW spread → **rising edge** trigger.
+   - If LOW spread + `edge_margin_ms` < HIGH spread → **falling edge** trigger.
    - Otherwise → **inconclusive**.
+
+   The comparison must be made across widths rather than within a single width. The LOW edge time is *derived* as HIGH + pulse_width, so `lat_LOW` is identically `lat_HIGH − pulse_width` and the two within-level ranges (`range_h`, `range_l`) are always equal by construction — comparing those can never resolve an edge. Latency measured from the edge the sensor actually latches on stays flat as the width is swept, while the other reference tracks the width.
 
 ## Implementation
 
@@ -40,6 +42,7 @@ Registry: `t15-gpio-pulse-width` in [test_registry.cpp](../../../source/backend/
 | `samples_per_width` | 8 | count | Captures per pulse width level |
 | `warmup_count` | 5 | count | Warmup captures before sweep |
 | `poll_timeout_ms` | 500 | ms | Maximum wait for frame after trigger |
+| `edge_margin_ms` | 1.0 | ms | Minimum gap by which one edge's across-width latency spread must undercut the other before an edge is declared |
 
 ## Output Metrics
 
@@ -57,6 +60,8 @@ Registry: `t15-gpio-pulse-width` in [test_registry.cpp](../../../source/backend/
 | ----------- | ------ | ------------- |
 | `range_h` | ms | Average within-level range of HIGH-referenced latency |
 | `range_l` | ms | Average within-level range of LOW-referenced latency |
+| `spread_h` | ms | Spread of mean HIGH-referenced latency across the swept widths (drives edge detection) |
+| `spread_l` | ms | Spread of mean LOW-referenced latency across the swept widths (drives edge detection) |
 
 ## Report Details
 
@@ -86,7 +91,8 @@ This test always passes if it can run — it is a characterization test. The edg
 - **Edge = inconclusive**: Camera may be level-sensitive, or the measurement noise exceeds the edge timing difference.
 - **hits < samples_per_width at narrow widths**: The pulse is too short for the camera's trigger input filter — this is the minimum viable pulse width.
 - **lat_HIGH constant across all widths, lat_LOW decreasing**: Classic rising-edge trigger behavior — latency from trigger to frame is fixed regardless of pulse duration.
-- **range_h ≈ range_l**: Both edges contribute to latency equally — level-sensitive or center-triggered.
+- **range_h ≈ range_l**: Expected in every run and not diagnostic — the two are equal by construction, since LOW is derived as HIGH + pulse_width. Use `spread_h` / `spread_l` to reason about the edge instead.
+- **spread_h ≈ spread_l**: Neither reference stays flat as the width is swept — level-sensitive or center-triggered, or the sweep did not produce enough fully-hit widths.
 
 ## Failure Modes
 

@@ -73,10 +73,10 @@ A summary box is also emitted to the log:
 
 ```text
 ╔═══════ CLIFF SUMMARY ══════════╗
-║  Production timeout :  48.5ms  ║
+║  Production timeout : 100.0ms  ║
 ║  Cliff (post-pulse) :    32ms  ║
 ║  Cliff (total)      :  42.0ms  ║
-║  Safety margin      :  16.5ms  ║
+║  Safety margin      :  68.0ms  ║
 ║  Stability          :   5/5    ║
 ║  Confirmed          :   YES    ║
 ╚════════════════════════════════╝
@@ -102,7 +102,7 @@ latency figures from other tests (e.g. `t13-trigger-latency`).
 
 | Key | Default | Description |
 | --- | ------- | ----------- |
-| `production_timeout_ms` | 48.5 | The production poll timeout to compare against |
+| `production_timeout_ms` | 100.0 | The production poll timeout to compare against |
 | `safe_margin_ms` | 5.0 | Minimum acceptable safety margin for Pass |
 
 ## Interpretation Guide

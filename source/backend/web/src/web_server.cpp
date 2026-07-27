@@ -756,8 +756,10 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
 
   if (method == "GET" && path == "/api/dmesg") {
     *content_type = "text/plain; charset=utf-8";
-    // Try dmesg first, fall back to journalctl -k if permission denied.
-    const char *commands[] = {"dmesg 2>&1", "journalctl -k --no-pager 2>&1"};
+    // Try dmesg first, fall back to journalctl -k -b if permission denied.
+    // -b limits to the current boot — without it journalctl -k spans every
+    // retained boot, unlike dmesg.
+    const char *commands[] = {"dmesg 2>&1", "journalctl -k -b --no-pager 2>&1"};
     for (const char *cmd : commands) {
       FILE *pipe = popen(cmd, "r");
       if (!pipe)
@@ -772,7 +774,7 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
       }
     }
     *status_code = MHD_HTTP_INTERNAL_SERVER_ERROR;
-    return "Cannot read kernel log. Both dmesg and journalctl -k failed (permission denied?).\n";
+    return "Cannot read kernel log. Both dmesg and journalctl -k -b failed (permission denied?).\n";
   }
 
   if (method == "GET" && path == "/api/devices") {

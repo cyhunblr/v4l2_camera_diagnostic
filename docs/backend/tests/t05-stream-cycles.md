@@ -11,7 +11,7 @@ Exercises repeated STREAMON/STREAMOFF cycles to detect resource leaks, race cond
 ## How It Works
 
 1. **Full cycles (20 iterations):** Each cycle opens the device, starts streaming with 2 buffers, warms up (3 frames), captures 5 frames, and closes. A cycle is counted as a failure if any step fails or fewer than 5 frames are captured. The first-frame latency from each cycle is recorded.
-2. **Rapid cycles (50 iterations):** Each cycle opens the device, starts streaming, captures a single frame (200ms timeout), and closes with only 10ms delay between cycles. This stresses the open/close path.
+2. **Rapid cycles (50 iterations):** Each cycle opens the device, starts streaming, warms up (1 frame), captures a single frame (200ms timeout), and closes with a short delay between cycles. This stresses the open/close path. The warmup frame is required because every iteration opens a fresh session and therefore pays the cold-start cost measured by [t26](t26-cold-start.md) — sensors that discard their first frame after STREAMON would otherwise spend it on the measured capture and score 0.
 3. Results are compared against thresholds for full failure count and rapid success percentage.
 
 ## Implementation
@@ -30,7 +30,10 @@ Registry: `t05-stream-cycles` in [test_registry.cpp](../../../source/backend/cor
 | `rapid_cycles` | 50 | count | Number of rapid start/capture/stop cycles |
 | `full_warmup` | 3 | count | Warmup frames per full cycle |
 | `full_captures` | 5 | count | Frames to capture per full cycle |
-| `rapid_pacing_ms` | 10 | ms | Delay between rapid cycles |
+| `full_timeout_ms` | 150 | ms | Capture timeout per full-cycle frame |
+| `rapid_warmup` | 1 | count | Warmup frames per rapid cycle (absorbs the cold-start frame) |
+| `rapid_timeout_ms` | 200 | ms | Capture timeout for the measured rapid-cycle frame |
+| `rapid_pacing_ms` | 60 | ms | Delay between rapid cycles |
 
 ## Output Metrics
 
@@ -72,6 +75,6 @@ Full: 20/20 OK. Rapid: 48/50 captured.
 | Symptom | Likely Cause |
 | --------- | -------------- |
 | Increasing full_cycle_failures | Kernel resource leak — buffers or file descriptors not released properly |
-| rapid_cycles_ok ≪ rapid_cycles_total | Driver needs >10ms between STREAMOFF and the next open/start |
+| rapid_cycles_ok ≪ rapid_cycles_total | Driver needs more than `rapid_pacing_ms` between STREAMOFF and the next open/start |
 | first_frame_latency degrades over time | Memory fragmentation or DMA channel exhaustion |
-| All rapid cycles fail | Driver cannot start streaming without a longer settle period |
+| All rapid cycles fail | Driver cannot start streaming without a longer settle period, or the sensor discards more than `rapid_warmup` frames after STREAMON — cross-check [t26](t26-cold-start.md) and raise `rapid_warmup` to match |

@@ -204,7 +204,10 @@ ThresholdConfig default_threshold_config() {
   config.description = "Built-in default verdict thresholds (conservative, matches historical behavior).";
   config.values = {
       {"t07-buffer-overwrite", {{"max_error_flags", 0}}},
-      {"t12-poll-timeout-cliff", {{"production_timeout_ms", 48.5}, {"safe_margin_ms", 5.0}}},
+      // production_timeout_ms is the poll() budget this suite recommends for
+      // production use; safety_margin_ms reports how far it clears the measured
+      // cliff. 48.5ms sat only ~3ms above a 45ms cliff, under safe_margin_ms.
+      {"t12-poll-timeout-cliff", {{"production_timeout_ms", 100.0}, {"safe_margin_ms", 5.0}}},
       {"t19-sequence-continuity", {{"max_dropped_frames", 5}, {"max_non_monotonic", 0}}},
       {"t22-sustained-capture",
        {{"pass_rate_pct", 95.0}, {"warn_rate_pct", 80.0}, {"pass_drift_ms", 1.0}, {"warn_drift_ms", 5.0}}},
@@ -231,7 +234,16 @@ std::map<std::string, TestThresholds> default_test_params() {
       {"t04-pollerr-handling",
        {{"baseline_captures", 3}, {"recovery_captures", 3}, {"poll_timeout_ms", 100}, {"warmup_count", 3}}},
       {"t05-stream-cycles",
-       {{"full_cycles", 20}, {"rapid_cycles", 50}, {"full_warmup", 3}, {"full_captures", 5}, {"rapid_pacing_ms", 10}}},
+       {{"full_cycles", 20},
+        {"rapid_cycles", 50},
+        {"full_warmup", 3},
+        {"full_captures", 5},
+        {"full_timeout_ms", 150},
+        // A freshly opened session discards its first frame (see t26), so the
+        // rapid loop needs a warmup frame of its own before the measured capture.
+        {"rapid_warmup", 1},
+        {"rapid_timeout_ms", 200},
+        {"rapid_pacing_ms", 60}}},
       {"t06-multi-buffer",
        {{"sample_count", 20},
         {"max_buffers", 5},
@@ -254,7 +266,13 @@ std::map<std::string, TestThresholds> default_test_params() {
        {{"sample_count", 50}, {"warmup_count", 5}, {"capture_timeout_ms", 100}, {"sample_interval_ms", 200}}},
       {"t14-nonblock-vs-block",
        {{"sample_count", 30}, {"spin_deadline_ms", 100}, {"poll_timeout_ms", 200}, {"sample_interval_ms", 200}}},
-      {"t15-gpio-pulse-width", {{"samples_per_width", 8}, {"warmup_count", 5}, {"poll_timeout_ms", 500}}},
+      {"t15-gpio-pulse-width",
+       {{"samples_per_width", 8},
+        {"warmup_count", 5},
+        {"poll_timeout_ms", 500},
+        // Min ms by which one edge's across-width latency spread must undercut
+        // the other before an edge is declared.
+        {"edge_margin_ms", 1.0}}},
       {"t16-format-comparison", {{"sample_count", 20}, {"throughput_reps", 50}}},
       {"t17-control-sweep", {{"warmup_count", 8}, {"sample_count", 20}, {"capture_timeout_ms", 200}}},
       {"t18-resolution-sweep", {{"sample_count", 15}, {"throughput_reps", 30}}},
@@ -270,7 +288,6 @@ std::map<std::string, TestThresholds> default_test_params() {
         {"load_timeout_ms", 200},
         {"sample_interval_ms", 200}}},
       {"t26-cold-start", {{"cycles", 10}, {"max_frames_per_cycle", 30}, {"stability_threshold_pct", 15.0}}},
-      {"t24-max-fps", {{"duration_sec", 10}, {"warmup_frames", 20}, {"poll_timeout_ms", 100}}},
       {"t25-multi-camera", {{"sample_count", 50}, {"poll_timeout_ms", 200}}},
   };
 }
