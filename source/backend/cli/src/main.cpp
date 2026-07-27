@@ -37,6 +37,8 @@ void print_usage() {
       << "  --trigger-channel ID       Trigger channel applied to every selected camera.\n"
       << "  --backend LIST             mmap, dmabuf, userptr. Default: mmap.\n"
       << "  --tests LIST               Test ids, categories, all, stable, or implemented. Default: implemented.\n"
+      << "                             A test named by its exact id always runs, even if long-running or\n"
+      << "                             experimental; the flags below only affect group selectors.\n"
       << "  --report LIST              json, markdown, md, html, pdf. Default: json,html.\n"
       << "  --output-dir DIR           Report output directory. Default: reports.\n"
       << "  --thresholds ID            Verdict threshold config id. Default: default.\n"

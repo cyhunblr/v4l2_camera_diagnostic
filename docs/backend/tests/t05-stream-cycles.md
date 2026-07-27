@@ -3,6 +3,11 @@
 **Layer:** 2 — State-machine correctness  
 **Category:** stream-state  
 **Trigger modes:** Hardware | Software | FreeRun  
+**Flags:** experimental, risky — **not part of the default sweep**
+
+> **Opt-in only.** Run it with `--include-experimental` on the CLI, or the "include experimental" checkbox in the web UI. Naming it directly (`--tests t05-stream-cycles`) also runs it, since an exact id is an explicit opt-in.
+>
+> The test is gated because cycling STREAMON hard enough to be meaningful is destructive on hardware where several sensors share a deserializer and fsync source: every STREAMON re-initialises the whole camera group over I2C. In the field this has wedged the capture channel badly enough to reset the board. The guards described below keep that from running away, but the safest default is not to run it at all.
 
 ## Purpose
 
@@ -14,11 +19,23 @@ Exercises repeated STREAMON/STREAMOFF cycles to detect resource leaks, race cond
 2. **Rapid cycles (50 iterations):** Each cycle opens the device, starts streaming, warms up (1 frame, covering sensors that discard their first frame after STREAMON — see [t25](t25-cold-start.md)), captures a single frame, and closes with a settle delay between cycles. This stresses the open/close path.
 3. Results are compared against thresholds for full failure count and rapid success percentage.
 
-> **Hardware-protection guard.** Both loops stop early once `max_consecutive_start_failures` open/STREAMON attempts fail back-to-back, and the test reports `Fail`.
+> **Hardware-protection guard.**
 >
-> This is not a cosmetic limit. Where several sensors sit behind a shared deserializer and fsync source, a STREAMON re-initialises the *whole camera group* over I2C — a single `/dev/videoN` is not independent. Once that re-init starts failing, each further cycle drives the capture channel into another `request timed out after 2500 ms` / `err_rec: attempting to reset the capture channel` round. Left unchecked this degrades into I2C read/write errors, `Power on Camera Sensor failed`, a `vb2_start_streaming` kernel warning, and ultimately a board reset — the diagnostic taking down the machine it is measuring.
+> Where several sensors sit behind a shared deserializer and fsync source, a STREAMON re-initialises the *whole camera group* over I2C — a single `/dev/videoN` is not independent. Once that re-init starts struggling, each further cycle drives the capture channel into another `request timed out after 2500 ms` / `err_rec: attempting to reset the capture channel` round. Left unchecked this degrades into I2C errors (`failed to read the MFP7 pin: -121`), `Camera failed to start streaming`, a `vb2_start_streaming` kernel warning, and ultimately a board reset — the diagnostic taking down the machine it is measuring.
 >
-> A failed STREAMON is therefore recorded (`rapid_start_failures`) rather than silently skipped. Silently skipping it also hides the real fault: a run can report `rapid_cycles_ok = 0` while the true cause is that streaming never started at all, not that frames were missed.
+> Three signals stop the cycling, and the test reports `Fail`:
+>
+> | Guard | Parameter | Why it exists |
+> | --- | --- | --- |
+> | Back-to-back failures | `max_consecutive_start_failures` | The obvious case: the group stops coming back at all |
+> | Total failures | `max_start_failures` | **Failures often alternate with successes** (`OK, OK, FAIL, OK, …`) and never accumulate consecutively, while the hardware degrades anyway. A consecutive-only counter never trips on that pattern |
+> | Slow STREAMON | `slow_start_ms`, `max_slow_starts` | The earliest signal, and it appears *before* the first failure. A healthy STREAMON is milliseconds; seconds means a full group re-init is happening every cycle |
+>
+> On top of that, the **full loop acts as the canary for the rapid loop**: if any full-cycle STREAMON exceeded `slow_start_ms`, the rapid phase is skipped entirely (`rapid_skipped = 1`, verdict `Warn`). The full loop spends seconds capturing between cycles so it stresses the hardware far less; the rapid loop does nothing *but* cycle. If the gentler phase already shows the slow path, running the aggressive one is not worth risking the board.
+>
+> A failed STREAMON is recorded (`rapid_start_failures`) rather than silently skipped. Hiding it also hides the real fault: a run can report `rapid_cycles_ok = 0` when the true cause is that streaming never started, not that frames were missed.
+>
+> Setting `slow_start_ms` to zero or a negative value disables the duration watchdog rather than marking every start slow.
 
 ## Implementation
 
@@ -40,7 +57,10 @@ Registry: `t05-stream-cycles` in [test_registry.cpp](../../../source/backend/cor
 | `rapid_warmup` | 1 | count | Warmup frames per rapid cycle (absorbs the cold-start frame) |
 | `rapid_timeout_ms` | 200 | ms | Capture timeout for the measured rapid-cycle frame |
 | `rapid_pacing_ms` | 250 | ms | Settle delay between rapid cycles. Sized for re-initialising a shared camera group over I2C, not for the frame interval |
-| `max_consecutive_start_failures` | 3 | count | Back-to-back open/STREAMON failures after which a loop stops early (applies to both loops) |
+| `max_consecutive_start_failures` | 3 | count | Back-to-back open/STREAMON failures after which a loop stops early (both loops) |
+| `max_start_failures` | 5 | count | Total open/STREAMON failures across both loops before stopping |
+| `slow_start_ms` | 2000 | ms | An open+STREAMON slower than this counts as "slow". Zero or negative disables the watchdog |
+| `max_slow_starts` | 3 | count | Slow starts tolerated before stopping |
 | `recovery_ms` | 1000 | ms | Pause after a failed open/STREAMON to let the hardware recover before retrying |
 
 ## Output Metrics
@@ -56,6 +76,10 @@ Registry: `t05-stream-cycles` in [test_registry.cpp](../../../source/backend/cor
 | `rapid_cycles_attempted` | count | Rapid cycles actually run (below `rapid_cycles` if the loop stopped early) |
 | `rapid_start_failures` | count | Rapid cycles where open/STREAMON failed outright |
 | `rapid_aborted` | bool | Rapid loop stopped early by the hardware-protection guard |
+| `rapid_skipped` | bool | Rapid loop never run because the full loop already saw a slow STREAMON |
+| `start_failures_total` | count | open/STREAMON failures across both loops |
+| `streamon_ms_max` | ms | Slowest open+STREAMON. Seconds here means a shared camera group is re-initialised every cycle |
+| `streamon_ms_mean` | ms | Mean open+STREAMON duration |
 | `first_frame_latency_mean` | ms | Mean first-frame latency across full cycles |
 | `first_frame_latency_max` | ms | Maximum first-frame latency |
 
@@ -71,7 +95,8 @@ Full: 20/20 OK. Rapid: 48/50 captured.
 
 | Status | Condition |
 | -------- | ----------- |
-| **Fail** | Either loop stopped early on repeated STREAMON failures (checked first) |
+| **Fail** | Either loop stopped early by the hardware-protection guard (checked first) |
+| **Warn** | Rapid phase skipped because STREAMON was already slow — it was never measured, so it is not scored as a failure; the full cycles alone decide |
 | **Pass** | full_failures ≤ 0 AND rapid success % ≥ 90% |
 | **Warn** | full_failures ≤ 2 AND rapid success % ≥ 70% |
 | **Fail** | full_failures > 2 OR rapid success % < 70% |
@@ -95,5 +120,6 @@ number actually attempted — an early stop must not flatter the score.
 | Increasing full_cycle_failures | Kernel resource leak — buffers or file descriptors not released properly |
 | rapid_cycles_ok ≪ rapid_cycles_total, rapid_start_failures = 0 | Driver needs more than `rapid_pacing_ms` between STREAMOFF and the next open/start |
 | rapid_aborted / full_aborted = 1 | The camera group stopped coming back after STREAMON. On shared-deserializer hardware this is where a runaway loop can reset the board — treat it as a hardware/driver fault, not a tuning problem, and read the kernel log |
+| rapid_skipped = 1, streamon_ms_max in the seconds | Every STREAMON re-initialises a shared camera group. Not a tuning problem: raising `slow_start_ms` to force the rapid phase through risks the board. Investigate the sensor/deserializer driver instead |
 | first_frame_latency degrades over time | Memory fragmentation or DMA channel exhaustion |
 | All rapid cycles fail | Driver cannot start streaming without a longer settle period, or the sensor discards more than `rapid_warmup` frames after STREAMON — cross-check [t25](t25-cold-start.md) and raise `rapid_warmup` to match |

@@ -116,7 +116,7 @@ export function TestSelectionPage({
                             <p className="info-popover-meta">
                               {test.implemented_in_core ? "implemented" : "not implemented"} ·{" "}
                               {test.long_running ? "long-running" : "quick"} ·{" "}
-                              {test.risky ? "experimental" : "stable"}
+                              {test.experimental ? "experimental" : test.risky ? "risky" : "stable"}
                             </p>
                           </div>
                         }

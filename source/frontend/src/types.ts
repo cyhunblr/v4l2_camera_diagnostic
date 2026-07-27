@@ -97,6 +97,8 @@ export type TestDefinition = {
   description: string;
   implemented_in_core: boolean;
   long_running: boolean;
+  /** Gated behind "include experimental"; `risky` alone does not gate a test. */
+  experimental: boolean;
   risky: boolean;
   uses_trigger: boolean;
   supported_trigger_modes: TriggerMode[];

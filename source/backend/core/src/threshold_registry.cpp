@@ -247,10 +247,18 @@ std::map<std::string, TestThresholds> default_test_params() {
         // re-initialises the whole camera group over I2C — that needs far more
         // settle time than the frame interval alone suggests.
         {"rapid_pacing_ms", 250},
-        // Safety valve for both loops: stop cycling once STREAMON keeps
-        // failing, rather than driving the VI channel through repeated
-        // timeout-and-reset.
+        // Safety valves for both loops. Failure counting alone is not enough:
+        // failures can alternate with successes and never accumulate
+        // consecutively while the hardware still degrades, so a total budget
+        // and a duration watchdog back it up.
         {"max_consecutive_start_failures", 3},
+        {"max_start_failures", 5},
+        // A healthy STREAMON is milliseconds. Seconds means the driver is
+        // re-initialising a whole shared camera group over I2C — the earliest
+        // reliable signal that rapid cycling is unsafe here, and it appears
+        // before the first outright failure.
+        {"slow_start_ms", 2000},
+        {"max_slow_starts", 3},
         {"recovery_ms", 1000}}},
       {"t06-multi-buffer",
        {{"sample_count", 20},

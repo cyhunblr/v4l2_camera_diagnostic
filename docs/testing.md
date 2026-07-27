@@ -190,7 +190,7 @@ Tests are grouped into 7 logical layers that run in dependency order:
 | --- | --- | --- | --- |
 | t03-no-streamon | Frame capture without STREAMON | stream-state | |
 | t04-pollerr-handling | POLLERR/POLLHUP handling | stream-state | experimental, risky |
-| t05-stream-cycles | STREAMON/STREAMOFF cycle reliability | stream-state | |
+| t05-stream-cycles | STREAMON/STREAMOFF cycle reliability | stream-state | **experimental, risky** — opt-in only; can wedge hardware whose sensors share a deserializer |
 
 #### Layer 3 — Buffer & memory
 

@@ -93,6 +93,11 @@ target_link_libraries(v4l2diag_trigger_model_test PRIVATE v4l2diag_core)
 v4l2diag_apply_warnings(v4l2diag_trigger_model_test)
 add_test(NAME trigger_model COMMAND v4l2diag_trigger_model_test)
 
+add_executable(v4l2diag_test_selection_test tests/test_selection_test.cpp)
+target_link_libraries(v4l2diag_test_selection_test PRIVATE v4l2diag_core)
+v4l2diag_apply_warnings(v4l2diag_test_selection_test)
+add_test(NAME test_selection COMMAND v4l2diag_test_selection_test)
+
 add_executable(v4l2diag_report_writer_test tests/report_writer_test.cpp)
 target_link_libraries(v4l2diag_report_writer_test PRIVATE v4l2diag_core)
 v4l2diag_apply_warnings(v4l2diag_report_writer_test)

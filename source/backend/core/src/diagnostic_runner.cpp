@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
+#include <limits>
 #include <linux/videodev2.h>
 #include <memory>
 #include <numeric>
@@ -1161,12 +1162,65 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
   const int RAPID_TIMEOUT_MS = static_cast<int>(tpv(tp, "t05-stream-cycles", "rapid_timeout_ms"));
   const int FULL_TIMEOUT_MS = static_cast<int>(tpv(tp, "t05-stream-cycles", "full_timeout_ms"));
   const int MAX_CONSEC_START_FAIL = static_cast<int>(tpv(tp, "t05-stream-cycles", "max_consecutive_start_failures"));
+  const int MAX_START_FAILURES = static_cast<int>(tpv(tp, "t05-stream-cycles", "max_start_failures"));
+  // A non-positive threshold would mark every STREAMON slow and abort healthy
+  // hardware on the third cycle, so treat that as "watchdog disabled".
+  const double slow_start_param = tpv(tp, "t05-stream-cycles", "slow_start_ms");
+  const double SLOW_START_MS = slow_start_param > 0.0 ? slow_start_param : std::numeric_limits<double>::infinity();
+  const int MAX_SLOW_STARTS = static_cast<int>(tpv(tp, "t05-stream-cycles", "max_slow_starts"));
   const int RECOVERY_MS = static_cast<int>(tpv(tp, "t05-stream-cycles", "recovery_ms"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   int full_failures = 0;
   std::vector<double> first_lat;
   emit(log, camera_path, "t05",
        "STREAMON/STREAMOFF cycles: " + std::to_string(FULL) + " full + " + std::to_string(RAPID) + " rapid...");
+
+  // --- Hardware-protection state, shared by both loops -----------------
+  //
+  // Cycling STREAMON/STREAMOFF is only cheap when a video node owns its own
+  // sensor. Where several sensors sit behind one deserializer and fsync
+  // source, a single STREAMON re-initialises the entire camera group over
+  // I2C, and driving that in a tight loop can wedge the capture channel hard
+  // enough to take the board down.
+  //
+  // Two signals are watched, because failure counting alone is not enough:
+  // failures can alternate with successes and never accumulate consecutively
+  // while the hardware still degrades. A STREAMON that takes seconds instead
+  // of milliseconds is the earlier and more reliable warning, and it shows up
+  // before the first failure does.
+  int start_failures_total = 0;
+  int slow_starts = 0;
+  std::vector<double> start_ms;
+  std::string abort_reason;
+
+  const auto timed_start = [&](V4lSession *s, std::string *err) {
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool ok = s->open(camera_path, err) && s->start(2, backend, err);
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    start_ms.push_back(ms);
+    if (ms > SLOW_START_MS)
+      slow_starts++;
+    if (!ok)
+      start_failures_total++;
+    return ok;
+  };
+
+  // Evaluated after every cycle, successful or not, so a slow-but-succeeding
+  // STREAMON still stops the run.
+  const auto must_stop = [&](int consecutive, int cycle, int total, const std::string &phase, const std::string &err) {
+    if (consecutive >= MAX_CONSEC_START_FAIL)
+      abort_reason = std::to_string(consecutive) + " consecutive STREAMON failures";
+    else if (start_failures_total >= MAX_START_FAILURES)
+      abort_reason = std::to_string(start_failures_total) + " STREAMON failures in total";
+    else if (slow_starts >= MAX_SLOW_STARTS)
+      abort_reason = std::to_string(slow_starts) + " STREAMON calls slower than " +
+                     std::to_string(static_cast<int>(SLOW_START_MS)) + "ms (camera group is being re-initialised)";
+    if (abort_reason.empty())
+      return false;
+    r.details.push_back(phase + " cycles stopped at " + std::to_string(cycle) + "/" + std::to_string(total) + ": " +
+                        abort_reason + (err.empty() ? "" : " (last error: " + err + ")"));
+    return true;
+  };
 
   int full_consecutive_failures = 0;
   int full_attempted = 0;
@@ -1175,22 +1229,21 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
     full_attempted++;
     V4lSession s;
     std::string err;
-    if (!s.open(camera_path, &err) || !s.start(2, backend, &err)) {
+    const bool started = timed_start(&s, &err);
+    if (!started) {
       full_failures++;
-      // Same hardware-protection rule as the rapid loop below: repeated
-      // STREAMON failures mean the camera group is not coming back, and
-      // cycling harder only makes it worse.
-      if (++full_consecutive_failures >= MAX_CONSEC_START_FAIL) {
-        full_aborted = true;
-        r.details.push_back("Full cycles aborted after " + std::to_string(full_consecutive_failures) +
-                            " consecutive STREAMON failures at cycle " + std::to_string(c + 1) + "/" +
-                            std::to_string(FULL) + " (last error: " + err + ")");
-        break;
-      }
+      full_consecutive_failures++;
+    } else {
+      full_consecutive_failures = 0;
+    }
+    if (must_stop(full_consecutive_failures, c + 1, FULL, "Full", err)) {
+      full_aborted = true;
+      break;
+    }
+    if (!started) {
       V4lSession::sleep_ms(RECOVERY_MS);
       continue;
     }
-    full_consecutive_failures = 0;
     s.warmup(trigger, FULL_WARMUP, 200, nullptr, pulse_ns);
     int ok = 0;
     for (int i = 0; i < FULL_CAPTURES; i++) {
@@ -1212,29 +1265,45 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
   int rapid_start_failures = 0;
   int consecutive_start_failures = 0;
   bool rapid_aborted = false;
-  for (int c = 0; c < RAPID; c++) {
+  bool rapid_skipped = false;
+
+  // The full loop is the canary for the rapid loop. It cycles the same
+  // STREAMON path but spends seconds capturing between cycles, so it stresses
+  // the hardware far less. If even that showed the camera group taking a slow
+  // path through STREAMON, the rapid loop — which does nothing but cycle — is
+  // not safe to run here, and measuring it is not worth risking the board.
+  const double slowest_full_start = start_ms.empty() ? 0.0 : *std::max_element(start_ms.begin(), start_ms.end());
+  if (!full_aborted && slowest_full_start > SLOW_START_MS) {
+    rapid_skipped = true;
+    r.details.push_back("Rapid cycles skipped: STREAMON took up to " +
+                        std::to_string(static_cast<int>(slowest_full_start)) + "ms during the full cycles (limit " +
+                        std::to_string(static_cast<int>(SLOW_START_MS)) +
+                        "ms). This device re-initialises a shared camera group on every STREAMON, so rapid "
+                        "open/close cycling is unsafe.");
+  }
+
+  for (int c = 0; !full_aborted && !rapid_skipped && c < RAPID; c++) {
     rapid_attempted++;
     V4lSession s;
     std::string err;
-    if (!s.open(camera_path, &err) || !s.start(2, backend, &err)) {
-      // A failed STREAMON is a first-class result here, not something to skip
-      // over silently. On sensors sharing a deserializer and fsync source,
-      // STREAMON re-initialises the whole camera group over I2C; once that
-      // starts failing, continuing to cycle only drives the VI channel further
-      // into timeout-and-reset and can take the board down with it. Stop.
+    // A failed STREAMON is a first-class result here, not something to skip
+    // over silently: reporting zero captures while hiding that streaming never
+    // started sends anyone reading the result after the wrong fault.
+    const bool started = timed_start(&s, &err);
+    if (!started) {
       rapid_start_failures++;
       consecutive_start_failures++;
-      if (consecutive_start_failures >= MAX_CONSEC_START_FAIL) {
-        rapid_aborted = true;
-        r.details.push_back("Rapid cycles aborted after " + std::to_string(consecutive_start_failures) +
-                            " consecutive STREAMON failures at cycle " + std::to_string(c + 1) + "/" +
-                            std::to_string(RAPID) + " (last error: " + err + ")");
-        break;
-      }
+    } else {
+      consecutive_start_failures = 0;
+    }
+    if (must_stop(consecutive_start_failures, c + 1, RAPID, "Rapid", err)) {
+      rapid_aborted = true;
+      break;
+    }
+    if (!started) {
       V4lSession::sleep_ms(RECOVERY_MS);
       continue;
     }
-    consecutive_start_failures = 0;
     // A freshly opened session discards its first frame on sensors that need a
     // warm-up frame after STREAMON (see t25-cold-start).
     s.warmup(trigger, RAPID_WARMUP, RAPID_PACING_MS, nullptr, pulse_ns);
@@ -1259,6 +1328,20 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
       metric("rapid_aborted", "bool", rapid_aborted ? 1.0 : 0.0, "Rapid loop stopped early to protect the hardware."));
   r.metrics.push_back(
       metric("full_aborted", "bool", full_aborted ? 1.0 : 0.0, "Full loop stopped early to protect the hardware."));
+  r.metrics.push_back(metric("rapid_skipped", "bool", rapid_skipped ? 1.0 : 0.0,
+                             "Rapid loop not run because STREAMON was already slow."));
+  r.metrics.push_back(metric("start_failures_total", "count", static_cast<double>(start_failures_total),
+                             "open/STREAMON failures across both loops."));
+  if (!start_ms.empty()) {
+    r.metrics.push_back(metric("streamon_ms_max", "ms", *std::max_element(start_ms.begin(), start_ms.end()),
+                               "Slowest open+STREAMON. Seconds here means a shared camera group is being "
+                               "re-initialised on every cycle."));
+    double sum = 0.0;
+    for (double v : start_ms)
+      sum += v;
+    r.metrics.push_back(
+        metric("streamon_ms_mean", "ms", sum / static_cast<double>(start_ms.size()), "Mean open+STREAMON duration."));
+  }
   if (!first_lat.empty())
     push_stats_metrics_brief(r.metrics, "first_frame_latency", compute_stats(first_lat));
 
@@ -1269,18 +1352,28 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
   const double rapid_warn = thv(th, "t05-stream-cycles", "rapid_pct_warn");
   if (full_aborted || rapid_aborted)
     r.status = TestStatus::Fail;
+  else if (rapid_skipped)
+    // The rapid phase was never measured, so it cannot be scored — judge on the
+    // full cycles alone and warn, rather than reading the absent captures as a
+    // failure.
+    r.status = full_failures <= max_fail_warn ? TestStatus::Warn : TestStatus::Fail;
   else if (full_failures <= max_fail_pass && rapid_pct >= rapid_pass)
     r.status = TestStatus::Pass;
   else if (full_failures <= max_fail_warn && rapid_pct >= rapid_warn)
     r.status = TestStatus::Warn;
   else
     r.status = TestStatus::Fail;
-  r.summary = "Full: " + std::to_string(full_attempted - full_failures) + "/" + std::to_string(FULL) +
-              " OK. Rapid: " + std::to_string(rapid_ok) + "/" + std::to_string(RAPID) + " captured.";
-  if (rapid_start_failures > 0)
-    r.summary += " " + std::to_string(rapid_start_failures) + " STREAMON failure(s).";
+  r.summary = "Full: " + std::to_string(full_attempted - full_failures) + "/" + std::to_string(FULL) + " OK.";
+  if (rapid_skipped) {
+    r.summary += " Rapid: skipped — STREAMON takes up to " + std::to_string(static_cast<int>(slowest_full_start)) +
+                 "ms on this device, so rapid cycling would risk the capture pipeline.";
+  } else {
+    r.summary += " Rapid: " + std::to_string(rapid_ok) + "/" + std::to_string(RAPID) + " captured.";
+    if (rapid_start_failures > 0)
+      r.summary += " " + std::to_string(rapid_start_failures) + " STREAMON failure(s).";
+  }
   if (full_aborted || rapid_aborted)
-    r.summary += " Cycling stopped early after repeated STREAMON failures — the camera group was not recovering.";
+    r.summary += " Cycling stopped early: " + abort_reason + ".";
 }
 
 // Docs: docs/backend/tests/t09-buffer-flags.md

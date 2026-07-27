@@ -27,7 +27,7 @@ visual default routing.
 | `--profile ID` | none | required by active trigger modes |
 | `--trigger-channel ID` | auto when unique | one compatible channel must resolve |
 | `--backend LIST` | `mmap` | `mmap`, `dmabuf`, `userptr` |
-| `--tests LIST` | `implemented` | test ids, categories, or group selectors |
+| `--tests LIST` | `implemented` | test ids, categories, or group selectors. Naming a test by its **exact id** is an explicit opt-in and runs it even when it is long-running or experimental — `--include-long` / `--include-experimental` only gate the group selectors (`all`, `stable`, `implemented`, category names) |
 | `--report LIST` | `json,html` | `json`, `markdown`, `html`, `pdf` |
 | `--output-dir DIR` | `reports` | report directory |
 | `--run-mode MODE` | `sequential` | `sequential` or `parallel` |

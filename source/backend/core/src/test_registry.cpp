@@ -25,8 +25,13 @@ std::vector<TestDefinition> built_in_tests() {
        "Validates that no frames are delivered before VIDIOC_STREAMON.", false, false, false, false, false, true},
       {"t04-pollerr-handling", "POLLERR/POLLHUP handling", "stream-state",
        "Checks DQBUF rejection after STREAMOFF and stream recovery.", true, false, false, true, true, true},
+      // Experimental + risky: cycling STREAMON hard enough to be meaningful is
+      // destructive where several sensors share a deserializer, since every
+      // STREAMON re-initialises the whole camera group over I2C. Observed
+      // wedging the capture channel badly enough to reset the board, so this
+      // one is opt-in rather than part of the default sweep.
       {"t05-stream-cycles", "STREAMON/STREAMOFF cycle reliability", "stream-state",
-       "Exercises full and rapid stream setup/teardown cycles.", true, false, false, false, false, true},
+       "Exercises full and rapid stream setup/teardown cycles.", true, false, false, true, true, true},
 
       // --- Layer 3: Buffer & memory ---
       {"t06-multi-buffer", "Multi-buffer configurations", "buffering",
@@ -123,14 +128,18 @@ std::vector<TestDefinition> select_tests(const std::vector<std::string> &selecto
     return true;
   };
 
+  const auto add_unique = [&](const TestDefinition &test) {
+    const bool already = std::any_of(selected.begin(), selected.end(),
+                                     [&](const TestDefinition &existing) { return existing.id == test.id; });
+    if (!already) {
+      selected.push_back(test);
+    }
+  };
+
   const auto append_if = [&](const auto &predicate) {
     for (const auto &test : tests) {
       if (eligible(test) && predicate(test)) {
-        const bool already = std::any_of(selected.begin(), selected.end(),
-                                         [&](const TestDefinition &existing) { return existing.id == test.id; });
-        if (!already) {
-          selected.push_back(test);
-        }
+        add_unique(test);
       }
     }
   };
@@ -148,7 +157,18 @@ std::vector<TestDefinition> select_tests(const std::vector<std::string> &selecto
     } else if (selector == "implemented") {
       append_if([](const TestDefinition &test) { return test.implemented_in_core; });
     } else {
-      append_if([&](const TestDefinition &test) { return test.id == selector || test.category == selector; });
+      // Naming a test by its exact id is an explicit opt-in, so it overrides the
+      // long-running and experimental gates: asking for a test by name and
+      // silently getting nothing back is worse than running what was asked for.
+      // Group selectors below (and all/stable/implemented above) keep the gates,
+      // since those are broad requests rather than a deliberate choice.
+      const auto by_id =
+          std::find_if(tests.begin(), tests.end(), [&](const TestDefinition &test) { return test.id == selector; });
+      if (by_id != tests.end()) {
+        add_unique(*by_id);
+      } else {
+        append_if([&](const TestDefinition &test) { return test.category == selector; });
+      }
     }
   }
 
