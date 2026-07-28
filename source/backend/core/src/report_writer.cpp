@@ -222,17 +222,55 @@ std::string sweep_prefix(const std::string &name) {
   return "";
 }
 
+std::string sweep_category_label(const std::string &name, const std::string &label_prefix) {
+  const std::string prefix = sweep_prefix(name);
+  if (!prefix.empty()) {
+    return humanize_metric_name(prefix);
+  }
+  return statistic_label(name, label_prefix);
+}
+
+std::string sweep_series_label(const std::string &name) {
+  if (ends_with(name, "_latency_mean"))
+    return "Mean";
+  if (ends_with(name, "_latency_p95"))
+    return "P95";
+  if (ends_with(name, "_latency_max"))
+    return "Max";
+  if (ends_with(name, "_throughput_mbps"))
+    return "Throughput";
+  return "";
+}
+
+bool looks_like_resolution_label(const std::string &value) {
+  const std::size_t separator = value.find('x');
+  if (separator == std::string::npos || separator == 0 || separator + 1 >= value.size()) {
+    return false;
+  }
+  return std::all_of(value.begin(), value.begin() + separator, [](unsigned char c) { return std::isdigit(c) != 0; }) &&
+         std::all_of(value.begin() + separator + 1, value.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+}
+
 struct MetricChartGroup {
+  enum class Kind {
+    StatisticDots,
+    VerticalBars,
+    HorizontalBars,
+  };
+
   std::string title;
   std::string unit;
   std::string label_prefix;
+  std::string x_axis;
+  std::string y_axis;
   std::vector<std::size_t> indices;
-  bool horizontal = false;
+  Kind kind = Kind::StatisticDots;
 };
 
 void append_metric_group(std::vector<MetricChartGroup> &groups, std::vector<bool> &used,
                          const std::vector<MetricValue> &metrics, const std::vector<std::size_t> &indices,
-                         const std::string &title, const std::string &label_prefix, bool force_horizontal) {
+                         const std::string &title, const std::string &label_prefix, const std::string &x_axis,
+                         MetricChartGroup::Kind kind) {
   if (indices.size() < 2) {
     return;
   }
@@ -241,13 +279,31 @@ void append_metric_group(std::vector<MetricChartGroup> &groups, std::vector<bool
   group.unit = metrics[indices.front()].unit;
   group.label_prefix = label_prefix;
   group.indices = indices;
-  group.horizontal = force_horizontal || indices.size() > 6;
-  if (!group.horizontal) {
+  group.kind = kind;
+  if (kind == MetricChartGroup::Kind::StatisticDots) {
+    group.x_axis = "Value";
+    if (!group.unit.empty()) {
+      group.x_axis += " (" + group.unit + ")";
+    }
+    group.y_axis = "Statistic";
+  } else {
+    group.x_axis = x_axis;
+    group.y_axis = title;
+    if (!group.unit.empty()) {
+      group.y_axis += " (" + group.unit + ")";
+    }
+  }
+  if (group.kind == MetricChartGroup::Kind::VerticalBars) {
+    std::vector<std::string> categories;
     for (std::size_t index : indices) {
-      if (statistic_label(metrics[index].name, label_prefix).size() > 18) {
-        group.horizontal = true;
-        break;
+      const std::string category = sweep_category_label(metrics[index].name, label_prefix);
+      if (std::find(categories.begin(), categories.end(), category) == categories.end()) {
+        categories.push_back(category);
       }
+    }
+    if (categories.size() > 12 || std::any_of(categories.begin(), categories.end(),
+                                              [](const std::string &category) { return category.size() > 18; })) {
+      group.kind = MetricChartGroup::Kind::HorizontalBars;
     }
   }
   for (std::size_t index : indices)
@@ -285,7 +341,15 @@ std::vector<MetricChartGroup> group_metrics(const std::vector<MetricValue> &metr
       }
     }
     for (const auto &entry : by_unit) {
-      append_metric_group(groups, used, metrics, entry.second, pattern.title, "", true);
+      const bool is_control_sweep = std::string(pattern.prefix) == "ll";
+      std::string label_prefix = pattern.prefix;
+      if (!label_prefix.empty() && label_prefix.back() == '_') {
+        label_prefix.pop_back();
+      }
+      const std::string x_axis = is_control_sweep ? "Control setting" : "Pulse width";
+      append_metric_group(
+          groups, used, metrics, entry.second, pattern.title, label_prefix, x_axis,
+          is_control_sweep ? MetricChartGroup::Kind::HorizontalBars : MetricChartGroup::Kind::VerticalBars);
     }
   }
 
@@ -311,7 +375,16 @@ std::vector<MetricChartGroup> group_metrics(const std::vector<MetricValue> &metr
     }
     for (const auto &entry : by_unit) {
       const std::string title = entry.first == "MB/s" ? "Throughput Sweep" : "Latency Sweep";
-      append_metric_group(groups, used, metrics, entry.second, title, "", true);
+      bool resolution_sweep = true;
+      for (std::size_t index : entry.second) {
+        const std::string prefix = sweep_prefix(metrics[index].name);
+        if (!looks_like_resolution_label(prefix)) {
+          resolution_sweep = false;
+          break;
+        }
+      }
+      append_metric_group(groups, used, metrics, entry.second, title, "", resolution_sweep ? "Resolution" : "Format",
+                          MetricChartGroup::Kind::VerticalBars);
     }
   }
 
@@ -339,7 +412,8 @@ std::vector<MetricChartGroup> group_metrics(const std::vector<MetricValue> &metr
     }
   }
   for (const auto &entry : pending) {
-    append_metric_group(groups, used, metrics, entry.indices, humanize_metric_name(entry.base), entry.base, false);
+    append_metric_group(groups, used, metrics, entry.indices, humanize_metric_name(entry.base), entry.base, "Value",
+                        MetricChartGroup::Kind::StatisticDots);
   }
 
   std::sort(groups.begin(), groups.end(), [](const MetricChartGroup &lhs, const MetricChartGroup &rhs) {
@@ -382,14 +456,34 @@ void render_status_distribution(std::ostream &out, int pass_count, int fail_coun
   out << "</div></div></div>";
 }
 
+void render_horizontal_svg_axis(std::ostream &out, double x1, double x2, double y, double caption_y,
+                                const std::string &label) {
+  out << "<line class=\"chart-axis\" x1=\"" << x1 << "\" y1=\"" << y << "\" x2=\"" << x2 << "\" y2=\"" << y
+      << "\"></line>";
+  out << "<path class=\"axis-arrow\" d=\"M " << x2 << " " << y << " L " << (x2 - 9.0) << " " << (y - 5.0) << " M " << x2
+      << " " << y << " L " << (x2 - 9.0) << " " << (y + 5.0) << "\"></path>";
+  out << "<text class=\"axis-caption\" x=\"" << x2 << "\" y=\"" << caption_y
+      << "\" text-anchor=\"end\">X: " << html_escape(label) << "</text>";
+}
+
+void render_vertical_svg_axis(std::ostream &out, double x, double y1, double y2, double caption_x,
+                              const std::string &label) {
+  out << "<line class=\"chart-axis\" x1=\"" << x << "\" y1=\"" << y1 << "\" x2=\"" << x << "\" y2=\"" << y2
+      << "\"></line>";
+  out << "<path class=\"axis-arrow\" d=\"M " << x << " " << y2 << " L " << (x - 5.0) << " " << (y2 + 9.0) << " M " << x
+      << " " << y2 << " L " << (x + 5.0) << " " << (y2 + 9.0) << "\"></path>";
+  out << "<text class=\"axis-caption\" transform=\"translate(" << caption_x << "," << ((y1 + y2) / 2.0)
+      << ") rotate(-90)\" text-anchor=\"middle\">Y: " << html_escape(label) << "</text>";
+}
+
 void render_statistic_dot_chart(std::ostream &out, const std::vector<MetricValue> &metrics,
                                 const MetricChartGroup &group) {
   constexpr double width = 760.0;
   const double height = std::max(190.0, 82.0 + 48.0 * group.indices.size());
-  constexpr double left = 118.0;
+  constexpr double left = 148.0;
   constexpr double right = 58.0;
   constexpr double top = 38.0;
-  constexpr double bottom = 48.0;
+  constexpr double bottom = 70.0;
   constexpr double point_inset = 16.0;
   const double plot_width = width - left - right - (point_inset * 2.0);
   const double plot_height = height - top - bottom;
@@ -437,16 +531,16 @@ void render_statistic_dot_chart(std::ostream &out, const std::vector<MetricValue
     const double x = x_for(value);
     out << "<line class=\"chart-grid\" x1=\"" << x << "\" y1=\"" << top << "\" x2=\"" << x << "\" y2=\""
         << (height - bottom) << "\"></line>";
-    out << "<text class=\"axis-value\" x=\"" << x << "\" y=\"" << (height - 17.0) << "\" text-anchor=\"middle\">"
-        << html_escape(format_metric_value(value)) << "</text>";
+    out << "<text class=\"axis-value\" x=\"" << x << "\" y=\"" << (height - bottom + 24.0)
+        << "\" text-anchor=\"middle\">" << html_escape(format_metric_value(value)) << "</text>";
   }
   if (has_negative) {
     const double zero_x = x_for(0.0);
     out << "<line class=\"zero-baseline\" x1=\"" << zero_x << "\" y1=\"" << top << "\" x2=\"" << zero_x << "\" y2=\""
         << (height - bottom) << "\"></line>";
   }
-  out << "<line class=\"chart-axis\" x1=\"" << left << "\" y1=\"" << (height - bottom) << "\" x2=\"" << (width - right)
-      << "\" y2=\"" << (height - bottom) << "\"></line>";
+  render_horizontal_svg_axis(out, left, width - right, height - bottom, height - 10.0, group.x_axis);
+  render_vertical_svg_axis(out, left, height - bottom, top, 18.0, group.y_axis);
 
   for (std::size_t i = 0; i < group.indices.size(); ++i) {
     const std::size_t index = group.indices[i];
@@ -471,6 +565,132 @@ void render_statistic_dot_chart(std::ostream &out, const std::vector<MetricValue
   out << "</svg></div>";
 }
 
+std::string sweep_category_label(const MetricValue &metric, const MetricChartGroup &group) {
+  std::string category = sweep_prefix(metric.name);
+  if (category.empty()) {
+    return statistic_label(metric.name, group.label_prefix);
+  }
+  const bool looks_like_fourcc =
+      category.size() <= 5 && category.find('x') == std::string::npos && category.find('_') == std::string::npos;
+  if (looks_like_fourcc) {
+    std::transform(category.begin(), category.end(), category.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    return category;
+  }
+  return humanize_metric_name(category);
+}
+
+void render_vertical_bar_chart(std::ostream &out, const std::vector<MetricValue> &metrics,
+                               const MetricChartGroup &group) {
+  struct BarItem {
+    std::size_t metric_index = 0;
+    std::size_t category_index = 0;
+    std::size_t series_index = 0;
+    std::string category;
+    std::string series;
+  };
+
+  std::vector<std::string> categories;
+  std::vector<std::string> series;
+  std::vector<BarItem> items;
+  double max_value = 0.0;
+  for (std::size_t metric_index : group.indices) {
+    const auto &metric = metrics[metric_index];
+    const std::string category = sweep_category_label(metric, group);
+    std::string series_label = sweep_series_label(metric.name);
+    if (series_label.empty()) {
+      series_label = group.title;
+    }
+    auto category_it = std::find(categories.begin(), categories.end(), category);
+    if (category_it == categories.end()) {
+      categories.push_back(category);
+      category_it = categories.end() - 1;
+    }
+    auto series_it = std::find(series.begin(), series.end(), series_label);
+    if (series_it == series.end()) {
+      series.push_back(series_label);
+      series_it = series.end() - 1;
+    }
+    items.push_back({metric_index, static_cast<std::size_t>(category_it - categories.begin()),
+                     static_cast<std::size_t>(series_it - series.begin()), category, series_label});
+    max_value = std::max(max_value, std::max(0.0, metric.value));
+  }
+  if (categories.empty() || series.empty()) {
+    return;
+  }
+
+  constexpr double width = 760.0;
+  constexpr double height = 330.0;
+  constexpr double left = 118.0;
+  constexpr double right = 40.0;
+  constexpr double top = 28.0;
+  constexpr double bottom = 100.0;
+  constexpr double x_inset = 34.0;
+  const double baseline_y = height - bottom;
+  const double plot_height = baseline_y - top;
+  const double plot_width = width - left - right - (x_inset * 2.0);
+  const double category_slot = plot_width / categories.size();
+  const double y_max = std::max(1.0, max_value * 1.18);
+  const double group_width = std::min(category_slot * 0.7, 92.0);
+  const double bar_gap = series.size() > 1 ? 4.0 : 0.0;
+  const double bar_width =
+      std::max(4.0, std::min(34.0, (group_width - bar_gap * static_cast<double>(series.size() - 1)) / series.size()));
+  const double occupied_width = bar_width * series.size() + bar_gap * static_cast<double>(series.size() - 1);
+  const auto y_for = [&](double value) { return top + (y_max - std::max(0.0, value)) * plot_height / y_max; };
+
+  out << "<div class=\"metric-chart metric-vertical-bars\"><div class=\"metric-chart-title\">"
+      << html_escape(group.title);
+  if (!group.unit.empty())
+    out << " <span>" << html_escape(group.unit) << "</span>";
+  out << "</div><svg viewBox=\"0 0 760 330\" role=\"img\" aria-label=\"" << html_escape(group.title)
+      << " vertical bar chart\">";
+
+  for (int tick = 0; tick <= 4; ++tick) {
+    const double value = y_max * tick / 4.0;
+    const double y = y_for(value);
+    out << "<line class=\"chart-grid\" x1=\"" << left << "\" y1=\"" << y << "\" x2=\"" << (width - right) << "\" y2=\""
+        << y << "\"></line>";
+    out << "<text class=\"axis-value\" x=\"" << (left - 10.0) << "\" y=\"" << (y + 4.0) << "\" text-anchor=\"end\">"
+        << html_escape(format_metric_value(value)) << "</text>";
+  }
+
+  render_horizontal_svg_axis(out, left, width - right, baseline_y, height - 10.0, group.x_axis);
+  render_vertical_svg_axis(out, left, baseline_y, top, 18.0, group.y_axis);
+
+  for (const auto &item : items) {
+    const auto &metric = metrics[item.metric_index];
+    const double center_x = left + x_inset + category_slot * (item.category_index + 0.5);
+    const double x = center_x - occupied_width / 2.0 + item.series_index * (bar_width + bar_gap);
+    const double y = y_for(metric.value);
+    const std::size_t tone = series.size() == 1 ? item.category_index % 4 : item.series_index % 4;
+    out << "<rect class=\"vertical-bar tone-" << tone << "\" data-metric=\"" << html_escape(metric.name) << "\" x=\""
+        << x << "\" y=\"" << y << "\" width=\"" << bar_width << "\" height=\"" << (baseline_y - y)
+        << "\" rx=\"2\"><title>"
+        << html_escape(item.category + " " + item.series + ": " + format_metric_value(metric.value) +
+                       (metric.unit.empty() ? "" : " " + metric.unit))
+        << "</title></rect>";
+    if (categories.size() <= 6 && series.size() == 1) {
+      out << "<text class=\"bar-point-value\" x=\"" << (x + bar_width / 2.0) << "\" y=\"" << (y - 7.0)
+          << "\" text-anchor=\"middle\">" << html_escape(format_metric_value(metric.value)) << "</text>";
+    }
+  }
+
+  for (std::size_t i = 0; i < categories.size(); ++i) {
+    const double x = left + x_inset + category_slot * (i + 0.5);
+    out << "<text class=\"axis-label\" transform=\"translate(" << (x + 3.0) << "," << (baseline_y + 27.0)
+        << ") rotate(-45)\" text-anchor=\"end\">" << html_escape(categories[i]) << "</text>";
+  }
+  out << "</svg>";
+  if (series.size() > 1) {
+    out << "<div class=\"chart-series-legend\">";
+    for (std::size_t i = 0; i < series.size(); ++i) {
+      out << "<span><i class=\"tone-" << (i % 4) << "\"></i>" << html_escape(series[i]) << "</span>";
+    }
+    out << "</div>";
+  }
+  out << "</div>";
+}
+
 void render_horizontal_chart(std::ostream &out, const std::vector<MetricValue> &metrics,
                              const MetricChartGroup &group) {
   double max_magnitude = 0.0;
@@ -482,7 +702,8 @@ void render_horizontal_chart(std::ostream &out, const std::vector<MetricValue> &
   out << "<div class=\"metric-chart metric-bars\"><div class=\"metric-chart-title\">" << html_escape(group.title);
   if (!group.unit.empty())
     out << " <span>" << html_escape(group.unit) << "</span>";
-  out << "</div><div class=\"bar-list\">";
+  out << "</div><div class=\"horizontal-bar-plot\"><div class=\"horizontal-y-axis\"><span>Y: "
+      << html_escape(group.x_axis) << "</span></div><div class=\"bar-list\">";
   for (std::size_t item = 0; item < group.indices.size(); ++item) {
     const std::size_t index = group.indices[item];
     const auto &metric = metrics[index];
@@ -496,7 +717,7 @@ void render_horizontal_chart(std::ostream &out, const std::vector<MetricValue> &
       out << " " << html_escape(metric.unit);
     out << "</div></div>";
   }
-  out << "</div></div>";
+  out << "</div><div class=\"horizontal-x-axis\"><span>X: " << html_escape(group.y_axis) << "</span></div></div></div>";
 }
 
 struct TimeoutProbePoint {
@@ -567,8 +788,8 @@ void render_t13_distribution_chart(std::ostream &out, const std::vector<TimeoutP
   }
   constexpr double width = 760.0;
   constexpr double height = 300.0;
-  constexpr double left = 64.0;
-  constexpr double right = 28.0;
+  constexpr double left = 108.0;
+  constexpr double right = 32.0;
   constexpr double top = 34.0;
   constexpr double bottom = 92.0;
   constexpr double point_inset = 28.0;
@@ -595,8 +816,8 @@ void render_t13_distribution_chart(std::ostream &out, const std::vector<TimeoutP
     out << "<text class=\"axis-value\" x=\"" << (left - 9.0) << "\" y=\"" << (y + 4.0) << "\" text-anchor=\"end\">"
         << html_escape(format_metric_value(value)) << "</text>";
   }
-  out << "<line class=\"chart-axis\" x1=\"" << left << "\" y1=\"" << baseline_y << "\" x2=\"" << (width - right)
-      << "\" y2=\"" << baseline_y << "\"></line>";
+  render_horizontal_svg_axis(out, left, width - right, baseline_y, height - 9.0, "Timeout (ms)");
+  render_vertical_svg_axis(out, left, baseline_y, top, 17.0, "Hit ratio (%)");
 
   std::ostringstream path;
   std::ostringstream area;
@@ -679,11 +900,13 @@ bool render_t13_threshold_chart(std::ostream &out, const std::vector<MetricValue
   const double span = std::max(1.0, max_value - min_value);
 
   constexpr double width = 760.0;
-  constexpr double left = 68.0;
+  constexpr double height = 300.0;
+  constexpr double left = 180.0;
   constexpr double right = 34.0;
-  constexpr double band_y = 42.0;
-  constexpr double band_height = 28.0;
-  constexpr double marker_y = band_y + band_height / 2.0;
+  constexpr double top = 30.0;
+  constexpr double bottom = 72.0;
+  const double baseline_y = height - bottom;
+  const double plot_height = baseline_y - top;
   const auto x_for = [&](double value) { return left + (width - left - right) * (value - min_value) / span; };
   const double cliff_x = x_for(metrics[cliff_index].value);
   double production_x = width - right;
@@ -695,32 +918,41 @@ bool render_t13_threshold_chart(std::ostream &out, const std::vector<MetricValue
   }
 
   out << "<div class=\"metric-chart t13-threshold-chart\"><div class=\"metric-chart-title\">Timeout Thresholds "
-         "<span>ms</span></div><svg viewBox=\"0 0 760 108\" role=\"img\" aria-label=\"t13 timeout thresholds\">";
-  out << "<rect class=\"threshold-zone threshold-risk\" x=\"" << left << "\" y=\"" << band_y << "\" width=\""
-      << std::max(0.0, cliff_x - left) << "\" height=\"" << band_height << "\"></rect>";
-  out << "<rect class=\"threshold-zone threshold-margin\" x=\"" << cliff_x << "\" y=\"" << band_y << "\" width=\""
-      << std::max(0.0, production_x - cliff_x) << "\" height=\"" << band_height << "\"></rect>";
-  out << "<rect class=\"threshold-zone threshold-safe\" x=\"" << production_x << "\" y=\"" << band_y << "\" width=\""
-      << std::max(0.0, width - right - production_x) << "\" height=\"" << band_height << "\"></rect>";
-  out << "<text class=\"axis-value\" x=\"" << left << "\" y=\"94\" text-anchor=\"start\">"
-      << html_escape(format_metric_value(min_value)) << "ms</text>";
-  out << "<text class=\"axis-value\" x=\"" << (width - right) << "\" y=\"94\" text-anchor=\"end\">"
-      << html_escape(format_metric_value(max_value)) << "ms</text>";
+         "<span>ms</span></div><svg viewBox=\"0 0 760 300\" role=\"img\" aria-label=\"t13 timeout thresholds\">";
+  out << "<rect class=\"threshold-zone threshold-risk\" x=\"" << left << "\" y=\"" << top << "\" width=\""
+      << std::max(0.0, cliff_x - left) << "\" height=\"" << plot_height << "\"></rect>";
+  out << "<rect class=\"threshold-zone threshold-margin\" x=\"" << cliff_x << "\" y=\"" << top << "\" width=\""
+      << std::max(0.0, production_x - cliff_x) << "\" height=\"" << plot_height << "\"></rect>";
+  out << "<rect class=\"threshold-zone threshold-safe\" x=\"" << production_x << "\" y=\"" << top << "\" width=\""
+      << std::max(0.0, width - right - production_x) << "\" height=\"" << plot_height << "\"></rect>";
+  for (int tick = 0; tick <= 4; ++tick) {
+    const double value = min_value + span * tick / 4.0;
+    const double x = x_for(value);
+    out << "<line class=\"chart-grid\" x1=\"" << x << "\" y1=\"" << top << "\" x2=\"" << x << "\" y2=\"" << baseline_y
+        << "\"></line>";
+    out << "<text class=\"axis-value\" x=\"" << x << "\" y=\"" << (baseline_y + 24.0) << "\" text-anchor=\"middle\">"
+        << html_escape(format_metric_value(value)) << "</text>";
+  }
+  render_horizontal_svg_axis(out, left, width - right, baseline_y, height - 10.0, "Timeout (ms)");
+  render_vertical_svg_axis(out, left, baseline_y, top, 18.0, "Threshold type");
   for (std::size_t i = 0; i < markers.size(); ++i) {
     const auto &marker = markers[i];
     const double x = x_for(marker.value);
-    out << "<line class=\"threshold-marker marker-" << (i % 4) << "\" data-metric=\"" << html_escape(marker.metric_name)
-        << "\" x1=\"" << x << "\" y1=\"28\" x2=\"" << x << "\" y2=\"82\"></line>";
-    out << "<circle class=\"threshold-point marker-" << (i % 4) << "\" cx=\"" << x << "\" cy=\"" << marker_y
-        << "\" r=\"6\"></circle>";
+    const double y = top + (i + 0.5) * plot_height / markers.size();
+    out << "<line class=\"threshold-row\" x1=\"" << left << "\" y1=\"" << y << "\" x2=\"" << (width - right)
+        << "\" y2=\"" << y << "\"></line>";
+    out << "<line class=\"guide-line\" x1=\"" << x << "\" y1=\"" << y << "\" x2=\"" << x << "\" y2=\"" << baseline_y
+        << "\"></line>";
+    out << "<text class=\"threshold-label\" x=\"" << (left - 14.0) << "\" y=\"" << (y + 4.0)
+        << "\" text-anchor=\"end\">" << html_escape(marker.label) << "</text>";
+    out << "<circle class=\"threshold-point marker-" << (i % 4) << "\" data-metric=\""
+        << html_escape(marker.metric_name) << "\" cx=\"" << x << "\" cy=\"" << y << "\" r=\"7\"></circle>";
+    const bool value_to_left = x > width - right - 72.0;
+    out << "<text class=\"point-value\" x=\"" << (value_to_left ? x - 12.0 : x + 12.0) << "\" y=\"" << (y + 4.0)
+        << "\" text-anchor=\"" << (value_to_left ? "end" : "start") << "\">"
+        << html_escape(format_metric_value(marker.value)) << "</text>";
   }
-  out << "</svg><div class=\"threshold-legend\">";
-  for (std::size_t i = 0; i < markers.size(); ++i) {
-    const auto &marker = markers[i];
-    out << "<span class=\"threshold-legend-item marker-" << (i % 4) << "\"><i></i><span>" << html_escape(marker.label)
-        << "</span><strong>" << html_escape(format_metric_value(marker.value)) << "ms</strong></span>";
-  }
-  out << "</div></div>";
+  out << "</svg></div>";
   return true;
 }
 
@@ -792,10 +1024,13 @@ void render_test_metrics(std::ostream &out, const TestResult &test) {
   if (!groups.empty())
     out << "<div class=\"metric-visuals\">";
   for (const auto &group : groups) {
-    if (group.horizontal)
+    if (group.kind == MetricChartGroup::Kind::HorizontalBars) {
       render_horizontal_chart(out, metrics, group);
-    else
+    } else if (group.kind == MetricChartGroup::Kind::VerticalBars) {
+      render_vertical_bar_chart(out, metrics, group);
+    } else {
       render_statistic_dot_chart(out, metrics, group);
+    }
   }
   if (!groups.empty())
     out << "</div>";
@@ -1005,14 +1240,28 @@ table.overview .summary-text { color: #475569; }
 .metric-xy-chart svg { min-width: 0; }
 .chart-grid { stroke: #e2e8f0; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .chart-axis { stroke: #94a3b8; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.axis-arrow { fill: none; stroke: #64748b; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.axis-caption { fill: #475569; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; font-weight: 700; }
 .guide-line { stroke: #94a3b8; stroke-width: 1; stroke-dasharray: 4 5; vector-effect: non-scaling-stroke; }
 .dot-row-line { stroke: #f1f5f9; stroke-width: 10; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .zero-baseline { stroke: #475569; stroke-width: 1.5; stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
 .metric-line { fill: none; stroke: #2563eb; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .metric-point { fill: #0f8aa6; stroke: #fff; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
-.axis-value, .axis-label, .point-value, .dot-label { font-family: 'JetBrains Mono', monospace; fill: #64748b; font-size: 13px; }
+.axis-value, .axis-label, .point-value, .dot-label, .bar-point-value { font-family: 'JetBrains Mono', monospace; fill: #64748b; font-size: 13px; }
 .dot-label { fill: #475569; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 700; }
-.point-value { fill: #1e293b; font-weight: 700; }
+.point-value, .bar-point-value { fill: #1e293b; font-weight: 700; }
+.vertical-bar { vector-effect: non-scaling-stroke; }
+.vertical-bar.tone-0 { fill: #2563eb; }
+.vertical-bar.tone-1 { fill: #0f8aa6; }
+.vertical-bar.tone-2 { fill: #d97706; }
+.vertical-bar.tone-3 { fill: #e2553d; }
+.chart-series-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; margin-top: 2px; color: #64748b; font-size: 10px; }
+.chart-series-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-series-legend i { width: 8px; height: 8px; border-radius: 2px; }
+.chart-series-legend i.tone-0 { background: #2563eb; }
+.chart-series-legend i.tone-1 { background: #0f8aa6; }
+.chart-series-legend i.tone-2 { background: #d97706; }
+.chart-series-legend i.tone-3 { background: #e2553d; }
 .hit-zone { opacity: 0.48; }
 .hit-zone-high { fill: #dcfce7; }
 .hit-zone-mid { fill: #fef3c7; }
@@ -1024,20 +1273,20 @@ table.overview .summary-text { color: #475569; }
 .threshold-risk { fill: #fecaca; }
 .threshold-margin { fill: #fde68a; }
 .threshold-safe { fill: #bbf7d0; }
-.threshold-marker { stroke-width: 3; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
-.threshold-marker.marker-0, .threshold-point.marker-0 { stroke: #dc2626; fill: #dc2626; }
-.threshold-marker.marker-1, .threshold-point.marker-1 { stroke: #d97706; fill: #d97706; }
-.threshold-marker.marker-2, .threshold-point.marker-2 { stroke: #0f8aa6; fill: #0f8aa6; }
-.threshold-marker.marker-3, .threshold-point.marker-3 { stroke: #15803d; fill: #15803d; }
+.threshold-row { stroke: rgba(255, 255, 255, 0.82); stroke-width: 10; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.threshold-label { fill: #475569; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; font-weight: 700; }
+.threshold-point.marker-0 { fill: #dc2626; }
+.threshold-point.marker-1 { fill: #d97706; }
+.threshold-point.marker-2 { fill: #0f8aa6; }
+.threshold-point.marker-3 { fill: #15803d; }
 .threshold-point { stroke: #fff !important; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
-.threshold-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 7px 12px; margin-top: 2px; }
-.threshold-legend-item { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 6px; min-width: 0; color: #64748b; font-size: 10px; }
-.threshold-legend-item i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.threshold-legend-item strong { color: #1e293b; font-family: monospace; font-size: 11px; white-space: nowrap; }
-.threshold-legend-item.marker-0 { color: #dc2626; }
-.threshold-legend-item.marker-1 { color: #d97706; }
-.threshold-legend-item.marker-2 { color: #0f8aa6; }
-.threshold-legend-item.marker-3 { color: #15803d; }
+.horizontal-bar-plot { position: relative; padding: 2px 0 31px 22px; }
+.horizontal-y-axis { position: absolute; left: 5px; top: 1px; bottom: 31px; border-left: 1.5px solid #94a3b8; }
+.horizontal-y-axis::before { content: ''; position: absolute; top: -1px; left: -5px; border-width: 0 4px 8px; border-style: solid; border-color: transparent transparent #64748b; }
+.horizontal-y-axis span { position: absolute; top: 50%; left: -9px; color: #475569; font-size: 10px; font-weight: 700; white-space: nowrap; transform: translate(-50%, -50%) rotate(-90deg); }
+.horizontal-x-axis { position: absolute; right: 0; bottom: 18px; left: 39%; border-top: 1.5px solid #94a3b8; }
+.horizontal-x-axis::after { content: ''; position: absolute; top: -5px; right: -1px; border-width: 4px 0 4px 8px; border-style: solid; border-color: transparent transparent transparent #64748b; }
+.horizontal-x-axis span { position: absolute; top: 5px; right: 0; color: #475569; font-size: 10px; font-weight: 700; white-space: nowrap; }
 .bar-list { display: grid; gap: 9px; }
 .bar-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(80px, 2fr) minmax(54px, auto); align-items: center; gap: 10px; }
 .bar-label { color: #475569; font-size: 11px; overflow-wrap: anywhere; }
@@ -1083,8 +1332,11 @@ table.overview .summary-text { color: #475569; }
   table.overview td:nth-child(4) { grid-column: 3; grid-row: 2; }
   table.overview td:nth-child(5) { grid-column: 1 / 4; grid-row: 3; }
   .metric-xy-chart .axis-value, .metric-xy-chart .axis-label, .metric-dot-chart .axis-value,
-  .metric-dot-chart .dot-label, .t13-threshold-chart .axis-value { font-size: 23px; }
-  .metric-xy-chart .point-value, .metric-dot-chart .point-value { font-size: 24px; }
+  .metric-dot-chart .dot-label, .metric-vertical-bars .axis-value, .metric-vertical-bars .axis-label,
+  .t13-threshold-chart .axis-value, .t13-threshold-chart .threshold-label { font-size: 19px; }
+  .metric-xy-chart .point-value, .metric-dot-chart .point-value, .metric-vertical-bars .bar-point-value,
+  .t13-threshold-chart .point-value { font-size: 20px; }
+  .metric-chart .axis-caption { font-size: 18px; }
   .metric-point { stroke-width: 3; }
   .bar-row { grid-template-columns: minmax(100px, 1fr) minmax(90px, 1.4fr); }
   .bar-value { grid-column: 2; }

@@ -94,6 +94,45 @@ int main() {
   };
   camera.tests.push_back(sweep_test);
 
+  v4l2diag::TestResult format_test;
+  format_test.id = "t17-format-comparison";
+  format_test.name = "Format Comparison";
+  format_test.category = "format";
+  format_test.memory_backend = "mmap";
+  format_test.status = v4l2diag::TestStatus::Pass;
+  format_test.summary = "Two unique formats compared.";
+  format_test.duration_ms = 3200.0;
+  format_test.metrics = {
+      {"uyvy_latency_mean", "ms", 468.6, "UYVY mean latency."},
+      {"uyvy_latency_max", "ms", 486.5, "UYVY max latency."},
+      {"uyvy_throughput_mbps", "MB/s", 1064.8, "UYVY throughput."},
+      {"nv16_latency_mean", "ms", 477.6, "NV16 mean latency."},
+      {"nv16_latency_max", "ms", 481.4, "NV16 max latency."},
+      {"nv16_throughput_mbps", "MB/s", 1056.9, "NV16 throughput."},
+      {"format_count", "count", 2.0, "Unique formats enumerated."},
+      {"formats_tested", "count", 2.0, "Unique formats tested."},
+  };
+  format_test.details = {
+      "UYVY: sizeimage=4915200",
+      "NV16: sizeimage=4915200",
+  };
+  camera.tests.push_back(format_test);
+
+  v4l2diag::TestResult control_test;
+  control_test.id = "t18-control-sweep";
+  control_test.name = "Control Sweep";
+  control_test.category = "control";
+  control_test.memory_backend = "mmap";
+  control_test.status = v4l2diag::TestStatus::Pass;
+  control_test.summary = "Control combinations measured.";
+  control_test.duration_ms = 2800.0;
+  control_test.metrics = {
+      {"ll0_bp0_wi0_mean_ms", "ms", 4.2, "Control combination latency."},
+      {"ll1_bp0_wi1_mean_ms", "ms", 5.1, "Control combination latency."},
+      {"ll1_bp1_wi1_mean_ms", "ms", 6.4, "Control combination latency."},
+  };
+  camera.tests.push_back(control_test);
+
   v4l2diag::TestResult overwrite_test;
   overwrite_test.id = "t08-buffer-overwrite";
   overwrite_test.name = "Buffer Overwrite";
@@ -196,16 +235,21 @@ int main() {
   html_ok &= require(html.find("overflow-x: auto") == std::string::npos, "chart horizontal scrollbar CSS remains");
   html_ok &= require(html.find("min-width: 620px") == std::string::npos, "chart minimum width still forces scrolling");
   html_ok &= require(html.find("metric-dot-chart") != std::string::npos, "missing statistic dot-range chart");
+  html_ok &= require(html.find("metric-vertical-bars") != std::string::npos, "missing vertical sweep chart");
   html_ok &= require(html.find("class=\"metric-point\"") != std::string::npos, "missing statistic point markers");
   html_ok &= require(html.find("class=\"guide-line\"") != std::string::npos, "missing statistic guide lines");
   html_ok &= require(html.find("stroke-dasharray") != std::string::npos, "guide lines are not dashed");
+  html_ok &= require(html.find("class=\"axis-arrow\"") != std::string::npos, "chart axis arrows are missing");
+  html_ok &= require(html.find(">X: Format</text>") != std::string::npos, "format X axis is not labelled");
+  html_ok &= require(html.find(">Y: Latency Sweep (ms)</text>") != std::string::npos, "latency Y axis is not labelled");
   html_ok &= require(html.find("cx=\"118\"") == std::string::npos, "statistic point marker is stuck on the left axis");
   html_ok &= require(html.find("cx=\"702\"") == std::string::npos, "statistic point marker is stuck on the right axis");
   html_ok &= require(html.find("cy=\"34\"") == std::string::npos, "distribution point marker is stuck on the top edge");
   html_ok &=
       require(html.find("cy=\"208\"") == std::string::npos, "distribution point marker is stuck on the bottom axis");
   html_ok &= require(html.find("metric-bars") != std::string::npos, "missing horizontal fallback chart");
-  html_ok &= require(html.find("bar-fill tone-0") != std::string::npos, "sweep chart palette is missing");
+  html_ok &= require(html.find("bar-fill tone-0") != std::string::npos, "control chart palette is missing");
+  html_ok &= require(html.find("horizontal-y-axis") != std::string::npos, "horizontal chart Y axis is missing");
   html_ok &= require(html.find("metric-kv-list") != std::string::npos, "missing plain metric list");
   html_ok &= require(html.find("Supporting values") != std::string::npos, "missing supporting values label");
   html_ok &= require(html.find("Supports capture") != std::string::npos, "bool metric is not in the plain list");
@@ -217,6 +261,14 @@ int main() {
   html_ok &=
       require(html.find("Latency stddev") != std::string::npos, "latency stddev is missing from supporting values");
   html_ok &= require(occurrence_count(html, "data-metric=\"hits_1ms\"") == 1, "charted sweep metric is duplicated");
+  html_ok &=
+      require(occurrence_count(html, "data-metric=\"uyvy_latency_mean\"") == 1, "charted format metric is duplicated");
+  html_ok &=
+      require(occurrence_count(html, ">UYVY</text>") == 2, "UYVY should appear once on each format comparison chart");
+  html_ok &=
+      require(occurrence_count(html, ">NV16</text>") == 2, "NV16 should appear once on each format comparison chart");
+  html_ok &= require(html.find(">Mean</span>") != std::string::npos, "format latency mean legend is missing");
+  html_ok &= require(html.find(">Max</span>") != std::string::npos, "format latency max legend is missing");
   html_ok &= require(html.find("Error flag buffers") != std::string::npos, "t08 error buffer details are missing");
   html_ok &= require(html.find("buffer_index=1") != std::string::npos, "t08 error buffer index is missing");
   html_ok &= require(html.find("t13-distribution-chart") != std::string::npos, "missing t13 distribution chart");

@@ -728,7 +728,12 @@ void run_format_comparison(const std::string &camera_path, MemoryBackend backend
     if (ioctl(enum_fd, VIDIOC_ENUM_FMT, &desc) < 0)
       break;
     std::string name = fourcc_to_string(desc.pixelformat);
-    formats.push_back({desc.pixelformat, name});
+    const auto duplicate = std::find_if(formats.begin(), formats.end(), [&](const FormatEntry &entry) {
+      return entry.pixelformat == desc.pixelformat;
+    });
+    if (duplicate == formats.end()) {
+      formats.push_back({desc.pixelformat, name});
+    }
   }
   ::close(enum_fd);
 
