@@ -70,8 +70,11 @@ int main() {
   latency_test.duration_ms = 1050.0;
   latency_test.metrics = {
       {"latency_mean", "ms", 8.7, "Mean trigger latency."},
+      {"latency_stddev", "ms", 0.1, "Std-dev trigger latency."},
+      {"latency_min", "ms", 8.5, "Minimum trigger latency."},
       {"latency_p95", "ms", 15.8, "P95 trigger latency."},
       {"latency_max", "ms", 23.2, "Maximum trigger latency."},
+      {"latency_jitter", "ms", 0.2, "Jitter trigger latency."},
   };
   camera.tests.push_back(latency_test);
 
@@ -91,6 +94,25 @@ int main() {
   };
   camera.tests.push_back(sweep_test);
 
+  v4l2diag::TestResult overwrite_test;
+  overwrite_test.id = "t08-buffer-overwrite";
+  overwrite_test.name = "Buffer Overwrite";
+  overwrite_test.category = "stress";
+  overwrite_test.memory_backend = "mmap";
+  overwrite_test.status = v4l2diag::TestStatus::Warn;
+  overwrite_test.summary = "Buffer saturation test completed; 1 frames had V4L2_BUF_FLAG_ERROR.";
+  overwrite_test.duration_ms = 1300.0;
+  overwrite_test.metrics = {
+      {"triggers_A", "count", 10.0, "Variant A."},
+      {"frames_available_A", "count", 2.0, "Frames available after variant A."},
+      {"error_flag_total", "count", 1.0, "Frames with V4L2_BUF_FLAG_ERROR."},
+  };
+  overwrite_test.details = {
+      "Variant A: buffers=2 triggers=10 available=2 errors=1",
+      "Error flag buffers: variant A buffer_index=1 sequence=42 flags=0x4000",
+  };
+  camera.tests.push_back(overwrite_test);
+
   v4l2diag::TestResult inventory_test;
   inventory_test.id = "t01-device-compliance";
   inventory_test.name = "Device Compliance";
@@ -105,6 +127,28 @@ int main() {
       {"safety_margin_ms", "ms", -500.0, "N/A."},
   };
   camera.tests.push_back(inventory_test);
+
+  v4l2diag::TestResult cliff_test;
+  cliff_test.id = "t13-poll-timeout-cliff";
+  cliff_test.name = "Poll Timeout Cliff";
+  cliff_test.category = "trigger";
+  cliff_test.memory_backend = "mmap";
+  cliff_test.status = v4l2diag::TestStatus::Pass;
+  cliff_test.summary = "Stable cliff at 45ms; 55ms safety margin.";
+  cliff_test.duration_ms = 61000.0;
+  cliff_test.metrics = {
+      {"cliff_ms", "ms", 45.0, "Stable poll timeout."},
+      {"cliff_total_ms", "ms", 50.0, "Cliff plus pulse width."},
+      {"first_miss_ms", "ms", 44.0, "Highest timeout with misses."},
+      {"safety_margin_ms", "ms", 55.0, "Production timeout - cliff timeout."},
+      {"stability_confirmed", "bool", 1.0, "Whether cliff was stable."},
+      {"stability_rounds_passed", "count", 3.0, "Rounds that confirmed the cliff."},
+  };
+  cliff_test.details = {
+      "coarse: 100ms -> 4/4", "coarse: 50ms -> 4/4",  "coarse: 40ms -> 2/4",
+      "bsearch: 45ms -> 4/4", "bsearch: 44ms -> 3/4", "stability round 1: @45ms=4/4, @44ms=3/4 OK",
+  };
+  camera.tests.push_back(cliff_test);
 
   v4l2diag::TestResult delta_test;
   delta_test.id = "t24-latency-under-load";
@@ -144,18 +188,39 @@ int main() {
   html_ok &= require(html.find("class=\"metric-point\"") != std::string::npos, "missing X-Y point markers");
   html_ok &= require(html.find("class=\"guide-line\"") != std::string::npos, "missing X-Y guide lines");
   html_ok &= require(html.find("stroke-dasharray") != std::string::npos, "guide lines are not dashed");
+  html_ok &= require(html.find("cx=\"60\"") == std::string::npos, "X-Y point marker is stuck on the left axis");
+  html_ok &= require(html.find("cx=\"736\"") == std::string::npos, "X-Y point marker is stuck on the right axis");
+  html_ok &= require(html.find("cy=\"38\"") == std::string::npos, "X-Y point marker is stuck on the top axis");
+  html_ok &= require(html.find("cy=\"202\"") == std::string::npos, "X-Y point marker is stuck on the bottom axis");
   html_ok &= require(html.find("metric-bars") != std::string::npos, "missing horizontal fallback chart");
   html_ok &= require(html.find("metric-kv-list") != std::string::npos, "missing plain metric list");
+  html_ok &= require(html.find("Supporting values") != std::string::npos, "missing supporting values label");
   html_ok &= require(html.find("Supports capture") != std::string::npos, "bool metric is not in the plain list");
   html_ok &= require(html.find("Format count") != std::string::npos, "count metric is not in the plain list");
   html_ok &=
       require(occurrence_count(html, "data-metric=\"latency_mean\"") == 1, "charted latency metric is duplicated");
+  html_ok &= require(occurrence_count(html, "data-metric=\"latency_stddev\"") == 0,
+                     "latency stddev should not compress the primary latency chart");
+  html_ok &=
+      require(html.find("Latency stddev") != std::string::npos, "latency stddev is missing from supporting values");
   html_ok &= require(occurrence_count(html, "data-metric=\"hits_1ms\"") == 1, "charted sweep metric is duplicated");
+  html_ok &= require(html.find("Error flag buffers") != std::string::npos, "t08 error buffer details are missing");
+  html_ok &= require(html.find("buffer_index=1") != std::string::npos, "t08 error buffer index is missing");
+  html_ok &= require(html.find("t13-distribution-chart") != std::string::npos, "missing t13 distribution chart");
+  html_ok &= require(html.find("data-timeout-ms=\"45\"") != std::string::npos, "missing t13 timeout point");
+  html_ok &= require(html.find("t13-threshold-chart") != std::string::npos, "missing t13 threshold chart");
+  html_ok &= require(html.find("data-metric=\"production_timeout_ms\"") != std::string::npos,
+                     "missing inferred production timeout marker");
+  html_ok &= require(occurrence_count(html, "data-metric=\"cliff_ms\"") == 1, "t13 cliff metric is duplicated");
+  html_ok &= require(occurrence_count(html, "<dt>Cliff ms</dt>") == 1, "t13 cliff key/value duplicate remains");
   html_ok &= require(html.find("data-metric=\"delta_mean_ms\"") != std::string::npos,
                      "negative non-sentinel delta was not charted");
   html_ok &= require(occurrence_count(html, ">N/A</dd>") == 2, "sentinel metrics were not rendered as N/A");
   html_ok &= require(html.find("Failed</span><strong>0</strong>") != std::string::npos,
                      "zero-count status is missing from the legend");
+  html_ok &= require(html.find("fetch(\"/api/dmesg\")") == std::string::npos, "dmesg export still uses fetch");
+  html_ok &= require(html.find("href=\"/api/dmesg?download=1\" download=\"dmesg.txt\"") != std::string::npos,
+                     "dmesg export is not a direct download link");
   if (!html_ok)
     return 1;
 

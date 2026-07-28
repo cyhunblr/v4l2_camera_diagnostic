@@ -1560,6 +1560,13 @@ MhdRequestResult WebServer::handle_request_static(void *cls, MHD_Connection *con
   if (after_value && *after_value) {
     query = "after=" + std::string(after_value);
   }
+  const char *download_value = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "download");
+  if (download_value && *download_value) {
+    if (!query.empty()) {
+      query += "&";
+    }
+    query += "download=" + std::string(download_value);
+  }
 
   int status_code = MHD_HTTP_OK;
   std::string content_type;
@@ -1571,6 +1578,9 @@ MhdRequestResult WebServer::handle_request_static(void *cls, MHD_Connection *con
   MHD_add_response_header(response, "Content-Type", content_type.c_str());
   MHD_add_response_header(response, "Access-Control-Allow-Origin", "http://127.0.0.1");
   MHD_add_response_header(response, "Cache-Control", "no-store");
+  if (path == "/api/dmesg" && query.find("download=1") != std::string::npos) {
+    MHD_add_response_header(response, "Content-Disposition", "attachment; filename=\"dmesg.txt\"");
+  }
   const MhdRequestResult ret = MHD_queue_response(connection, status_code, response);
   MHD_destroy_response(response);
   delete buffer;

@@ -422,6 +422,7 @@ void run_buffer_overwrite(const std::string &camera_path, MemoryBackend backend,
   };
 
   int error_frames_total = 0;
+  std::vector<std::string> error_buffer_details;
   for (const auto &v : variants) {
     emit(log, camera_path, "t08", std::string(v.label) + ": sending " + std::to_string(v.triggers) + " triggers...");
     V4lSession s;
@@ -449,8 +450,13 @@ void run_buffer_overwrite(const std::string &camera_path, MemoryBackend backend,
       if (ioctl(s.fd(), VIDIOC_DQBUF, &buf) < 0)
         break;
       available++;
-      if (buf.flags & V4L2_BUF_FLAG_ERROR)
+      if (buf.flags & V4L2_BUF_FLAG_ERROR) {
         error_frames++;
+        std::ostringstream detail;
+        detail << "Error flag buffers: variant " << v.key << " buffer_index=" << buf.index
+               << " sequence=" << buf.sequence << " flags=0x" << std::hex << buf.flags;
+        error_buffer_details.push_back(detail.str());
+      }
     }
     error_frames_total += error_frames;
 
@@ -461,6 +467,9 @@ void run_buffer_overwrite(const std::string &camera_path, MemoryBackend backend,
     r.details.push_back(std::string(v.label) + ": buffers=2 triggers=" + std::to_string(v.triggers) +
                         " available=" + std::to_string(available) +
                         (error_frames > 0 ? " errors=" + std::to_string(error_frames) : ""));
+  }
+  for (const auto &detail : error_buffer_details) {
+    r.details.push_back(detail);
   }
 
   r.metrics.push_back(metric("error_flag_total", "count", static_cast<double>(error_frames_total),
