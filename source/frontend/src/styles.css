@@ -1888,14 +1888,16 @@ summary span {
 .choice-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
+  justify-content: center;
+  text-align: center;
+  padding: 6px 14px;
   border-radius: 8px;
   border: 1px solid var(--border-strong);
   background: var(--bg-elevated);
   color: var(--text-secondary);
   font-weight: 600;
   font-size: 13px;
+  line-height: 1;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -1906,32 +1908,94 @@ summary span {
   color: var(--accent);
 }
 
-.choice-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
+.combined-toolbar-panel {
+  margin-bottom: 20px;
+  padding: 12px 18px;
 }
 
-.filter-toolbar {
+.combined-toolbar-panel .filter-toolbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 16px;
+  margin-bottom: 0;
 }
 
-.preset-selector {
+.filter-group {
   display: flex;
   align-items: center;
   gap: 10px;
+  height: 36px;
+}
+
+.filter-group .choice-row,
+.filter-group .choice-row.compact {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-group .choice-btn {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-sizing: border-box;
+}
+
+.filter-group .segmented-control {
+  height: 34px;
+}
+
+.filter-group .segmented-control button {
+  min-height: 34px;
+  height: 34px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-sizing: border-box;
+}
+
+.filter-group .filter-toggles {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+}
+
+.filter-group .toggle-switch-pill {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border-subtle);
+  margin: 0 4px;
+  align-self: center;
 }
 
 .toolbar-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .filter-toggles {
@@ -2010,30 +2074,6 @@ summary span {
   background: var(--bg-elevated);
   color: var(--text-secondary);
   border: 1px solid var(--border-subtle);
-}
-
-.card-checkbox-indicator {
-  margin-right: 10px;
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.custom-check {
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  border: 2px solid var(--border-strong);
-  display: grid;
-  place-items: center;
-  color: #ffffff;
-  background: transparent;
-  transition: all 0.15s ease;
-}
-
-.custom-check.checked {
-  background: var(--accent);
-  border-color: var(--accent);
 }
 
 .card-header-row {

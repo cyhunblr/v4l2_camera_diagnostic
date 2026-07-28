@@ -52,54 +52,59 @@ export function TestSelectionPage({
         </div>
       </header>
 
-      <div className="panel backend-panel">
-        <div className="panel-title">
-          <HardDrive size={18} />
-          <h3>Memory Backend &amp; Execution Strategy</h3>
-        </div>
-        <div className="choice-row compact">
-          {BACKEND_OPTIONS.map((backend) => (
-            <button
-              key={backend}
-              className={`choice-btn ${backends.includes(backend) ? "selected" : ""}`}
-              onClick={() => onToggleBackend(backend)}
-            >
-              <span className="choice-dot" />
-              {backend}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="panel">
-        <div className="panel-title">
-          <ListChecks size={18} />
-          <h3>Test Preset &amp; Filters</h3>
-        </div>
-        <div className="test-groups">
-          <div className="filter-toolbar">
-            <div className="preset-selector">
-              <span className="toolbar-label">Preset:</span>
-              <div className="segmented-control">
-                {GROUP_SELECTORS.map((selector) => (
-                  <button
-                    key={selector}
-                    className={selectedTests.includes(selector) ? "selected" : ""}
-                    onClick={() => onSetGroupSelector(selector)}
-                  >
-                    {selector}
-                  </button>
-                ))}
-              </div>
+      <div className="panel combined-toolbar-panel">
+        <div className="filter-toolbar">
+          <div className="filter-group">
+            <span className="toolbar-label">
+              <HardDrive size={15} />
+              Backend:
+            </span>
+            <div className="choice-row compact">
+              {BACKEND_OPTIONS.map((backend) => (
+                <button
+                  key={backend}
+                  className={`choice-btn ${backends.includes(backend) ? "selected" : ""}`}
+                  onClick={() => onToggleBackend(backend)}
+                >
+                  {backend}
+                </button>
+              ))}
             </div>
+          </div>
 
+          <div className="toolbar-divider" />
+
+          <div className="filter-group">
+            <span className="toolbar-label">
+              <ListChecks size={15} />
+              Preset:
+            </span>
+            <div className="segmented-control">
+              {GROUP_SELECTORS.map((selector) => (
+                <button
+                  key={selector}
+                  className={selectedTests.includes(selector) ? "selected" : ""}
+                  onClick={() => onSetGroupSelector(selector)}
+                >
+                  {selector}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="toolbar-divider" />
+
+          <div className="filter-group">
+            <span className="toolbar-label">
+              <Sliders size={15} />
+              Filter:
+            </span>
             <div className="filter-toggles">
               <button
                 type="button"
                 className={`toggle-switch-pill ${includeLong ? "active" : ""}`}
                 onClick={() => onIncludeLongChange(!includeLong)}
               >
-                <Sliders size={13} />
                 <span>Long-running</span>
                 <span className="switch-track"><span className="switch-thumb" /></span>
               </button>
@@ -109,14 +114,16 @@ export function TestSelectionPage({
                 className={`toggle-switch-pill ${includeExperimental ? "active" : ""}`}
                 onClick={() => onIncludeExperimentalChange(!includeExperimental)}
               >
-                <Sliders size={13} />
                 <span>Experimental</span>
                 <span className="switch-track"><span className="switch-thumb" /></span>
               </button>
             </div>
           </div>
+        </div>
+      </div>
 
-          {groupedTests.map(([category, items]) => {
+      <div className="test-groups">
+        {groupedTests.map(([category, items]) => {
             const categorySelectedCount = items.filter((t) => isTestSelected(t)).length;
             return (
               <details key={category} open className="test-category-group">
@@ -166,7 +173,6 @@ export function TestSelectionPage({
           })}
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 

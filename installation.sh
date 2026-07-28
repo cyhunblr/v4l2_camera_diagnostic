@@ -174,6 +174,11 @@ prime_sudo() {
     echo "This installer needs sudo to install missing system packages and/or"
     echo "grant the web app permission to read the kernel log (for Export DMESG)."
     sudo -v
+    if [[ -t 1 ]]; then
+      # Remove the previous terminal line (sudo password prompt row).
+      # Works on common ANSI terminals.
+      printf '\033[1A\033[2K\r'
+    fi
     echo
   fi
 }

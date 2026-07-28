@@ -1,5 +1,4 @@
 import React from "react";
-import { Check } from "lucide-react";
 
 export type SelectableCardProps = {
   selected: boolean;
@@ -43,11 +42,6 @@ export function SelectableCard({
       onClick={() => !disabled && onToggle()}
       onKeyDown={handleKeyDown}
     >
-      <div className="card-checkbox-indicator">
-        <span className={`custom-check ${selected ? "checked" : ""}`}>
-          {selected && <Check size={12} strokeWidth={3} />}
-        </span>
-      </div>
       <div className="card-body">
         <div className="card-header-row">
           <div className="card-title">{title}</div>
