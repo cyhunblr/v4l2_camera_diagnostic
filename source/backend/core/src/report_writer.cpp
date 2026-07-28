@@ -1,12 +1,16 @@
 #include "v4l2diag/core/report_writer.hpp"
 
+#include <algorithm>
 #include <cerrno>
+#include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
+#include <map>
 #include <sstream>
 #include <string>
 #include <sys/stat.h>
@@ -115,6 +119,400 @@ std::string html_escape(const std::string &value) {
     }
   }
   return out.str();
+}
+
+bool starts_with(const std::string &value, const std::string &prefix) {
+  return value.size() >= prefix.size() && value.compare(0, prefix.size(), prefix) == 0;
+}
+
+bool ends_with(const std::string &value, const std::string &suffix) {
+  return value.size() >= suffix.size() && value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+std::string humanize_metric_name(std::string value) {
+  std::replace(value.begin(), value.end(), '_', ' ');
+  if (!value.empty() && value[0] >= 'a' && value[0] <= 'z') {
+    value[0] = static_cast<char>(value[0] - 'a' + 'A');
+  }
+  return value;
+}
+
+std::string format_metric_value(double value) {
+  std::ostringstream out;
+  const double rounded = std::round(value);
+  if (std::fabs(value - rounded) < 0.0005) {
+    out << std::fixed << std::setprecision(0) << value;
+  } else if (std::fabs(value) >= 100.0) {
+    out << std::fixed << std::setprecision(1) << value;
+  } else {
+    out << std::fixed << std::setprecision(3) << value;
+  }
+  std::string rendered = out.str();
+  if (rendered.find('.') != std::string::npos) {
+    while (!rendered.empty() && rendered.back() == '0')
+      rendered.pop_back();
+    if (!rendered.empty() && rendered.back() == '.')
+      rendered.pop_back();
+  }
+  return rendered;
+}
+
+bool is_sentinel_metric(const MetricValue &metric) {
+  if (std::fabs(metric.value + 500.0) < 0.000001) {
+    return true;
+  }
+  if (std::fabs(metric.value + 1.0) >= 0.000001) {
+    return false;
+  }
+  std::string description = metric.description;
+  std::transform(description.begin(), description.end(), description.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return metric.name.find("cliff") != std::string::npos || metric.name.find("safety_margin") != std::string::npos ||
+         metric.name.find("min_reliable") != std::string::npos || description.find("n/a") != std::string::npos ||
+         description.find("none") != std::string::npos || description.find("no cliff") != std::string::npos ||
+         description.find("could not") != std::string::npos;
+}
+
+bool is_chartable_metric(const MetricValue &metric) {
+  return metric.unit != "bool" && metric.unit != "errno" && std::isfinite(metric.value) && !is_sentinel_metric(metric);
+}
+
+std::string statistic_base(const std::string &name) {
+  static const std::vector<std::string> suffixes = {
+      "_stddev_ms", "_jitter_ms", "_mean_ms", "_p95_ms", "_max_ms", "_min_ms",
+      "_stddev",    "_jitter",    "_mean",    "_p95",    "_max",    "_min",
+  };
+  for (const auto &suffix : suffixes) {
+    if (ends_with(name, suffix)) {
+      return name.substr(0, name.size() - suffix.size());
+    }
+  }
+  return "";
+}
+
+std::string statistic_label(const std::string &name, const std::string &base) {
+  std::string label = name;
+  if (!base.empty() && starts_with(label, base + "_")) {
+    label.erase(0, base.size() + 1);
+  }
+  if (ends_with(label, "_ms")) {
+    label.resize(label.size() - 3);
+  }
+  return humanize_metric_name(label);
+}
+
+std::string sweep_prefix(const std::string &name) {
+  static const std::vector<std::string> suffixes = {
+      "_latency_mean",
+      "_latency_p95",
+      "_latency_max",
+      "_throughput_mbps",
+  };
+  for (const auto &suffix : suffixes) {
+    if (ends_with(name, suffix)) {
+      return name.substr(0, name.size() - suffix.size());
+    }
+  }
+  return "";
+}
+
+struct MetricChartGroup {
+  std::string title;
+  std::string unit;
+  std::string label_prefix;
+  std::vector<std::size_t> indices;
+  bool horizontal = false;
+};
+
+void append_metric_group(std::vector<MetricChartGroup> &groups, std::vector<bool> &used,
+                         const std::vector<MetricValue> &metrics, const std::vector<std::size_t> &indices,
+                         const std::string &title, const std::string &label_prefix, bool force_horizontal) {
+  if (indices.size() < 2) {
+    return;
+  }
+  MetricChartGroup group;
+  group.title = title;
+  group.unit = metrics[indices.front()].unit;
+  group.label_prefix = label_prefix;
+  group.indices = indices;
+  group.horizontal = force_horizontal || indices.size() > 6;
+  if (!group.horizontal) {
+    for (std::size_t index : indices) {
+      if (statistic_label(metrics[index].name, label_prefix).size() > 18) {
+        group.horizontal = true;
+        break;
+      }
+    }
+  }
+  for (std::size_t index : indices)
+    used[index] = true;
+  groups.push_back(group);
+}
+
+std::vector<MetricChartGroup> group_metrics(const std::vector<MetricValue> &metrics, std::vector<bool> &used) {
+  std::vector<MetricChartGroup> groups;
+  used.assign(metrics.size(), false);
+
+  const struct {
+    const char *prefix;
+    const char *title;
+  } sweep_patterns[] = {
+      {"hits_", "Pulse Width Hits"},
+      {"lat_high_avg_", "HIGH Edge Latency"},
+      {"lat_low_avg_", "LOW Edge Latency"},
+      {"ll", "Control Sweep Latency"},
+  };
+
+  for (const auto &pattern : sweep_patterns) {
+    std::map<std::string, std::vector<std::size_t>> by_unit;
+    for (std::size_t i = 0; i < metrics.size(); ++i) {
+      const auto &metric = metrics[i];
+      bool matches = starts_with(metric.name, pattern.prefix);
+      if (std::string(pattern.prefix) == "ll") {
+        matches = matches && metric.name.find("_bp") != std::string::npos &&
+                  metric.name.find("_wi") != std::string::npos && ends_with(metric.name, "_mean_ms");
+      }
+      if (!used[i] && matches && is_chartable_metric(metric)) {
+        by_unit[metric.unit].push_back(i);
+      }
+    }
+    for (const auto &entry : by_unit) {
+      append_metric_group(groups, used, metrics, entry.second, pattern.title, "", true);
+    }
+  }
+
+  // A repeated latency/throughput prefix identifies format or resolution sweeps
+  // without relying on the test ID.
+  std::vector<std::string> throughput_prefixes;
+  for (const auto &metric : metrics) {
+    if (ends_with(metric.name, "_throughput_mbps")) {
+      throughput_prefixes.push_back(sweep_prefix(metric.name));
+    }
+  }
+  std::sort(throughput_prefixes.begin(), throughput_prefixes.end());
+  throughput_prefixes.erase(std::unique(throughput_prefixes.begin(), throughput_prefixes.end()),
+                            throughput_prefixes.end());
+  if (throughput_prefixes.size() >= 2) {
+    std::map<std::string, std::vector<std::size_t>> by_unit;
+    for (std::size_t i = 0; i < metrics.size(); ++i) {
+      const std::string prefix = sweep_prefix(metrics[i].name);
+      if (!used[i] && !prefix.empty() && is_chartable_metric(metrics[i]) &&
+          std::find(throughput_prefixes.begin(), throughput_prefixes.end(), prefix) != throughput_prefixes.end()) {
+        by_unit[metrics[i].unit].push_back(i);
+      }
+    }
+    for (const auto &entry : by_unit) {
+      const std::string title = entry.first == "MB/s" ? "Throughput Sweep" : "Latency Sweep";
+      append_metric_group(groups, used, metrics, entry.second, title, "", true);
+    }
+  }
+
+  struct PendingGroup {
+    std::string key;
+    std::string base;
+    std::string unit;
+    std::vector<std::size_t> indices;
+  };
+  std::vector<PendingGroup> pending;
+  for (std::size_t i = 0; i < metrics.size(); ++i) {
+    if (used[i] || !is_chartable_metric(metrics[i])) {
+      continue;
+    }
+    const std::string base = statistic_base(metrics[i].name);
+    if (base.empty()) {
+      continue;
+    }
+    const std::string key = base + "\n" + metrics[i].unit;
+    auto it = std::find_if(pending.begin(), pending.end(), [&](const PendingGroup &group) { return group.key == key; });
+    if (it == pending.end()) {
+      pending.push_back({key, base, metrics[i].unit, {i}});
+    } else {
+      it->indices.push_back(i);
+    }
+  }
+  for (const auto &entry : pending) {
+    append_metric_group(groups, used, metrics, entry.indices, humanize_metric_name(entry.base), entry.base, false);
+  }
+
+  std::sort(groups.begin(), groups.end(), [](const MetricChartGroup &lhs, const MetricChartGroup &rhs) {
+    return lhs.indices.front() < rhs.indices.front();
+  });
+  return groups;
+}
+
+void render_status_distribution(std::ostream &out, int pass_count, int fail_count, int warn_count, int skip_count) {
+  const int total = pass_count + fail_count + warn_count + skip_count;
+  out << "<div class=\"section result-distribution\"><div class=\"section-header\"><h2>Result Distribution</h2></div>";
+  out << "<div class=\"distribution-body\"><div class=\"distribution-track\" role=\"img\" "
+         "aria-label=\"Test result distribution\">";
+  const struct {
+    const char *name;
+    const char *css_class;
+    int count;
+  } statuses[] = {
+      {"Passed", "pass", pass_count},
+      {"Failed", "fail", fail_count},
+      {"Warnings", "warn", warn_count},
+      {"Skipped", "skip", skip_count},
+  };
+  if (total == 0) {
+    out << "<span class=\"distribution-empty\">No test results</span>";
+  } else {
+    for (const auto &status : statuses) {
+      if (status.count == 0)
+        continue;
+      const double width = 100.0 * status.count / total;
+      out << "<span class=\"distribution-segment " << status.css_class << "\" style=\"width:" << std::fixed
+          << std::setprecision(3) << width << "%\" title=\"" << status.name << ": " << status.count << "\"></span>";
+    }
+  }
+  out << "</div><div class=\"distribution-legend\">";
+  for (const auto &status : statuses) {
+    out << "<span class=\"legend-item\"><span class=\"legend-dot " << status.css_class << "\"></span><span>"
+        << status.name << "</span><strong>" << status.count << "</strong></span>";
+  }
+  out << "</div></div></div>";
+}
+
+void render_xy_chart(std::ostream &out, const std::vector<MetricValue> &metrics, const MetricChartGroup &group) {
+  constexpr double width = 760.0;
+  constexpr double height = 290.0;
+  constexpr double left = 60.0;
+  constexpr double right = 24.0;
+  constexpr double top = 38.0;
+  constexpr double bottom = 88.0;
+  const double plot_width = width - left - right;
+  const double plot_height = height - top - bottom;
+
+  double min_value = 0.0;
+  double max_value = 0.0;
+  for (std::size_t index : group.indices) {
+    min_value = std::min(min_value, metrics[index].value);
+    max_value = std::max(max_value, metrics[index].value);
+  }
+  if (std::fabs(max_value - min_value) < 0.000001) {
+    max_value = min_value + 1.0;
+  }
+  const auto y_for = [&](double value) { return top + (max_value - value) * plot_height / (max_value - min_value); };
+  const double zero_y = y_for(0.0);
+
+  out << "<div class=\"metric-chart metric-xy-chart\"><div class=\"metric-chart-title\">" << html_escape(group.title);
+  if (!group.unit.empty())
+    out << " <span>" << html_escape(group.unit) << "</span>";
+  out << "</div><svg viewBox=\"0 0 760 290\" role=\"img\" aria-label=\"" << html_escape(group.title)
+      << " metric chart\">";
+
+  for (int tick = 0; tick <= 4; ++tick) {
+    const double value = max_value - (max_value - min_value) * tick / 4.0;
+    const double y = y_for(value);
+    out << "<line class=\"chart-grid\" x1=\"" << left << "\" y1=\"" << y << "\" x2=\"" << (width - right) << "\" y2=\""
+        << y << "\"></line>";
+    out << "<text class=\"axis-value\" x=\"" << (left - 9.0) << "\" y=\"" << (y + 4.0) << "\" text-anchor=\"end\">"
+        << html_escape(format_metric_value(value)) << "</text>";
+  }
+  out << "<line class=\"chart-axis\" x1=\"" << left << "\" y1=\"" << zero_y << "\" x2=\"" << (width - right)
+      << "\" y2=\"" << zero_y << "\"></line>";
+
+  std::ostringstream points;
+  for (std::size_t i = 0; i < group.indices.size(); ++i) {
+    const std::size_t index = group.indices[i];
+    const auto &metric = metrics[index];
+    const double x =
+        group.indices.size() == 1 ? left + plot_width / 2.0 : left + plot_width * i / (group.indices.size() - 1);
+    const double y = y_for(metric.value);
+    if (i)
+      points << " ";
+    points << x << "," << y;
+    out << "<line class=\"guide-line\" x1=\"" << x << "\" y1=\"" << y << "\" x2=\"" << x << "\" y2=\"" << zero_y
+        << "\"></line>";
+  }
+  out << "<polyline class=\"metric-line\" points=\"" << points.str() << "\"></polyline>";
+
+  for (std::size_t i = 0; i < group.indices.size(); ++i) {
+    const std::size_t index = group.indices[i];
+    const auto &metric = metrics[index];
+    const double x =
+        group.indices.size() == 1 ? left + plot_width / 2.0 : left + plot_width * i / (group.indices.size() - 1);
+    const double y = y_for(metric.value);
+    const std::string label = statistic_label(metric.name, group.label_prefix);
+    const double value_y = metric.value >= 0.0 ? y - 11.0 : y + 20.0;
+    out << "<circle class=\"metric-point\" data-metric=\"" << html_escape(metric.name) << "\" cx=\"" << x << "\" cy=\""
+        << y << "\" r=\"7\"></circle>";
+    out << "<text class=\"point-value\" x=\"" << x << "\" y=\"" << value_y << "\" text-anchor=\"middle\">"
+        << html_escape(format_metric_value(metric.value)) << "</text>";
+    out << "<text class=\"axis-label\" transform=\"translate(" << (x + 2.0) << "," << (height - bottom + 25.0)
+        << ") rotate(-45)\" text-anchor=\"end\">" << html_escape(label) << "</text>";
+  }
+  out << "</svg></div>";
+}
+
+void render_horizontal_chart(std::ostream &out, const std::vector<MetricValue> &metrics,
+                             const MetricChartGroup &group) {
+  double max_magnitude = 0.0;
+  for (std::size_t index : group.indices)
+    max_magnitude = std::max(max_magnitude, std::fabs(metrics[index].value));
+  if (max_magnitude < 0.000001)
+    max_magnitude = 1.0;
+
+  out << "<div class=\"metric-chart metric-bars\"><div class=\"metric-chart-title\">" << html_escape(group.title);
+  if (!group.unit.empty())
+    out << " <span>" << html_escape(group.unit) << "</span>";
+  out << "</div><div class=\"bar-list\">";
+  for (std::size_t index : group.indices) {
+    const auto &metric = metrics[index];
+    const double bar_width = 100.0 * std::fabs(metric.value) / max_magnitude;
+    out << "<div class=\"bar-row\" data-metric=\"" << html_escape(metric.name) << "\"><div class=\"bar-label\">"
+        << html_escape(humanize_metric_name(metric.name)) << "</div><div class=\"bar-track\"><span class=\"bar-fill"
+        << (metric.value < 0.0 ? " negative" : "") << "\" style=\"width:" << std::fixed << std::setprecision(3)
+        << bar_width << "%\"></span></div><div class=\"bar-value\">" << html_escape(format_metric_value(metric.value));
+    if (!metric.unit.empty())
+      out << " " << html_escape(metric.unit);
+    out << "</div></div>";
+  }
+  out << "</div></div>";
+}
+
+void render_plain_metrics(std::ostream &out, const std::vector<MetricValue> &metrics, const std::vector<bool> &used) {
+  bool has_plain_metrics = false;
+  for (std::size_t i = 0; i < metrics.size(); ++i)
+    has_plain_metrics = has_plain_metrics || !used[i];
+  if (!has_plain_metrics)
+    return;
+
+  out << "<dl class=\"metric-kv-list\">";
+  for (std::size_t i = 0; i < metrics.size(); ++i) {
+    if (used[i])
+      continue;
+    const auto &metric = metrics[i];
+    out << "<div class=\"metric-kv-row\"><dt>" << html_escape(humanize_metric_name(metric.name)) << "</dt><dd>";
+    if (is_sentinel_metric(metric)) {
+      out << "N/A";
+    } else if (metric.unit == "bool") {
+      out << (metric.value != 0.0 ? "true" : "false");
+    } else {
+      out << html_escape(format_metric_value(metric.value));
+      if (!metric.unit.empty())
+        out << " <span>" << html_escape(metric.unit) << "</span>";
+    }
+    out << "</dd></div>";
+  }
+  out << "</dl>";
+}
+
+void render_test_metrics(std::ostream &out, const std::vector<MetricValue> &metrics) {
+  std::vector<bool> used;
+  const auto groups = group_metrics(metrics, used);
+  if (!groups.empty())
+    out << "<div class=\"metric-visuals\">";
+  for (const auto &group : groups) {
+    if (group.horizontal)
+      render_horizontal_chart(out, metrics, group);
+    else
+      render_xy_chart(out, metrics, group);
+  }
+  if (!groups.empty())
+    out << "</div>";
+  render_plain_metrics(out, metrics, used);
 }
 
 void write_json(const RunResult &result, const std::string &path) {
@@ -266,17 +664,21 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans
 .meta-row .v { color: #f1f5f9; font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 12px; word-break: break-word; }
 .meta-note { color: #94a3b8; font-size: 11px; font-style: italic; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); }
 
-.summary-bar { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 32px; }
-.summary-badge { display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 8px; font-weight: 700; font-size: 14px; }
-.summary-badge.pass { background: #f0fdf4; color: var(--pass); border: 1px solid #bbf7d0; }
-.summary-badge.fail { background: #fef2f2; color: var(--fail); border: 1px solid #fecaca; }
-.summary-badge.warn { background: #fffbeb; color: var(--warn); border: 1px solid #fde68a; }
-.summary-badge.skip { background: #f8fafc; color: var(--skip); border: 1px solid #e2e8f0; }
-.summary-badge .count { font-size: 22px; font-weight: 800; }
-
 .section { background: white; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 24px; overflow: hidden; }
 .section-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 12px; }
 .section-header h2 { margin: 0; font-size: 18px; }
+.distribution-body { padding: 20px 24px; }
+.distribution-track { height: 22px; display: flex; overflow: hidden; background: #e2e8f0; border-radius: 5px; }
+.distribution-segment { display: block; min-width: 2px; }
+.distribution-segment.pass, .legend-dot.pass { background: var(--pass); }
+.distribution-segment.fail, .legend-dot.fail { background: var(--fail); }
+.distribution-segment.warn, .legend-dot.warn { background: var(--warn); }
+.distribution-segment.skip, .legend-dot.skip { background: var(--skip); }
+.distribution-empty { width: 100%; color: #64748b; font-size: 11px; line-height: 22px; text-align: center; }
+.distribution-legend { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 14px; }
+.legend-item { display: grid; grid-template-columns: 8px auto auto; align-items: center; gap: 7px; color: #64748b; font-size: 12px; }
+.legend-item strong { color: #1e293b; font-family: monospace; }
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; }
 
 table.overview { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.overview th { background: #f8fafc; padding: 12px 16px; text-align: left; font-weight: 600;
@@ -307,11 +709,30 @@ table.overview .summary-text { color: #475569; }
 .test-section-header .badge.warn { background: #fef3c7; color: var(--warn); }
 .test-section-header .badge.skipped { background: #f1f5f9; color: var(--skip); }
 .test-body { padding: 16px; }
-.test-body .metrics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin-bottom: 12px; }
-.metric-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; }
-.metric-card .m-name { font-size: 11px; color: #64748b; font-weight: 500; }
-.metric-card .m-value { font-size: 16px; font-weight: 700; color: #1e293b; margin-top: 2px; font-family: monospace; }
-.metric-card .m-unit { font-size: 11px; color: #94a3b8; }
+.metric-visuals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 12px; margin-bottom: 12px; }
+.metric-chart { border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; padding: 12px; overflow-x: auto; }
+.metric-chart-title { color: #334155; font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.metric-chart-title span { color: #94a3b8; font-size: 10px; font-weight: 600; margin-left: 4px; }
+.metric-xy-chart svg { display: block; width: 100%; min-width: 620px; height: auto; overflow: visible; }
+.chart-grid { stroke: #e2e8f0; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart-axis { stroke: #94a3b8; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.guide-line { stroke: #94a3b8; stroke-width: 1; stroke-dasharray: 4 5; vector-effect: non-scaling-stroke; }
+.metric-line { fill: none; stroke: #2563eb; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.metric-point { fill: #2563eb; stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.axis-value, .axis-label, .point-value { font-family: 'JetBrains Mono', monospace; fill: #64748b; font-size: 10px; }
+.point-value { fill: #1e293b; font-weight: 700; }
+.bar-list { display: grid; gap: 9px; }
+.bar-row { display: grid; grid-template-columns: minmax(130px, 1.2fr) minmax(120px, 2fr) minmax(86px, auto); align-items: center; gap: 10px; }
+.bar-label { color: #475569; font-size: 11px; overflow-wrap: anywhere; }
+.bar-track { height: 9px; border-radius: 3px; overflow: hidden; background: #e2e8f0; }
+.bar-fill { display: block; height: 100%; min-width: 2px; background: #2563eb; }
+.bar-fill.negative { background: #d97706; }
+.bar-value { color: #1e293b; font-family: monospace; font-size: 11px; font-weight: 700; text-align: right; white-space: nowrap; }
+.metric-kv-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 0 24px; margin: 0 0 12px; border-top: 1px solid #e2e8f0; }
+.metric-kv-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 8px 0; border-bottom: 1px solid #e2e8f0; }
+.metric-kv-row dt { color: #64748b; font-size: 11px; overflow-wrap: anywhere; }
+.metric-kv-row dd { margin: 0; color: #1e293b; font-family: monospace; font-size: 12px; font-weight: 700; text-align: right; }
+.metric-kv-row dd span { color: #94a3b8; font-size: 10px; }
 .detail-list { background: #f8fafc; border-radius: 6px; padding: 12px 16px; font-family: 'JetBrains Mono', monospace;
                font-size: 12px; line-height: 1.8; color: #475569; white-space: pre-wrap; }
 .warnings-box { background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 10px 14px; margin-top: 8px;
@@ -322,8 +743,32 @@ table.overview .summary-text { color: #475569; }
                   background: #0f172a; color: white; border: none; border-radius: 8px; padding: 10px 18px;
                   font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
 .export-pdf-btn:hover { background: #1e293b; }
+@media (max-width: 700px) {
+  .container { padding: 20px 12px; }
+  .header { padding: 28px 20px; border-radius: 8px; }
+  .test-section { margin: 12px; }
+  .test-section-header { align-items: flex-start; flex-wrap: wrap; }
+  table.overview thead { display: none; }
+  table.overview tbody { display: block; }
+  table.overview tr { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px 12px; padding: 12px 14px; }
+  table.overview td { padding: 0; border: none; }
+  table.overview tr + tr { border-top: 1px solid #e2e8f0; }
+  table.overview td:nth-child(1) { grid-column: 1; grid-row: 1; overflow-wrap: anywhere; }
+  table.overview td:nth-child(2) { grid-column: 1; grid-row: 2; color: #64748b; }
+  table.overview td:nth-child(3) { grid-column: 2; grid-row: 1; }
+  table.overview td:nth-child(4) { grid-column: 3; grid-row: 1; }
+  table.overview td:nth-child(5) { grid-column: 2 / 4; grid-row: 2; }
+  .metric-xy-chart svg { min-width: 0; }
+  .metric-xy-chart .axis-value, .metric-xy-chart .axis-label { font-size: 14px; }
+  .metric-xy-chart .point-value { font-size: 15px; }
+  .metric-xy-chart .metric-point { stroke-width: 3; }
+  .bar-row { grid-template-columns: minmax(100px, 1fr) minmax(90px, 1.4fr); }
+  .bar-value { grid-column: 2; }
+  .export-actions { position: static; flex-direction: row; padding: 12px; background: #f8fafc; }
+}
 @media print { body { background: white; } .container { padding: 20px; } .header { break-inside: avoid; }
-               .test-section { break-inside: avoid; } .export-actions { display: none; }
+               .test-section, .metric-chart, .result-distribution { break-inside: avoid; }
+               .metric-xy-chart svg { min-width: 0; } .export-actions { display: none; }
                @page { margin: 15mm 10mm; size: A4; } }
 </style></head><body>
 <div class="export-actions">
@@ -411,17 +856,7 @@ table.overview .summary-text { color: #475569; }
       }
     }
 
-    // Summary badges
-    out << "<div class=\"summary-bar\">";
-    if (pass_count > 0)
-      out << "<div class=\"summary-badge pass\"><span class=\"count\">" << pass_count << "</span> Passed</div>";
-    if (fail_count > 0)
-      out << "<div class=\"summary-badge fail\"><span class=\"count\">" << fail_count << "</span> Failed</div>";
-    if (warn_count > 0)
-      out << "<div class=\"summary-badge warn\"><span class=\"count\">" << warn_count << "</span> Warnings</div>";
-    if (skip_count > 0)
-      out << "<div class=\"summary-badge skip\"><span class=\"count\">" << skip_count << "</span> Skipped</div>";
-    out << "</div>";
+    render_status_distribution(out, pass_count, fail_count, warn_count, skip_count);
 
     // Overview table
     out << "<div class=\"section\"><div class=\"section-header\"><h2>Test Results Overview</h2></div>";
@@ -451,15 +886,8 @@ table.overview .summary-text { color: #475569; }
           << test.duration_ms << "ms</span>";
       out << "</div><div class=\"test-body\">";
 
-      // Metrics grid
       if (!test.metrics.empty()) {
-        out << "<div class=\"metrics-grid\">";
-        for (const auto &m : test.metrics) {
-          out << "<div class=\"metric-card\"><div class=\"m-name\">" << html_escape(m.name) << "</div>";
-          out << "<div class=\"m-value\">" << std::fixed << std::setprecision(3) << m.value;
-          out << " <span class=\"m-unit\">" << html_escape(m.unit) << "</span></div></div>";
-        }
-        out << "</div>";
+        render_test_metrics(out, test.metrics);
       }
 
       // Details
