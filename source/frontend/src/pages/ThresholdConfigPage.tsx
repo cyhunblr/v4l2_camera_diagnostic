@@ -34,7 +34,7 @@ type Props = {
 };
 
 export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onError }: Props) {
-  const [configs, setConfigs] = useState<ThresholdConfig[]>([]);
+  const [configs, setConfigs] = useState<ThresholdConfig[]>(api.DEFAULT_THRESHOLDS);
   const [editing, setEditing] = useState<ThresholdConfig | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);

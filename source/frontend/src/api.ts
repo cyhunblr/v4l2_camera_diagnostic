@@ -1,6 +1,6 @@
 import { Profile, RunSummary, StartRunPayload, TestDefinition, ThresholdConfig } from "./types";
 
-const FALLBACK_TESTS: TestDefinition[] = [
+export const DEFAULT_TESTS: TestDefinition[] = [
   {
     id: "t01-open-close",
     name: "Open / Close Cycle Test",
@@ -51,13 +51,14 @@ const FALLBACK_TESTS: TestDefinition[] = [
   }
 ];
 
-const FALLBACK_THRESHOLDS: ThresholdConfig[] = [
+export const DEFAULT_THRESHOLDS: ThresholdConfig[] = [
   {
     id: "default",
     name: "Built-in Standard Thresholds",
     description: "Default validation thresholds for Jetson diagnostic suite",
     values: {
       "t01-open-close": { "max_open_duration_ms": 150, "failure_rate_pct": 0 },
+
       "t07-poll-timeout-sweep": { "max_poll_delay_ms": 500, "drop_count": 0 }
     },
     params: {
@@ -152,7 +153,7 @@ export async function getTests() {
   } catch {
     // fallback below
   }
-  return jsonResp({ tests: FALLBACK_TESTS });
+  return jsonResp({ tests: DEFAULT_TESTS });
 }
 
 export function getRunLogs(runId: string, after: number) {
@@ -195,7 +196,7 @@ export async function getThresholds() {
   } catch {
     // fallback below
   }
-  return jsonResp({ configs: FALLBACK_THRESHOLDS });
+  return jsonResp({ configs: DEFAULT_THRESHOLDS });
 }
 
 export function getThreshold(id: string) {

@@ -26,7 +26,7 @@ type ToastState = {
 export default function App() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [tests, setTests] = useState<TestDefinition[]>([]);
+  const [tests, setTests] = useState<TestDefinition[]>(api.DEFAULT_TESTS);
   const [cameraMode, setCameraMode] = useState<"single" | "multi">("single");
   const [masterPath, setMasterPath] = useState<string | null>(null);
   const [slavePaths, setSlavePaths] = useState<string[]>([]);
