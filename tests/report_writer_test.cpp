@@ -181,18 +181,31 @@ int main() {
   const std::string html = read_file(dir + "/diagnostic-report.html");
   bool html_ok = true;
   html_ok &= require(html.find("Result Distribution") != std::string::npos, "missing result distribution");
+  const auto passed_pos = html.find("<span>Passed</span>");
+  const auto warnings_pos = html.find("<span>Warnings</span>");
+  const auto failed_pos = html.find("<span>Failed</span>");
+  const auto skipped_pos = html.find("<span>Skipped</span>");
+  html_ok &= require(passed_pos != std::string::npos && warnings_pos != std::string::npos &&
+                         failed_pos != std::string::npos && skipped_pos != std::string::npos &&
+                         passed_pos < warnings_pos && warnings_pos < failed_pos && failed_pos < skipped_pos,
+                     "result distribution order is not Passed-Warnings-Failed-Skipped");
   html_ok &= require(html.find("summary-badge") == std::string::npos, "legacy summary badges remain");
   html_ok &= require(html.find("metric-card") == std::string::npos, "legacy metric cards remain");
   html_ok &= require(html.find("Latency Snapshot") == std::string::npos, "unexpected latency snapshot");
   html_ok &= require(html.find("Test Duration") == std::string::npos, "unexpected test duration chart");
-  html_ok &= require(html.find("class=\"metric-point\"") != std::string::npos, "missing X-Y point markers");
-  html_ok &= require(html.find("class=\"guide-line\"") != std::string::npos, "missing X-Y guide lines");
+  html_ok &= require(html.find("overflow-x: auto") == std::string::npos, "chart horizontal scrollbar CSS remains");
+  html_ok &= require(html.find("min-width: 620px") == std::string::npos, "chart minimum width still forces scrolling");
+  html_ok &= require(html.find("metric-dot-chart") != std::string::npos, "missing statistic dot-range chart");
+  html_ok &= require(html.find("class=\"metric-point\"") != std::string::npos, "missing statistic point markers");
+  html_ok &= require(html.find("class=\"guide-line\"") != std::string::npos, "missing statistic guide lines");
   html_ok &= require(html.find("stroke-dasharray") != std::string::npos, "guide lines are not dashed");
-  html_ok &= require(html.find("cx=\"60\"") == std::string::npos, "X-Y point marker is stuck on the left axis");
-  html_ok &= require(html.find("cx=\"736\"") == std::string::npos, "X-Y point marker is stuck on the right axis");
-  html_ok &= require(html.find("cy=\"38\"") == std::string::npos, "X-Y point marker is stuck on the top axis");
-  html_ok &= require(html.find("cy=\"202\"") == std::string::npos, "X-Y point marker is stuck on the bottom axis");
+  html_ok &= require(html.find("cx=\"118\"") == std::string::npos, "statistic point marker is stuck on the left axis");
+  html_ok &= require(html.find("cx=\"702\"") == std::string::npos, "statistic point marker is stuck on the right axis");
+  html_ok &= require(html.find("cy=\"34\"") == std::string::npos, "distribution point marker is stuck on the top edge");
+  html_ok &=
+      require(html.find("cy=\"208\"") == std::string::npos, "distribution point marker is stuck on the bottom axis");
   html_ok &= require(html.find("metric-bars") != std::string::npos, "missing horizontal fallback chart");
+  html_ok &= require(html.find("bar-fill tone-0") != std::string::npos, "sweep chart palette is missing");
   html_ok &= require(html.find("metric-kv-list") != std::string::npos, "missing plain metric list");
   html_ok &= require(html.find("Supporting values") != std::string::npos, "missing supporting values label");
   html_ok &= require(html.find("Supports capture") != std::string::npos, "bool metric is not in the plain list");
@@ -207,8 +220,13 @@ int main() {
   html_ok &= require(html.find("Error flag buffers") != std::string::npos, "t08 error buffer details are missing");
   html_ok &= require(html.find("buffer_index=1") != std::string::npos, "t08 error buffer index is missing");
   html_ok &= require(html.find("t13-distribution-chart") != std::string::npos, "missing t13 distribution chart");
+  html_ok &= require(html.find("distribution-area") != std::string::npos, "t13 distribution area is missing");
+  html_ok &= require(html.find("hit-zone-high") != std::string::npos, "t13 distribution bands are missing");
   html_ok &= require(html.find("data-timeout-ms=\"45\"") != std::string::npos, "missing t13 timeout point");
   html_ok &= require(html.find("t13-threshold-chart") != std::string::npos, "missing t13 threshold chart");
+  html_ok &= require(html.find("threshold-risk") != std::string::npos, "t13 risk threshold band is missing");
+  html_ok &= require(html.find("threshold-margin") != std::string::npos, "t13 margin threshold band is missing");
+  html_ok &= require(html.find("threshold-safe") != std::string::npos, "t13 safe threshold band is missing");
   html_ok &= require(html.find("data-metric=\"production_timeout_ms\"") != std::string::npos,
                      "missing inferred production timeout marker");
   html_ok &= require(occurrence_count(html, "data-metric=\"cliff_ms\"") == 1, "t13 cliff metric is duplicated");

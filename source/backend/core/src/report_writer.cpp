@@ -359,8 +359,8 @@ void render_status_distribution(std::ostream &out, int pass_count, int fail_coun
     int count;
   } statuses[] = {
       {"Passed", "pass", pass_count},
-      {"Failed", "fail", fail_count},
       {"Warnings", "warn", warn_count},
+      {"Failed", "fail", fail_count},
       {"Skipped", "skip", skip_count},
   };
   if (total == 0) {
@@ -382,14 +382,15 @@ void render_status_distribution(std::ostream &out, int pass_count, int fail_coun
   out << "</div></div></div>";
 }
 
-void render_xy_chart(std::ostream &out, const std::vector<MetricValue> &metrics, const MetricChartGroup &group) {
+void render_statistic_dot_chart(std::ostream &out, const std::vector<MetricValue> &metrics,
+                                const MetricChartGroup &group) {
   constexpr double width = 760.0;
-  constexpr double height = 290.0;
-  constexpr double left = 60.0;
-  constexpr double right = 24.0;
+  const double height = std::max(190.0, 82.0 + 48.0 * group.indices.size());
+  constexpr double left = 118.0;
+  constexpr double right = 58.0;
   constexpr double top = 38.0;
-  constexpr double bottom = 88.0;
-  constexpr double point_inset = 30.0;
+  constexpr double bottom = 48.0;
+  constexpr double point_inset = 16.0;
   const double plot_width = width - left - right - (point_inset * 2.0);
   const double plot_height = height - top - bottom;
 
@@ -420,55 +421,52 @@ void render_xy_chart(std::ostream &out, const std::vector<MetricValue> &metrics,
       min_value = 0.0;
     }
   }
-  const auto y_for = [&](double value) { return top + (max_value - value) * plot_height / (max_value - min_value); };
-  const double baseline_y = has_negative ? y_for(0.0) : top + plot_height;
+  const auto x_for = [&](double value) {
+    return left + point_inset + (value - min_value) * plot_width / (max_value - min_value);
+  };
+  const double guide_start_x = has_negative ? x_for(0.0) : left;
 
-  out << "<div class=\"metric-chart metric-xy-chart\"><div class=\"metric-chart-title\">" << html_escape(group.title);
+  out << "<div class=\"metric-chart metric-dot-chart\"><div class=\"metric-chart-title\">" << html_escape(group.title);
   if (!group.unit.empty())
     out << " <span>" << html_escape(group.unit) << "</span>";
-  out << "</div><svg viewBox=\"0 0 760 290\" role=\"img\" aria-label=\"" << html_escape(group.title)
-      << " metric chart\">";
+  out << "</div><svg viewBox=\"0 0 760 " << height << "\" role=\"img\" aria-label=\"" << html_escape(group.title)
+      << " statistic dot chart\">";
 
   for (int tick = 0; tick <= 4; ++tick) {
-    const double value = max_value - (max_value - min_value) * tick / 4.0;
-    const double y = y_for(value);
-    out << "<line class=\"chart-grid\" x1=\"" << left << "\" y1=\"" << y << "\" x2=\"" << (width - right) << "\" y2=\""
-        << y << "\"></line>";
-    out << "<text class=\"axis-value\" x=\"" << (left - 9.0) << "\" y=\"" << (y + 4.0) << "\" text-anchor=\"end\">"
+    const double value = min_value + (max_value - min_value) * tick / 4.0;
+    const double x = x_for(value);
+    out << "<line class=\"chart-grid\" x1=\"" << x << "\" y1=\"" << top << "\" x2=\"" << x << "\" y2=\""
+        << (height - bottom) << "\"></line>";
+    out << "<text class=\"axis-value\" x=\"" << x << "\" y=\"" << (height - 17.0) << "\" text-anchor=\"middle\">"
         << html_escape(format_metric_value(value)) << "</text>";
   }
-  out << "<line class=\"chart-axis\" x1=\"" << left << "\" y1=\"" << baseline_y << "\" x2=\"" << (width - right)
-      << "\" y2=\"" << baseline_y << "\"></line>";
-
-  std::ostringstream points;
-  for (std::size_t i = 0; i < group.indices.size(); ++i) {
-    const std::size_t index = group.indices[i];
-    const auto &metric = metrics[index];
-    const double x = group.indices.size() == 1 ? left + point_inset + plot_width / 2.0
-                                               : left + point_inset + plot_width * i / (group.indices.size() - 1);
-    const double y = y_for(metric.value);
-    if (i)
-      points << " ";
-    points << x << "," << y;
-    out << "<line class=\"guide-line\" x1=\"" << x << "\" y1=\"" << y << "\" x2=\"" << x << "\" y2=\"" << baseline_y
-        << "\"></line>";
+  if (has_negative) {
+    const double zero_x = x_for(0.0);
+    out << "<line class=\"zero-baseline\" x1=\"" << zero_x << "\" y1=\"" << top << "\" x2=\"" << zero_x << "\" y2=\""
+        << (height - bottom) << "\"></line>";
   }
-  out << "<polyline class=\"metric-line\" points=\"" << points.str() << "\"></polyline>";
+  out << "<line class=\"chart-axis\" x1=\"" << left << "\" y1=\"" << (height - bottom) << "\" x2=\"" << (width - right)
+      << "\" y2=\"" << (height - bottom) << "\"></line>";
 
   for (std::size_t i = 0; i < group.indices.size(); ++i) {
     const std::size_t index = group.indices[i];
     const auto &metric = metrics[index];
-    const double x = group.indices.size() == 1 ? left + point_inset + plot_width / 2.0
-                                               : left + point_inset + plot_width * i / (group.indices.size() - 1);
-    const double y = y_for(metric.value);
+    const double x = x_for(metric.value);
+    const double y = top + (i + 0.5) * plot_height / group.indices.size();
     const std::string label = statistic_label(metric.name, group.label_prefix);
-    const double value_y = y < top + 24.0 ? y + 24.0 : y - 11.0;
+    const bool label_to_left = x > width - right - 72.0;
+    const double value_x = label_to_left ? x - 12.0 : x + 12.0;
+    const char *text_anchor = label_to_left ? "end" : "start";
+    out << "<line class=\"dot-row-line\" x1=\"" << left << "\" y1=\"" << y << "\" x2=\"" << (width - right)
+        << "\" y2=\"" << y << "\"></line>";
+    out << "<line class=\"guide-line\" x1=\"" << guide_start_x << "\" y1=\"" << y << "\" x2=\"" << x << "\" y2=\"" << y
+        << "\"></line>";
+    out << "<text class=\"dot-label\" x=\"" << (left - 14.0) << "\" y=\"" << (y + 4.0) << "\" text-anchor=\"end\">"
+        << html_escape(label) << "</text>";
     out << "<circle class=\"metric-point\" data-metric=\"" << html_escape(metric.name) << "\" cx=\"" << x << "\" cy=\""
         << y << "\" r=\"7\"></circle>";
-    out << "<text class=\"point-value\" x=\"" << x << "\" y=\"" << value_y << "\" text-anchor=\"middle\">"
-        << html_escape(format_metric_value(metric.value)) << "</text>";
-    out << "<text class=\"axis-label\" transform=\"translate(" << (x + 2.0) << "," << (height - bottom + 25.0)
-        << ") rotate(-45)\" text-anchor=\"end\">" << html_escape(label) << "</text>";
+    out << "<text class=\"point-value\" x=\"" << value_x << "\" y=\"" << (y + 4.0) << "\" text-anchor=\"" << text_anchor
+        << "\">" << html_escape(format_metric_value(metric.value)) << "</text>";
   }
   out << "</svg></div>";
 }
@@ -485,13 +483,15 @@ void render_horizontal_chart(std::ostream &out, const std::vector<MetricValue> &
   if (!group.unit.empty())
     out << " <span>" << html_escape(group.unit) << "</span>";
   out << "</div><div class=\"bar-list\">";
-  for (std::size_t index : group.indices) {
+  for (std::size_t item = 0; item < group.indices.size(); ++item) {
+    const std::size_t index = group.indices[item];
     const auto &metric = metrics[index];
     const double bar_width = 100.0 * std::fabs(metric.value) / max_magnitude;
     out << "<div class=\"bar-row\" data-metric=\"" << html_escape(metric.name) << "\"><div class=\"bar-label\">"
         << html_escape(humanize_metric_name(metric.name)) << "</div><div class=\"bar-track\"><span class=\"bar-fill"
-        << (metric.value < 0.0 ? " negative" : "") << "\" style=\"width:" << std::fixed << std::setprecision(3)
-        << bar_width << "%\"></span></div><div class=\"bar-value\">" << html_escape(format_metric_value(metric.value));
+        << (metric.value < 0.0 ? " negative" : "") << " tone-" << (item % 4) << "\" style=\"width:" << std::fixed
+        << std::setprecision(3) << bar_width << "%\"><i></i></span></div><div class=\"bar-value\">"
+        << html_escape(format_metric_value(metric.value));
     if (!metric.unit.empty())
       out << " " << html_escape(metric.unit);
     out << "</div></div>";
@@ -574,18 +574,19 @@ void render_t13_distribution_chart(std::ostream &out, const std::vector<TimeoutP
   constexpr double point_inset = 28.0;
   const double plot_width = width - left - right - (point_inset * 2.0);
   const double plot_height = height - top - bottom;
-  const int min_timeout = points.front().timeout_ms;
-  const int max_timeout = points.back().timeout_ms;
-  const int timeout_span = std::max(1, max_timeout - min_timeout);
-  const auto x_for = [&](int timeout) {
-    return left + point_inset + plot_width * (timeout - min_timeout) / timeout_span;
-  };
-  const auto y_for = [&](double ratio) { return top + (100.0 - ratio) * plot_height / 100.0; };
+  const auto x_for = [&](std::size_t index) { return left + point_inset + plot_width * index / (points.size() - 1); };
+  const auto y_for = [&](double ratio) { return top + 10.0 + (100.0 - ratio) * (plot_height - 20.0) / 100.0; };
   const double baseline_y = top + plot_height;
 
   out << "<div class=\"metric-chart metric-xy-chart t13-distribution-chart\"><div class=\"metric-chart-title\">Timeout "
          "Hit Distribution <span>%</span></div><svg viewBox=\"0 0 760 300\" role=\"img\" aria-label=\"t13 timeout hit "
          "distribution\">";
+  out << "<rect class=\"hit-zone hit-zone-high\" x=\"" << left << "\" y=\"" << top << "\" width=\""
+      << (width - left - right) << "\" height=\"" << (plot_height * 0.25) << "\"></rect>";
+  out << "<rect class=\"hit-zone hit-zone-mid\" x=\"" << left << "\" y=\"" << (top + plot_height * 0.25)
+      << "\" width=\"" << (width - left - right) << "\" height=\"" << (plot_height * 0.5) << "\"></rect>";
+  out << "<rect class=\"hit-zone hit-zone-low\" x=\"" << left << "\" y=\"" << (top + plot_height * 0.75)
+      << "\" width=\"" << (width - left - right) << "\" height=\"" << (plot_height * 0.25) << "\"></rect>";
   for (int tick = 0; tick <= 4; ++tick) {
     const double value = 100.0 - 25.0 * tick;
     const double y = y_for(value);
@@ -598,22 +599,28 @@ void render_t13_distribution_chart(std::ostream &out, const std::vector<TimeoutP
       << "\" y2=\"" << baseline_y << "\"></line>";
 
   std::ostringstream path;
+  std::ostringstream area;
+  area << x_for(0) << "," << baseline_y << " ";
   for (std::size_t i = 0; i < points.size(); ++i) {
     const auto &point = points[i];
     const double ratio = 100.0 * point.hits / point.total;
-    const double x = x_for(point.timeout_ms);
+    const double x = x_for(i);
     const double y = y_for(ratio);
     if (i)
       path << " ";
     path << x << "," << y;
+    area << x << "," << y << " ";
     out << "<line class=\"guide-line\" x1=\"" << x << "\" y1=\"" << y << "\" x2=\"" << x << "\" y2=\"" << baseline_y
         << "\"></line>";
   }
-  out << "<polyline class=\"metric-line\" points=\"" << path.str() << "\"></polyline>";
+  area << x_for(points.size() - 1) << "," << baseline_y;
+  out << "<polygon class=\"distribution-area\" points=\"" << area.str() << "\"></polygon>";
+  out << "<polyline class=\"metric-line distribution-line\" points=\"" << path.str() << "\"></polyline>";
 
-  for (const auto &point : points) {
+  for (std::size_t i = 0; i < points.size(); ++i) {
+    const auto &point = points[i];
     const double ratio = 100.0 * point.hits / point.total;
-    const double x = x_for(point.timeout_ms);
+    const double x = x_for(i);
     const double y = y_for(ratio);
     const double value_y = y < top + 24.0 ? y + 24.0 : y - 11.0;
     out << "<circle class=\"metric-point t13-probe-point\" data-timeout-ms=\"" << point.timeout_ms << "\" cx=\"" << x
@@ -674,28 +681,46 @@ bool render_t13_threshold_chart(std::ostream &out, const std::vector<MetricValue
   constexpr double width = 760.0;
   constexpr double left = 68.0;
   constexpr double right = 34.0;
-  constexpr double axis_y = 66.0;
+  constexpr double band_y = 42.0;
+  constexpr double band_height = 28.0;
+  constexpr double marker_y = band_y + band_height / 2.0;
   const auto x_for = [&](double value) { return left + (width - left - right) * (value - min_value) / span; };
+  const double cliff_x = x_for(metrics[cliff_index].value);
+  double production_x = width - right;
+  const auto production = std::find_if(markers.begin(), markers.end(), [](const ThresholdMarker &marker) {
+    return marker.metric_name == "production_timeout_ms";
+  });
+  if (production != markers.end()) {
+    production_x = x_for(production->value);
+  }
 
   out << "<div class=\"metric-chart t13-threshold-chart\"><div class=\"metric-chart-title\">Timeout Thresholds "
-         "<span>ms</span></div><svg viewBox=\"0 0 760 150\" role=\"img\" aria-label=\"t13 timeout thresholds\">";
-  out << "<line class=\"chart-axis\" x1=\"" << left << "\" y1=\"" << axis_y << "\" x2=\"" << (width - right)
-      << "\" y2=\"" << axis_y << "\"></line>";
-  out << "<text class=\"axis-value\" x=\"" << left << "\" y=\"118\" text-anchor=\"middle\">"
+         "<span>ms</span></div><svg viewBox=\"0 0 760 108\" role=\"img\" aria-label=\"t13 timeout thresholds\">";
+  out << "<rect class=\"threshold-zone threshold-risk\" x=\"" << left << "\" y=\"" << band_y << "\" width=\""
+      << std::max(0.0, cliff_x - left) << "\" height=\"" << band_height << "\"></rect>";
+  out << "<rect class=\"threshold-zone threshold-margin\" x=\"" << cliff_x << "\" y=\"" << band_y << "\" width=\""
+      << std::max(0.0, production_x - cliff_x) << "\" height=\"" << band_height << "\"></rect>";
+  out << "<rect class=\"threshold-zone threshold-safe\" x=\"" << production_x << "\" y=\"" << band_y << "\" width=\""
+      << std::max(0.0, width - right - production_x) << "\" height=\"" << band_height << "\"></rect>";
+  out << "<text class=\"axis-value\" x=\"" << left << "\" y=\"94\" text-anchor=\"start\">"
       << html_escape(format_metric_value(min_value)) << "ms</text>";
-  out << "<text class=\"axis-value\" x=\"" << (width - right) << "\" y=\"118\" text-anchor=\"middle\">"
+  out << "<text class=\"axis-value\" x=\"" << (width - right) << "\" y=\"94\" text-anchor=\"end\">"
       << html_escape(format_metric_value(max_value)) << "ms</text>";
-  for (const auto &marker : markers) {
+  for (std::size_t i = 0; i < markers.size(); ++i) {
+    const auto &marker = markers[i];
     const double x = x_for(marker.value);
-    out << "<line class=\"guide-line\" x1=\"" << x << "\" y1=\"36\" x2=\"" << x << "\" y2=\"96\"></line>";
-    out << "<circle class=\"metric-point threshold-point\" data-metric=\"" << html_escape(marker.metric_name)
-        << "\" cx=\"" << x << "\" cy=\"" << axis_y << "\" r=\"6\"></circle>";
-    out << "<text class=\"point-value\" x=\"" << x << "\" y=\"28\" text-anchor=\"middle\">"
-        << html_escape(format_metric_value(marker.value)) << "</text>";
-    out << "<text class=\"axis-label\" x=\"" << x << "\" y=\"96\" text-anchor=\"middle\">" << html_escape(marker.label)
-        << "</text>";
+    out << "<line class=\"threshold-marker marker-" << (i % 4) << "\" data-metric=\"" << html_escape(marker.metric_name)
+        << "\" x1=\"" << x << "\" y1=\"28\" x2=\"" << x << "\" y2=\"82\"></line>";
+    out << "<circle class=\"threshold-point marker-" << (i % 4) << "\" cx=\"" << x << "\" cy=\"" << marker_y
+        << "\" r=\"6\"></circle>";
   }
-  out << "</svg></div>";
+  out << "</svg><div class=\"threshold-legend\">";
+  for (std::size_t i = 0; i < markers.size(); ++i) {
+    const auto &marker = markers[i];
+    out << "<span class=\"threshold-legend-item marker-" << (i % 4) << "\"><i></i><span>" << html_escape(marker.label)
+        << "</span><strong>" << html_escape(format_metric_value(marker.value)) << "ms</strong></span>";
+  }
+  out << "</div></div>";
   return true;
 }
 
@@ -770,7 +795,7 @@ void render_test_metrics(std::ostream &out, const TestResult &test) {
     if (group.horizontal)
       render_horizontal_chart(out, metrics, group);
     else
-      render_xy_chart(out, metrics, group);
+      render_statistic_dot_chart(out, metrics, group);
   }
   if (!groups.empty())
     out << "</div>";
@@ -972,26 +997,58 @@ table.overview .summary-text { color: #475569; }
 .test-section-header .badge.warn { background: #fef3c7; color: var(--warn); }
 .test-section-header .badge.skipped { background: #f1f5f9; color: var(--skip); }
 .test-body { padding: 16px; }
-.metric-visuals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 12px; margin-bottom: 12px; }
-.metric-chart { border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; padding: 12px; overflow-x: auto; }
-.metric-chart-title { color: #334155; font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.metric-visuals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 12px; margin-bottom: 12px; }
+.metric-chart { border: 1px solid #dbe4ee; border-radius: 6px; background: #fff; padding: 14px; overflow: hidden; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
+.metric-chart-title { color: #1e293b; font-size: 13px; font-weight: 750; margin-bottom: 6px; }
 .metric-chart-title span { color: #94a3b8; font-size: 10px; font-weight: 600; margin-left: 4px; }
-.metric-xy-chart svg { display: block; width: 100%; min-width: 620px; height: auto; overflow: visible; }
+.metric-chart svg { display: block; width: 100%; max-width: 100%; height: auto; overflow: hidden; }
+.metric-xy-chart svg { min-width: 0; }
 .chart-grid { stroke: #e2e8f0; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .chart-axis { stroke: #94a3b8; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .guide-line { stroke: #94a3b8; stroke-width: 1; stroke-dasharray: 4 5; vector-effect: non-scaling-stroke; }
+.dot-row-line { stroke: #f1f5f9; stroke-width: 10; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.zero-baseline { stroke: #475569; stroke-width: 1.5; stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
 .metric-line { fill: none; stroke: #2563eb; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.metric-point { fill: #2563eb; stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; }
-.threshold-point { fill: #0f766e; }
-.axis-value, .axis-label, .point-value { font-family: 'JetBrains Mono', monospace; fill: #64748b; font-size: 10px; }
+.metric-point { fill: #0f8aa6; stroke: #fff; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.axis-value, .axis-label, .point-value, .dot-label { font-family: 'JetBrains Mono', monospace; fill: #64748b; font-size: 13px; }
+.dot-label { fill: #475569; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 700; }
 .point-value { fill: #1e293b; font-weight: 700; }
-.t13-threshold-chart .axis-label { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 700; fill: #475569; }
+.hit-zone { opacity: 0.48; }
+.hit-zone-high { fill: #dcfce7; }
+.hit-zone-mid { fill: #fef3c7; }
+.hit-zone-low { fill: #fee2e2; }
+.distribution-area { fill: #bae6fd; opacity: 0.58; }
+.distribution-line { stroke: #087f9b; stroke-width: 3; }
+.t13-probe-point { fill: #087f9b; }
+.threshold-zone { rx: 5; ry: 5; }
+.threshold-risk { fill: #fecaca; }
+.threshold-margin { fill: #fde68a; }
+.threshold-safe { fill: #bbf7d0; }
+.threshold-marker { stroke-width: 3; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.threshold-marker.marker-0, .threshold-point.marker-0 { stroke: #dc2626; fill: #dc2626; }
+.threshold-marker.marker-1, .threshold-point.marker-1 { stroke: #d97706; fill: #d97706; }
+.threshold-marker.marker-2, .threshold-point.marker-2 { stroke: #0f8aa6; fill: #0f8aa6; }
+.threshold-marker.marker-3, .threshold-point.marker-3 { stroke: #15803d; fill: #15803d; }
+.threshold-point { stroke: #fff !important; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.threshold-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 7px 12px; margin-top: 2px; }
+.threshold-legend-item { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 6px; min-width: 0; color: #64748b; font-size: 10px; }
+.threshold-legend-item i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.threshold-legend-item strong { color: #1e293b; font-family: monospace; font-size: 11px; white-space: nowrap; }
+.threshold-legend-item.marker-0 { color: #dc2626; }
+.threshold-legend-item.marker-1 { color: #d97706; }
+.threshold-legend-item.marker-2 { color: #0f8aa6; }
+.threshold-legend-item.marker-3 { color: #15803d; }
 .bar-list { display: grid; gap: 9px; }
-.bar-row { display: grid; grid-template-columns: minmax(130px, 1.2fr) minmax(120px, 2fr) minmax(86px, auto); align-items: center; gap: 10px; }
+.bar-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(80px, 2fr) minmax(54px, auto); align-items: center; gap: 10px; }
 .bar-label { color: #475569; font-size: 11px; overflow-wrap: anywhere; }
-.bar-track { height: 9px; border-radius: 3px; overflow: hidden; background: #e2e8f0; }
-.bar-fill { display: block; height: 100%; min-width: 2px; background: #2563eb; }
-.bar-fill.negative { background: #d97706; }
+.bar-track { height: 5px; border-radius: 3px; background: #e2e8f0; }
+.bar-fill { position: relative; display: block; height: 100%; min-width: 2px; border-radius: 3px; background: #2563eb; }
+.bar-fill i { position: absolute; right: -4px; top: 50%; width: 9px; height: 9px; border: 2px solid #fff; border-radius: 50%; background: inherit; transform: translateY(-50%); box-shadow: 0 0 0 1px currentColor; }
+.bar-fill.tone-0 { background: #2563eb; color: #2563eb; }
+.bar-fill.tone-1 { background: #0f8aa6; color: #0f8aa6; }
+.bar-fill.tone-2 { background: #d97706; color: #d97706; }
+.bar-fill.tone-3 { background: #e2553d; color: #e2553d; }
+.bar-fill.negative { background: #dc2626; color: #dc2626; }
 .bar-value { color: #1e293b; font-family: monospace; font-size: 11px; font-weight: 700; text-align: right; white-space: nowrap; }
 .supporting-values { margin: 0 0 12px; }
 .supporting-title { color: #64748b; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
@@ -1020,22 +1077,22 @@ table.overview .summary-text { color: #475569; }
   table.overview tr { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px 12px; padding: 12px 14px; }
   table.overview td { padding: 0; border: none; }
   table.overview tr + tr { border-top: 1px solid #e2e8f0; }
-  table.overview td:nth-child(1) { grid-column: 1; grid-row: 1; overflow-wrap: anywhere; }
+  table.overview td:nth-child(1) { grid-column: 1 / 4; grid-row: 1; overflow-wrap: anywhere; }
   table.overview td:nth-child(2) { grid-column: 1; grid-row: 2; color: #64748b; }
-  table.overview td:nth-child(3) { grid-column: 2; grid-row: 1; }
-  table.overview td:nth-child(4) { grid-column: 3; grid-row: 1; }
-  table.overview td:nth-child(5) { grid-column: 2 / 4; grid-row: 2; }
-  .metric-xy-chart svg { min-width: 0; }
-  .metric-xy-chart .axis-value, .metric-xy-chart .axis-label { font-size: 14px; }
-  .metric-xy-chart .point-value { font-size: 15px; }
-  .metric-xy-chart .metric-point { stroke-width: 3; }
+  table.overview td:nth-child(3) { grid-column: 2; grid-row: 2; }
+  table.overview td:nth-child(4) { grid-column: 3; grid-row: 2; }
+  table.overview td:nth-child(5) { grid-column: 1 / 4; grid-row: 3; }
+  .metric-xy-chart .axis-value, .metric-xy-chart .axis-label, .metric-dot-chart .axis-value,
+  .metric-dot-chart .dot-label, .t13-threshold-chart .axis-value { font-size: 23px; }
+  .metric-xy-chart .point-value, .metric-dot-chart .point-value { font-size: 24px; }
+  .metric-point { stroke-width: 3; }
   .bar-row { grid-template-columns: minmax(100px, 1fr) minmax(90px, 1.4fr); }
   .bar-value { grid-column: 2; }
   .export-actions { position: static; flex-direction: row; padding: 12px; background: #f8fafc; }
 }
 @media print { body { background: white; } .container { padding: 20px; } .header { break-inside: avoid; }
                .test-section, .metric-chart, .result-distribution { break-inside: avoid; }
-               .metric-xy-chart svg { min-width: 0; } .export-actions { display: none; }
+               .export-actions { display: none; }
                @page { margin: 15mm 10mm; size: A4; } }
 </style></head><body>
 <div class="export-actions">
