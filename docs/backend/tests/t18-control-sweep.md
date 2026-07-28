@@ -57,6 +57,8 @@ For each combination of ll∈{0,1}, bp∈{0,1}, wi∈{0,1}:
 
 Example metric keys: `ll0_bp0_wi0_mean_ms`, `ll0_bp0_wi1_mean_ms`, `ll0_bp1_wi0_mean_ms`, ..., `ll1_bp1_wi1_mean_ms`
 
+Here `ll` is LED_LEVEL, `bp` is BYPASS, and `wi` is WINDOW_INTEG.
+
 ## Report Details
 
 ### Control inventory (one line per control)

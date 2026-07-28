@@ -86,11 +86,15 @@ int main() {
   sweep_test.status = v4l2diag::TestStatus::Warn;
   sweep_test.summary = "Pulse sweep completed with warnings.";
   sweep_test.duration_ms = 2200.0;
+  // The full pws[] sweep the test actually performs: 11 categories is what made
+  // the old "tone-{index % 4}" palette give 3ms and 30ms the same fill.
   sweep_test.metrics = {
       {"hits_1ms", "count", 2.0, "Hits at 1ms."},    {"hits_2ms", "count", 5.0, "Hits at 2ms."},
       {"hits_3ms", "count", 8.0, "Hits at 3ms."},    {"hits_5ms", "count", 12.0, "Hits at 5ms."},
       {"hits_7ms", "count", 16.0, "Hits at 7ms."},   {"hits_10ms", "count", 20.0, "Hits at 10ms."},
-      {"hits_13ms", "count", 20.0, "Hits at 13ms."},
+      {"hits_13ms", "count", 20.0, "Hits at 13ms."}, {"hits_15ms", "count", 20.0, "Hits at 15ms."},
+      {"hits_20ms", "count", 20.0, "Hits at 20ms."}, {"hits_25ms", "count", 20.0, "Hits at 25ms."},
+      {"hits_30ms", "count", 20.0, "Hits at 30ms."},
   };
   camera.tests.push_back(sweep_test);
 
@@ -109,14 +113,52 @@ int main() {
       {"nv16_latency_mean", "ms", 477.6, "NV16 mean latency."},
       {"nv16_latency_max", "ms", 481.4, "NV16 max latency."},
       {"nv16_throughput_mbps", "MB/s", 1056.9, "NV16 throughput."},
-      {"format_count", "count", 2.0, "Unique formats enumerated."},
+      {"format_count", "count", 3.0, "Unique formats enumerated."},
       {"formats_tested", "count", 2.0, "Unique formats tested."},
   };
+  // YUYV is enumerated but never measured, so it produces no metrics at all and
+  // only shows up in the details. It has to reach the report as an explicit
+  // omission instead of silently disappearing from the chart.
   format_test.details = {
       "UYVY: sizeimage=4915200",
       "NV16: sizeimage=4915200",
+      "YUYV: S_FMT failed",
   };
   camera.tests.push_back(format_test);
+
+  v4l2diag::TestResult resolution_test;
+  resolution_test.id = "t19-resolution-sweep";
+  resolution_test.name = "Resolution Sweep";
+  resolution_test.category = "format";
+  resolution_test.memory_backend = "mmap";
+  resolution_test.status = v4l2diag::TestStatus::Pass;
+  resolution_test.summary = "Four resolutions compared.";
+  resolution_test.duration_ms = 4100.0;
+  // Every resolution has to land on one chart per unit; the old grouping fell
+  // back to a separate dot chart per resolution, which made them incomparable.
+  resolution_test.metrics = {
+      {"640x480_latency_mean", "ms", 12.4, "Mean latency at 640x480."},
+      {"640x480_latency_p95", "ms", 15.1, "P95 latency at 640x480."},
+      {"640x480_throughput_mbps", "MB/s", 1890.0, "Throughput at 640x480."},
+      {"1280x720_latency_mean", "ms", 18.9, "Mean latency at 1280x720."},
+      {"1280x720_latency_p95", "ms", 23.7, "P95 latency at 1280x720."},
+      {"1280x720_throughput_mbps", "MB/s", 1540.0, "Throughput at 1280x720."},
+      {"1920x1080_latency_mean", "ms", 27.3, "Mean latency at 1920x1080."},
+      {"1920x1080_latency_p95", "ms", 34.8, "P95 latency at 1920x1080."},
+      {"1920x1080_throughput_mbps", "MB/s", 1210.0, "Throughput at 1920x1080."},
+      {"2896x1876_latency_mean", "ms", 41.6, "Mean latency at 2896x1876."},
+      {"2896x1876_latency_p95", "ms", 52.2, "P95 latency at 2896x1876."},
+      {"2896x1876_throughput_mbps", "MB/s", 1056.0, "Throughput at 2896x1876."},
+      {"resolution_count", "count", 5.0, "Resolutions tested."},
+  };
+  resolution_test.details = {
+      "640x480: mean=12ms p95=15ms throughput=1890MB/s",
+      "1280x720: mean=18ms p95=23ms throughput=1540MB/s",
+      "1920x1080: mean=27ms p95=34ms throughput=1210MB/s",
+      "2896x1876: mean=41ms p95=52ms throughput=1056MB/s",
+      "3840x2160: S_FMT failed — skipped",
+  };
+  camera.tests.push_back(resolution_test);
 
   v4l2diag::TestResult control_test;
   control_test.id = "t18-control-sweep";
@@ -126,9 +168,15 @@ int main() {
   control_test.status = v4l2diag::TestStatus::Pass;
   control_test.summary = "Control combinations measured.";
   control_test.duration_ms = 2800.0;
+  // All 8 combinations of the ISX021 sweep, as the test emits them.
   control_test.metrics = {
       {"ll0_bp0_wi0_mean_ms", "ms", 4.2, "Control combination latency."},
+      {"ll0_bp0_wi1_mean_ms", "ms", 4.9, "Control combination latency."},
+      {"ll0_bp1_wi0_mean_ms", "ms", 3.8, "Control combination latency."},
+      {"ll0_bp1_wi1_mean_ms", "ms", 4.4, "Control combination latency."},
+      {"ll1_bp0_wi0_mean_ms", "ms", 5.6, "Control combination latency."},
       {"ll1_bp0_wi1_mean_ms", "ms", 5.1, "Control combination latency."},
+      {"ll1_bp1_wi0_mean_ms", "ms", 6.0, "Control combination latency."},
       {"ll1_bp1_wi1_mean_ms", "ms", 6.4, "Control combination latency."},
   };
   camera.tests.push_back(control_test);
@@ -239,17 +287,40 @@ int main() {
   html_ok &= require(html.find("class=\"metric-point\"") != std::string::npos, "missing statistic point markers");
   html_ok &= require(html.find("class=\"guide-line\"") != std::string::npos, "missing statistic guide lines");
   html_ok &= require(html.find("stroke-dasharray") != std::string::npos, "guide lines are not dashed");
-  html_ok &= require(html.find("class=\"axis-arrow\"") != std::string::npos, "chart axis arrows are missing");
-  html_ok &= require(html.find(">X: Format</text>") != std::string::npos, "format X axis is not labelled");
-  html_ok &= require(html.find(">Y: Latency Sweep (ms)</text>") != std::string::npos, "latency Y axis is not labelled");
-  html_ok &= require(html.find("cx=\"118\"") == std::string::npos, "statistic point marker is stuck on the left axis");
-  html_ok &= require(html.find("cx=\"702\"") == std::string::npos, "statistic point marker is stuck on the right axis");
-  html_ok &= require(html.find("cy=\"34\"") == std::string::npos, "distribution point marker is stuck on the top edge");
-  html_ok &=
-      require(html.find("cy=\"208\"") == std::string::npos, "distribution point marker is stuck on the bottom axis");
-  html_ok &= require(html.find("metric-bars") != std::string::npos, "missing horizontal fallback chart");
-  html_ok &= require(html.find("bar-fill tone-0") != std::string::npos, "control chart palette is missing");
-  html_ok &= require(html.find("horizontal-y-axis") != std::string::npos, "horizontal chart Y axis is missing");
+
+  // Axis roles: the category axis names the independent variable and the value
+  // axis names the measured quantity. Neither is derived from the chart title,
+  // and neither carries the old "X: " / "Y: " prefix.
+  html_ok &= require(html.find(">X: ") == std::string::npos, "axis captions still carry the X: prefix");
+  html_ok &= require(html.find(">Y: ") == std::string::npos, "axis captions still carry the Y: prefix");
+  html_ok &= require(html.find(">Pixel format</text>") != std::string::npos, "format category axis is not labelled");
+  html_ok &= require(html.find(">Capture latency (ms)</text>") != std::string::npos,
+                     "format latency value axis is not labelled with the measured quantity");
+  html_ok &= require(html.find(">Memcpy throughput (MB/s)</text>") != std::string::npos,
+                     "throughput value axis is not labelled with the measured quantity");
+  html_ok &= require(html.find("Latency Sweep (ms)") == std::string::npos,
+                     "value axis is still labelled with the chart title");
+  html_ok &= require(html.find(">Pulse width (ms)</text>") != std::string::npos,
+                     "t16 category axis is not labelled with the swept quantity");
+  html_ok &= require(html.find(">Trigger hits (count)</text>") != std::string::npos,
+                     "t16 value axis is not labelled with the measured quantity");
+
+  html_ok &= require(html.find("metric-bars") != std::string::npos, "missing horizontal bar chart");
+  html_ok &= require(html.find("class=\"horizontal-bar\"") != std::string::npos,
+                     "horizontal bars are not rendered as SVG marks");
+  html_ok &= require(html.find("bar-fill") == std::string::npos, "legacy CSS horizontal bar fills remain");
+  html_ok &= require(html.find("horizontal-y-axis") == std::string::npos, "legacy CSS horizontal axis remains");
+  html_ok &= require(html.find("horizontal-bar-plot") == std::string::npos, "legacy CSS horizontal plot remains");
+
+  // t18: the control combination labels spell the controls out. The metric keys
+  // stay untouched -- docs and the threshold registry reference them.
+  html_ok &= require(html.find("Ll0 bp0 wi0 mean ms") == std::string::npos, "t18 still shows raw metric-name labels");
+  html_ok &= require(html.find("LED 0 \xc2\xb7 BYP 1 \xc2\xb7 WIN 0") != std::string::npos,
+                     "t18 control combination label is missing");
+  html_ok &= require(html.find("data-metric=\"ll0_bp1_wi0_mean_ms\"") != std::string::npos,
+                     "t18 metric keys should not change");
+  html_ok &= require(html.find(">Mean capture latency (ms)</text>") != std::string::npos,
+                     "t18 value axis is not labelled with the measured quantity");
   html_ok &= require(html.find("metric-kv-list") != std::string::npos, "missing plain metric list");
   html_ok &= require(html.find("Supporting values") != std::string::npos, "missing supporting values label");
   html_ok &= require(html.find("Supports capture") != std::string::npos, "bool metric is not in the plain list");
@@ -269,6 +340,43 @@ int main() {
       require(occurrence_count(html, ">NV16</text>") == 2, "NV16 should appear once on each format comparison chart");
   html_ok &= require(html.find(">Mean</span>") != std::string::npos, "format latency mean legend is missing");
   html_ok &= require(html.find(">Max</span>") != std::string::npos, "format latency max legend is missing");
+
+  // YUYV was enumerated but never measured: it must be reported, not dropped.
+  html_ok &= require(html.find("chart-omissions") != std::string::npos, "unmeasured formats are not reported");
+  html_ok &= require(html.find("YUYV") != std::string::npos, "unmeasured YUYV is missing from the report");
+  html_ok &= require(html.find("S_FMT failed") != std::string::npos, "unmeasured format reason is missing");
+  html_ok &=
+      require(occurrence_count(html, ">YUYV</text>") == 0, "unmeasured YUYV should not be charted as a category");
+  html_ok &= require(html.find("3840x2160") != std::string::npos, "unmeasured resolution is missing from the report");
+
+  // t19: every resolution belongs on one chart per unit, not one chart each.
+  html_ok &= require(html.find(">Resolution</text>") != std::string::npos, "t19 category axis is not labelled");
+  html_ok &= require(html.find("640x480 Latency") == std::string::npos, "t19 still emits a chart per resolution");
+  html_ok &= require(occurrence_count(html, ">640x480</text>") == 2,
+                     "each resolution should appear once per t19 chart (latency and throughput)");
+  html_ok &= require(occurrence_count(html, ">2896x1876</text>") == 2,
+                     "the largest resolution should appear once per t19 chart");
+  html_ok &=
+      require(html.find("data-metric=\"1920x1080_latency_p95\"") != std::string::npos, "t19 p95 series is not charted");
+
+  // Colour never cycles: no tone-* classes survive, and the sequential ramp is
+  // keyed to the category so distant categories cannot share a fill.
+  html_ok &= require(html.find("tone-0") == std::string::npos && html.find("tone-1") == std::string::npos &&
+                         html.find("tone-2") == std::string::npos && html.find("tone-3") == std::string::npos,
+                     "cycling tone-* palette classes remain");
+  html_ok &=
+      require(html.find("fill=\"#d97706\"") == std::string::npos, "the warning colour is still used for a data series");
+  html_ok &=
+      require(html.find("fill=\"#e2553d\"") == std::string::npos, "the failure colour is still used for a data series");
+  html_ok &= require(html.find("#e2553d") == std::string::npos, "the old series palette is still defined");
+  html_ok &= require(html.find("chart-ramp-key") != std::string::npos, "sequential ramp has no scale key");
+  html_ok &= require(html.find("fill=\"#86b6ef\"") != std::string::npos, "sequential ramp light end is missing");
+  html_ok &= require(html.find("fill=\"#0d366b\"") != std::string::npos, "sequential ramp dark end is missing");
+
+  // Ticks are round numbers rather than max*1.18 fractions.
+  html_ok &= require(html.find(">23.6</text>") == std::string::npos, "axis ticks are still scaled by max*1.18");
+  html_ok &=
+      require(html.find("metric-chart--wide") != std::string::npos, "many-category charts do not take the full row");
   html_ok &= require(html.find("Error flag buffers") != std::string::npos, "t08 error buffer details are missing");
   html_ok &= require(html.find("buffer_index=1") != std::string::npos, "t08 error buffer index is missing");
   html_ok &= require(html.find("t13-distribution-chart") != std::string::npos, "missing t13 distribution chart");

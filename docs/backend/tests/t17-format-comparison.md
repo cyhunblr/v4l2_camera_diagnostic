@@ -15,8 +15,9 @@ Compares capture performance across all pixel formats the device advertises via 
 2. Closes the enumeration file descriptor to avoid resource contention.
 3. For each enumerated format:
    a. Opens a fresh V4L2 session and sets the pixel format at the device's current resolution using `VIDIOC_S_FMT`.
-   b. Starts streaming with 2 buffers, warms up, and captures `sample_count` frames recording latency for each.
-   c. On the first successful capture, benchmarks memcpy throughput by copying `sizeimage` bytes `throughput_reps` times.
+   b. Verifies the granted `pixelformat` matches the request; `VIDIOC_S_FMT` may substitute a different format and still succeed, so mismatches are skipped rather than measured.
+   c. Starts streaming with 2 buffers, warms up, and captures `sample_count` frames recording latency for each.
+   d. On the first successful capture, benchmarks memcpy throughput by copying `sizeimage` bytes `throughput_reps` times.
 4. Restores the original device format and closes.
 
 ## Implementation
@@ -70,6 +71,7 @@ If a format fails to set or start:
 ```text
 UYVY: S_FMT failed
 NV12: start failed: VIDIOC_STREAMON: Device or resource busy
+YUYV: driver substituted UYVY — skipped
 ```
 
 ## Verdict Logic

@@ -767,6 +767,15 @@ void run_format_comparison(const std::string &camera_path, MemoryBackend backend
       r.details.push_back(entry.name + ": S_FMT failed");
       continue;
     }
+    // S_FMT is a negotiation, not a command: a driver may quietly substitute a
+    // different pixel format and still report success. Without this check the
+    // samples below would be recorded under the format we asked for rather than
+    // the one the driver actually granted.
+    if (fmt.fmt.pix.pixelformat != entry.pixelformat) {
+      r.details.push_back(entry.name + ": driver substituted " + fourcc_to_string(fmt.fmt.pix.pixelformat) +
+                          " — skipped");
+      continue;
+    }
     r.details.push_back(entry.name + ": sizeimage=" + std::to_string(fmt.fmt.pix.sizeimage));
 
     if (!s.start(2, backend, &err)) {

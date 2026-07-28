@@ -222,14 +222,6 @@ std::string sweep_prefix(const std::string &name) {
   return "";
 }
 
-std::string sweep_category_label(const std::string &name, const std::string &label_prefix) {
-  const std::string prefix = sweep_prefix(name);
-  if (!prefix.empty()) {
-    return humanize_metric_name(prefix);
-  }
-  return statistic_label(name, label_prefix);
-}
-
 std::string sweep_series_label(const std::string &name) {
   if (ends_with(name, "_latency_mean"))
     return "Mean";
@@ -251,6 +243,115 @@ bool looks_like_resolution_label(const std::string &value) {
          std::all_of(value.begin() + separator + 1, value.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
 }
 
+// Ticks land on 1/2/5 x 10^n steps so axis labels read as round numbers. The
+// previous "max * 1.18" scaling produced ticks like 5.9 / 11.8 / 17.7.
+struct AxisTicks {
+  std::vector<double> values;
+  double min = 0.0;
+  double max = 1.0;
+};
+
+AxisTicks nice_ticks(double lo, double hi, int target_count) {
+  AxisTicks result;
+  if (target_count < 2) {
+    target_count = 2;
+  }
+  if (!(hi > lo)) {
+    hi = lo + std::max(1.0, std::fabs(lo) * 0.1);
+  }
+  const double raw_step = (hi - lo) / (target_count - 1);
+  const double magnitude = std::pow(10.0, std::floor(std::log10(raw_step)));
+  const double normalized = raw_step / magnitude;
+  double step = 10.0;
+  if (normalized <= 1.0) {
+    step = 1.0;
+  } else if (normalized <= 2.0) {
+    step = 2.0;
+  } else if (normalized <= 5.0) {
+    step = 5.0;
+  }
+  step *= magnitude;
+  result.min = std::floor(lo / step) * step;
+  result.max = std::ceil(hi / step) * step;
+  if (result.max - result.min < step * 0.5) {
+    result.max = result.min + step;
+  }
+  for (double value = result.min; value <= result.max + step * 1e-9; value += step) {
+    result.values.push_back(value);
+  }
+  return result;
+}
+
+// Data colours. Sequential blue ramp (steps 250..700) for an ordered category
+// axis, one accent for nominal categories, and a 4-step ordinal ramp for the
+// ordered Mean/P95/Max series. The verdict colours (--pass/--warn/--fail) are
+// deliberately absent: reusing them for a data series made an ordinary bar read
+// as a warning or a failure.
+const char *const kSequentialRamp[] = {"#86b6ef", "#6da7ec", "#5598e7", "#3987e5", "#2a78d6",
+                                       "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b"};
+constexpr std::size_t kSequentialRampSize = sizeof(kSequentialRamp) / sizeof(kSequentialRamp[0]);
+const char *const kSingleHue = "#2a78d6";
+const char *const kOrdinalSeries[] = {"#86b6ef", "#3987e5", "#1c5cab", "#0d366b"};
+constexpr std::size_t kOrdinalSeriesSize = sizeof(kOrdinalSeries) / sizeof(kOrdinalSeries[0]);
+
+// Monotone in the category index, so colour never cycles back: with the old
+// "tone-{index % 4}" the 3rd and 11th pulse width shared a fill.
+const char *ramp_color(std::size_t index, std::size_t count) {
+  if (count <= 1) {
+    return kSequentialRamp[kSequentialRampSize - 1];
+  }
+  const double position =
+      static_cast<double>(index) * static_cast<double>(kSequentialRampSize - 1) / static_cast<double>(count - 1);
+  const std::size_t slot = static_cast<std::size_t>(std::llround(position));
+  return kSequentialRamp[std::min(slot, kSequentialRampSize - 1)];
+}
+
+const char *series_color(std::size_t index) {
+  return kOrdinalSeries[std::min(index, kOrdinalSeriesSize - 1)];
+}
+
+// How the category axis labels are derived, and how they sort.
+enum class CategoryKind {
+  Statistic,
+  PulseWidth,
+  Fourcc,
+  Resolution,
+  ControlCombo,
+};
+
+enum class ColorRule {
+  SingleHue,
+  SequentialByCategory,
+  OrdinalSeries,
+};
+
+// "ll1_bp0_wi1_mean_ms" -> "LED 1 - BYP 0 - WIN 1". The metric keys themselves
+// never change: docs, the threshold registry and the tests reference them.
+// Docs: docs/backend/tests/t18-control-sweep.md
+std::string control_combo_label(const std::string &name) {
+  int led = 0;
+  int bypass = 0;
+  int window = 0;
+  if (std::sscanf(name.c_str(), "ll%d_bp%d_wi%d", &led, &bypass, &window) != 3) {
+    return humanize_metric_name(name);
+  }
+  std::ostringstream out;
+  out << "LED " << led << " \xc2\xb7 BYP " << bypass << " \xc2\xb7 WIN " << window;
+  return out.str();
+}
+
+std::string upper_case(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+  return value;
+}
+
+std::string lower_case(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return value;
+}
+
 struct MetricChartGroup {
   enum class Kind {
     StatisticDots,
@@ -261,137 +362,329 @@ struct MetricChartGroup {
   std::string title;
   std::string unit;
   std::string label_prefix;
-  std::string x_axis;
-  std::string y_axis;
+  // Axis roles are fixed and never swapped: category_axis names the independent
+  // variable, value_axis names the measured quantity. A horizontal chart draws
+  // the category axis vertically -- it does not exchange the two labels, which
+  // is what the old x_axis/y_axis pair did.
+  std::string category_axis;
+  std::string value_axis;
   std::vector<std::size_t> indices;
   Kind kind = Kind::StatisticDots;
+  CategoryKind category_kind = CategoryKind::Statistic;
+  ColorRule color_rule = ColorRule::SingleHue;
+  bool wide = false;
 };
 
-void append_metric_group(std::vector<MetricChartGroup> &groups, std::vector<bool> &used,
-                         const std::vector<MetricValue> &metrics, const std::vector<std::size_t> &indices,
-                         const std::string &title, const std::string &label_prefix, const std::string &x_axis,
-                         MetricChartGroup::Kind kind) {
-  if (indices.size() < 2) {
-    return;
-  }
-  MetricChartGroup group;
-  group.title = title;
-  group.unit = metrics[indices.front()].unit;
-  group.label_prefix = label_prefix;
-  group.indices = indices;
-  group.kind = kind;
-  if (kind == MetricChartGroup::Kind::StatisticDots) {
-    group.x_axis = "Value";
-    if (!group.unit.empty()) {
-      group.x_axis += " (" + group.unit + ")";
+std::string category_label(const MetricValue &metric, const MetricChartGroup &group) {
+  const std::string prefix = sweep_prefix(metric.name);
+  switch (group.category_kind) {
+    case CategoryKind::ControlCombo:
+      return control_combo_label(metric.name);
+    case CategoryKind::Fourcc:
+      return prefix.empty() ? humanize_metric_name(metric.name) : upper_case(prefix);
+    case CategoryKind::Resolution:
+      return prefix.empty() ? humanize_metric_name(metric.name) : prefix;
+    case CategoryKind::PulseWidth: {
+      // "hits_30ms" -> "30"; the unit already lives in the axis title.
+      std::string label = statistic_label(metric.name, group.label_prefix);
+      if (ends_with(label, "ms")) {
+        label.resize(label.size() - 2);
+      }
+      return label;
     }
-    group.y_axis = "Statistic";
-  } else {
-    group.x_axis = x_axis;
-    group.y_axis = title;
-    if (!group.unit.empty()) {
-      group.y_axis += " (" + group.unit + ")";
+    case CategoryKind::Statistic:
+      break;
+  }
+  if (!prefix.empty()) {
+    const bool looks_like_fourcc =
+        prefix.size() <= 5 && prefix.find('x') == std::string::npos && prefix.find('_') == std::string::npos;
+    return looks_like_fourcc ? upper_case(prefix) : humanize_metric_name(prefix);
+  }
+  return statistic_label(metric.name, group.label_prefix);
+}
+
+// Ordered category axes sort by the quantity they represent rather than by the
+// order the metrics happen to be emitted in.
+double category_sort_key(CategoryKind kind, const std::string &label, double value) {
+  switch (kind) {
+    case CategoryKind::PulseWidth: {
+      double ms = 0.0;
+      return std::sscanf(label.c_str(), "%lf", &ms) == 1 ? ms : 0.0;
+    }
+    case CategoryKind::Resolution: {
+      int width = 0;
+      int height = 0;
+      if (std::sscanf(label.c_str(), "%dx%d", &width, &height) == 2) {
+        return static_cast<double>(width) * static_cast<double>(height);
+      }
+      return 0.0;
+    }
+    case CategoryKind::ControlCombo:
+      return value;
+    case CategoryKind::Fourcc:
+    case CategoryKind::Statistic:
+      break;
+  }
+  return 0.0;
+}
+
+struct BarItem {
+  std::size_t metric_index = 0;
+  std::size_t category_index = 0;
+  std::size_t series_index = 0;
+};
+
+// Shared by the bar renderers and by the group builder, so the colour rule and
+// the orientation are decided from the same categories the chart will draw.
+struct BarLayout {
+  std::vector<std::string> categories;
+  std::vector<std::string> series;
+  std::vector<BarItem> items;
+  double max_value = 0.0;
+};
+
+BarLayout build_bar_layout(const std::vector<MetricValue> &metrics, const MetricChartGroup &group) {
+  struct Pending {
+    std::size_t metric_index;
+    std::string category;
+    std::string series;
+    double sort_key;
+  };
+  std::vector<Pending> pending;
+  for (std::size_t metric_index : group.indices) {
+    const auto &metric = metrics[metric_index];
+    const std::string category = category_label(metric, group);
+    std::string series = sweep_series_label(metric.name);
+    if (series.empty()) {
+      series = group.value_axis;
+    }
+    pending.push_back({metric_index, category, series, category_sort_key(group.category_kind, category, metric.value)});
+  }
+
+  std::vector<std::string> ordered;
+  for (const auto &entry : pending) {
+    if (std::find(ordered.begin(), ordered.end(), entry.category) == ordered.end()) {
+      ordered.push_back(entry.category);
     }
   }
-  if (group.kind == MetricChartGroup::Kind::VerticalBars) {
-    std::vector<std::string> categories;
-    for (std::size_t index : indices) {
-      const std::string category = sweep_category_label(metrics[index].name, label_prefix);
-      if (std::find(categories.begin(), categories.end(), category) == categories.end()) {
-        categories.push_back(category);
+  const bool sortable = group.category_kind == CategoryKind::PulseWidth ||
+                        group.category_kind == CategoryKind::Resolution ||
+                        group.category_kind == CategoryKind::ControlCombo;
+  if (sortable) {
+    std::map<std::string, double> keys;
+    for (const auto &entry : pending) {
+      auto it = keys.find(entry.category);
+      if (it == keys.end() || entry.sort_key < it->second) {
+        keys[entry.category] = entry.sort_key;
       }
     }
-    if (categories.size() > 12 || std::any_of(categories.begin(), categories.end(),
-                                              [](const std::string &category) { return category.size() > 18; })) {
-      group.kind = MetricChartGroup::Kind::HorizontalBars;
+    std::stable_sort(ordered.begin(), ordered.end(),
+                     [&](const std::string &lhs, const std::string &rhs) { return keys[lhs] < keys[rhs]; });
+  }
+
+  BarLayout layout;
+  layout.categories = ordered;
+  for (const auto &entry : pending) {
+    if (std::find(layout.series.begin(), layout.series.end(), entry.series) == layout.series.end()) {
+      layout.series.push_back(entry.series);
     }
   }
-  for (std::size_t index : indices)
+  for (const auto &entry : pending) {
+    const std::size_t category_index =
+        static_cast<std::size_t>(std::find(ordered.begin(), ordered.end(), entry.category) - ordered.begin());
+    const std::size_t series_index = static_cast<std::size_t>(
+        std::find(layout.series.begin(), layout.series.end(), entry.series) - layout.series.begin());
+    layout.items.push_back({entry.metric_index, category_index, series_index});
+    layout.max_value = std::max(layout.max_value, std::max(0.0, metrics[entry.metric_index].value));
+  }
+  return layout;
+}
+
+// Per-test chart declarations. Each one fixes what goes on the category axis and
+// what quantity the value axis measures, instead of inferring it from the chart
+// title the way the old grouping did.
+struct SweepChartSpec {
+  const char *test_id;
+  const char *metric_prefix;
+  const char *title;
+  const char *category_axis;
+  const char *value_axis;
+  CategoryKind category_kind;
+  bool horizontal;
+};
+
+const SweepChartSpec kSweepChartSpecs[] = {
+    {"t16-gpio-pulse-width", "hits_", "Trigger hits by pulse width", "Pulse width (ms)", "Trigger hits",
+     CategoryKind::PulseWidth, false},
+    {"t16-gpio-pulse-width", "lat_high_avg_", "HIGH edge latency by pulse width", "Pulse width (ms)",
+     "Mean latency from HIGH", CategoryKind::PulseWidth, false},
+    {"t16-gpio-pulse-width", "lat_low_avg_", "LOW edge latency by pulse width", "Pulse width (ms)",
+     "Mean latency from LOW", CategoryKind::PulseWidth, false},
+    {"t18-control-sweep", "ll", "Capture latency by ISX021 control combination", "Control combination",
+     "Mean capture latency", CategoryKind::ControlCombo, true},
+};
+
+// Format / resolution sweeps share one shape: a repeated metric prefix names the
+// category, and the unit names the measured quantity.
+struct PrefixSweepSpec {
+  const char *test_id;
+  const char *category_axis;
+  CategoryKind category_kind;
+};
+
+const PrefixSweepSpec kPrefixSweepSpecs[] = {
+    {"t17-format-comparison", "Pixel format", CategoryKind::Fourcc},
+    {"t19-resolution-sweep", "Resolution", CategoryKind::Resolution},
+};
+
+std::string prefix_sweep_value_axis(const std::string &unit) {
+  if (unit == "MB/s") {
+    return "Memcpy throughput";
+  }
+  if (unit == "ms") {
+    return "Capture latency";
+  }
+  return "Value";
+}
+
+std::string axis_with_unit(const std::string &quantity, const std::string &unit) {
+  if (unit.empty() || quantity.find('(') != std::string::npos) {
+    return quantity;
+  }
+  return quantity + " (" + unit + ")";
+}
+
+void finalize_group(std::vector<MetricChartGroup> &groups, std::vector<bool> &used,
+                    const std::vector<MetricValue> &metrics, MetricChartGroup group) {
+  if (group.indices.size() < 2) {
+    return;
+  }
+  group.unit = metrics[group.indices.front()].unit;
+  group.value_axis = axis_with_unit(group.value_axis, group.unit);
+
+  const BarLayout layout = build_bar_layout(metrics, group);
+  if (layout.categories.empty() || layout.series.empty()) {
+    return;
+  }
+
+  if (layout.series.size() > 1) {
+    // Several measured series share one value axis -> identity comes from the
+    // series colour, so the category axis cannot also carry a ramp.
+    group.color_rule = ColorRule::OrdinalSeries;
+  } else if (group.category_kind == CategoryKind::PulseWidth || group.category_kind == CategoryKind::Resolution) {
+    group.color_rule = ColorRule::SequentialByCategory;
+  } else {
+    group.color_rule = ColorRule::SingleHue;
+  }
+
+  // Long category labels do not fit under a vertical bar; give them their own
+  // row instead of rotating them until they collide.
+  std::size_t longest = 0;
+  for (const auto &category : layout.categories) {
+    longest = std::max(longest, category.size());
+  }
+  if (group.kind == MetricChartGroup::Kind::VerticalBars && (layout.categories.size() > 12 || longest > 18)) {
+    group.kind = MetricChartGroup::Kind::HorizontalBars;
+  }
+  group.wide = layout.categories.size() > 8 ||
+               (group.kind == MetricChartGroup::Kind::HorizontalBars && layout.categories.size() > 5);
+
+  for (std::size_t index : group.indices) {
     used[index] = true;
+  }
   groups.push_back(group);
 }
 
-std::vector<MetricChartGroup> group_metrics(const std::vector<MetricValue> &metrics, std::vector<bool> &used) {
+std::vector<MetricChartGroup> group_metrics(const std::vector<MetricValue> &metrics, std::vector<bool> &used,
+                                            const std::string &test_id) {
   std::vector<MetricChartGroup> groups;
   if (used.size() != metrics.size()) {
     used.assign(metrics.size(), false);
   }
 
-  const struct {
-    const char *prefix;
-    const char *title;
-  } sweep_patterns[] = {
-      {"hits_", "Pulse Width Hits"},
-      {"lat_high_avg_", "HIGH Edge Latency"},
-      {"lat_low_avg_", "LOW Edge Latency"},
-      {"ll", "Control Sweep Latency"},
-  };
-
-  for (const auto &pattern : sweep_patterns) {
+  // 1. Explicitly declared per-test sweeps.
+  for (const auto &spec : kSweepChartSpecs) {
+    if (test_id != spec.test_id) {
+      continue;
+    }
+    const std::string prefix = spec.metric_prefix;
     std::map<std::string, std::vector<std::size_t>> by_unit;
     for (std::size_t i = 0; i < metrics.size(); ++i) {
       const auto &metric = metrics[i];
-      bool matches = starts_with(metric.name, pattern.prefix);
-      if (std::string(pattern.prefix) == "ll") {
-        matches = matches && metric.name.find("_bp") != std::string::npos &&
-                  metric.name.find("_wi") != std::string::npos && ends_with(metric.name, "_mean_ms");
+      if (used[i] || !is_chartable_metric(metric) || !starts_with(metric.name, prefix)) {
+        continue;
       }
-      if (!used[i] && matches && is_chartable_metric(metric)) {
-        by_unit[metric.unit].push_back(i);
+      // The ISX021 sweep keys share the "ll" prefix with unrelated names.
+      if (prefix == "ll" && (metric.name.find("_bp") == std::string::npos ||
+                             metric.name.find("_wi") == std::string::npos || !ends_with(metric.name, "_mean_ms"))) {
+        continue;
       }
+      by_unit[metric.unit].push_back(i);
     }
     for (const auto &entry : by_unit) {
-      const bool is_control_sweep = std::string(pattern.prefix) == "ll";
-      std::string label_prefix = pattern.prefix;
-      if (!label_prefix.empty() && label_prefix.back() == '_') {
-        label_prefix.pop_back();
-      }
-      const std::string x_axis = is_control_sweep ? "Control setting" : "Pulse width";
-      append_metric_group(
-          groups, used, metrics, entry.second, pattern.title, label_prefix, x_axis,
-          is_control_sweep ? MetricChartGroup::Kind::HorizontalBars : MetricChartGroup::Kind::VerticalBars);
+      MetricChartGroup group;
+      group.title = spec.title;
+      group.category_axis = spec.category_axis;
+      group.value_axis = spec.value_axis;
+      group.category_kind = spec.category_kind;
+      group.kind = spec.horizontal ? MetricChartGroup::Kind::HorizontalBars : MetricChartGroup::Kind::VerticalBars;
+      group.label_prefix = prefix.size() > 1 && prefix.back() == '_' ? prefix.substr(0, prefix.size() - 1) : prefix;
+      group.indices = entry.second;
+      finalize_group(groups, used, metrics, group);
     }
   }
 
-  // A repeated latency/throughput prefix identifies format or resolution sweeps
-  // without relying on the test ID.
-  std::vector<std::string> throughput_prefixes;
-  for (const auto &metric : metrics) {
-    if (ends_with(metric.name, "_throughput_mbps")) {
-      throughput_prefixes.push_back(sweep_prefix(metric.name));
-    }
-  }
-  std::sort(throughput_prefixes.begin(), throughput_prefixes.end());
-  throughput_prefixes.erase(std::unique(throughput_prefixes.begin(), throughput_prefixes.end()),
-                            throughput_prefixes.end());
-  if (throughput_prefixes.size() >= 2) {
-    std::map<std::string, std::vector<std::size_t>> by_unit;
-    for (std::size_t i = 0; i < metrics.size(); ++i) {
-      const std::string prefix = sweep_prefix(metrics[i].name);
-      if (!used[i] && !prefix.empty() && is_chartable_metric(metrics[i]) &&
-          std::find(throughput_prefixes.begin(), throughput_prefixes.end(), prefix) != throughput_prefixes.end()) {
-        by_unit[metrics[i].unit].push_back(i);
+  // 2. Format / resolution sweeps: two or more categories sharing a latency or
+  //    throughput suffix collapse into one chart per unit. Keyed on the category
+  //    count, not on how many throughput metrics exist -- the old check made a
+  //    latency-only run fall through to one dot chart per category.
+  {
+    const PrefixSweepSpec *spec = nullptr;
+    for (const auto &candidate : kPrefixSweepSpecs) {
+      if (test_id == candidate.test_id) {
+        spec = &candidate;
+        break;
       }
     }
-    for (const auto &entry : by_unit) {
-      const std::string title = entry.first == "MB/s" ? "Throughput Sweep" : "Latency Sweep";
+    std::vector<std::string> prefixes;
+    for (std::size_t i = 0; i < metrics.size(); ++i) {
+      if (used[i] || !is_chartable_metric(metrics[i])) {
+        continue;
+      }
+      const std::string prefix = sweep_prefix(metrics[i].name);
+      if (!prefix.empty() && std::find(prefixes.begin(), prefixes.end(), prefix) == prefixes.end()) {
+        prefixes.push_back(prefix);
+      }
+    }
+    if (prefixes.size() >= 2) {
       bool resolution_sweep = true;
-      for (std::size_t index : entry.second) {
-        const std::string prefix = sweep_prefix(metrics[index].name);
-        if (!looks_like_resolution_label(prefix)) {
-          resolution_sweep = false;
-          break;
+      for (const auto &prefix : prefixes) {
+        resolution_sweep = resolution_sweep && looks_like_resolution_label(prefix);
+      }
+      std::map<std::string, std::vector<std::size_t>> by_unit;
+      for (std::size_t i = 0; i < metrics.size(); ++i) {
+        if (!used[i] && is_chartable_metric(metrics[i]) && !sweep_prefix(metrics[i].name).empty()) {
+          by_unit[metrics[i].unit].push_back(i);
         }
       }
-      append_metric_group(groups, used, metrics, entry.second, title, "", resolution_sweep ? "Resolution" : "Format",
-                          MetricChartGroup::Kind::VerticalBars);
+      for (const auto &entry : by_unit) {
+        MetricChartGroup group;
+        group.category_axis = spec != nullptr ? spec->category_axis : (resolution_sweep ? "Resolution" : "Format");
+        group.category_kind = spec != nullptr ? spec->category_kind
+                                              : (resolution_sweep ? CategoryKind::Resolution : CategoryKind::Fourcc);
+        group.value_axis = prefix_sweep_value_axis(entry.first);
+        group.title = group.value_axis + " by " + lower_case(group.category_axis);
+        group.kind = MetricChartGroup::Kind::VerticalBars;
+        group.indices = entry.second;
+        finalize_group(groups, used, metrics, group);
+      }
     }
   }
 
+  // 3. Anything left that shares a statistic base becomes a dot chart.
   struct PendingGroup {
     std::string key;
     std::string base;
-    std::string unit;
     std::vector<std::size_t> indices;
   };
   std::vector<PendingGroup> pending;
@@ -406,14 +699,27 @@ std::vector<MetricChartGroup> group_metrics(const std::vector<MetricValue> &metr
     const std::string key = base + "\n" + metrics[i].unit;
     auto it = std::find_if(pending.begin(), pending.end(), [&](const PendingGroup &group) { return group.key == key; });
     if (it == pending.end()) {
-      pending.push_back({key, base, metrics[i].unit, {i}});
+      pending.push_back({key, base, {i}});
     } else {
       it->indices.push_back(i);
     }
   }
   for (const auto &entry : pending) {
-    append_metric_group(groups, used, metrics, entry.indices, humanize_metric_name(entry.base), entry.base, "Value",
-                        MetricChartGroup::Kind::StatisticDots);
+    MetricChartGroup group;
+    group.title = humanize_metric_name(entry.base);
+    group.label_prefix = entry.base;
+    group.category_axis = "Statistic";
+    // The base often already carries the unit ("first_frame_ms"); drop it so the
+    // axis does not read "First frame ms (ms)".
+    std::string quantity = entry.base;
+    if (ends_with(quantity, "_ms")) {
+      quantity.resize(quantity.size() - 3);
+    }
+    group.value_axis = humanize_metric_name(quantity);
+    group.category_kind = CategoryKind::Statistic;
+    group.kind = MetricChartGroup::Kind::StatisticDots;
+    group.indices = entry.indices;
+    finalize_group(groups, used, metrics, group);
   }
 
   std::sort(groups.begin(), groups.end(), [](const MetricChartGroup &lhs, const MetricChartGroup &rhs) {
@@ -456,268 +762,343 @@ void render_status_distribution(std::ostream &out, int pass_count, int fail_coun
   out << "</div></div></div>";
 }
 
-void render_horizontal_svg_axis(std::ostream &out, double x1, double x2, double y, double caption_y,
-                                const std::string &label) {
-  out << "<line class=\"chart-axis\" x1=\"" << x1 << "\" y1=\"" << y << "\" x2=\"" << x2 << "\" y2=\"" << y
+// Axis chrome. The caption names the quantity itself; the old "X: " / "Y: "
+// prefixes added noise without saying anything.
+void render_axis_line(std::ostream &out, double x1, double y1, double x2, double y2) {
+  out << "<line class=\"chart-axis\" x1=\"" << x1 << "\" y1=\"" << y1 << "\" x2=\"" << x2 << "\" y2=\"" << y2
       << "\"></line>";
-  out << "<path class=\"axis-arrow\" d=\"M " << x2 << " " << y << " L " << (x2 - 9.0) << " " << (y - 5.0) << " M " << x2
-      << " " << y << " L " << (x2 - 9.0) << " " << (y + 5.0) << "\"></path>";
-  out << "<text class=\"axis-caption\" x=\"" << x2 << "\" y=\"" << caption_y
-      << "\" text-anchor=\"end\">X: " << html_escape(label) << "</text>";
 }
 
-void render_vertical_svg_axis(std::ostream &out, double x, double y1, double y2, double caption_x,
-                              const std::string &label) {
-  out << "<line class=\"chart-axis\" x1=\"" << x << "\" y1=\"" << y1 << "\" x2=\"" << x << "\" y2=\"" << y2
-      << "\"></line>";
-  out << "<path class=\"axis-arrow\" d=\"M " << x << " " << y2 << " L " << (x - 5.0) << " " << (y2 + 9.0) << " M " << x
-      << " " << y2 << " L " << (x + 5.0) << " " << (y2 + 9.0) << "\"></path>";
-  out << "<text class=\"axis-caption\" transform=\"translate(" << caption_x << "," << ((y1 + y2) / 2.0)
-      << ") rotate(-90)\" text-anchor=\"middle\">Y: " << html_escape(label) << "</text>";
+void render_axis_title_x(std::ostream &out, double center_x, double y, const std::string &label) {
+  out << "<text class=\"axis-caption\" x=\"" << center_x << "\" y=\"" << y << "\" text-anchor=\"middle\">"
+      << html_escape(label) << "</text>";
+}
+
+void render_axis_title_y(std::ostream &out, double x, double center_y, const std::string &label) {
+  out << "<text class=\"axis-caption\" transform=\"translate(" << x << "," << center_y
+      << ") rotate(-90)\" text-anchor=\"middle\">" << html_escape(label) << "</text>";
+}
+
+// The value-axis margin grows with the widest tick label; a fixed margin clipped
+// the rotated axis title as soon as ticks reached four digits (MB/s).
+double value_axis_margin(const AxisTicks &ticks) {
+  std::size_t widest = 1;
+  for (double value : ticks.values) {
+    widest = std::max(widest, format_metric_value(value).size());
+  }
+  return 28.0 + static_cast<double>(widest) * 6.0;
 }
 
 void render_statistic_dot_chart(std::ostream &out, const std::vector<MetricValue> &metrics,
                                 const MetricChartGroup &group) {
-  constexpr double width = 760.0;
-  const double height = std::max(190.0, 82.0 + 48.0 * group.indices.size());
-  constexpr double left = 148.0;
-  constexpr double right = 58.0;
-  constexpr double top = 38.0;
-  constexpr double bottom = 70.0;
-  constexpr double point_inset = 16.0;
-  const double plot_width = width - left - right - (point_inset * 2.0);
-  const double plot_height = height - top - bottom;
-
+  const std::size_t count = group.indices.size();
   double min_value = metrics[group.indices.front()].value;
-  double max_value = metrics[group.indices.front()].value;
+  double max_value = min_value;
   for (std::size_t index : group.indices) {
     min_value = std::min(min_value, metrics[index].value);
     max_value = std::max(max_value, metrics[index].value);
   }
-  const bool has_negative = min_value < 0.0;
-  if (has_negative) {
-    max_value = std::max(max_value, 0.0);
-    min_value = std::min(min_value, 0.0);
-  }
-  const double raw_span = max_value - min_value;
-  const double magnitude = std::max(std::fabs(max_value), std::fabs(min_value));
-  const double padding = std::max(raw_span * 0.16, std::max(magnitude * 0.03, 0.001));
-  min_value -= padding;
-  max_value += padding;
-  if (!has_negative && min_value < 0.0) {
-    min_value = 0.0;
-  }
-  if (std::fabs(max_value - min_value) < 0.000001) {
-    const double equal_padding = std::max(std::fabs(max_value) * 0.08, 1.0);
-    min_value -= equal_padding;
-    max_value += equal_padding;
-    if (!has_negative && min_value < 0.0) {
-      min_value = 0.0;
-    }
-  }
-  const auto x_for = [&](double value) {
-    return left + point_inset + (value - min_value) * plot_width / (max_value - min_value);
-  };
-  const double guide_start_x = has_negative ? x_for(0.0) : left;
+  const AxisTicks ticks = nice_ticks(min_value < 0.0 ? min_value : 0.0, max_value, 6);
 
-  out << "<div class=\"metric-chart metric-dot-chart\"><div class=\"metric-chart-title\">" << html_escape(group.title);
+  std::size_t longest_label = 1;
+  for (std::size_t index : group.indices) {
+    longest_label = std::max(longest_label, statistic_label(metrics[index].name, group.label_prefix).size());
+  }
+
+  const double width = group.wide ? 780.0 : 460.0;
+  const double left = std::min(180.0, 30.0 + static_cast<double>(longest_label) * 6.2);
+  constexpr double right = 48.0;
+  constexpr double top = 16.0;
+  constexpr double bottom = 44.0;
+  constexpr double row_height = 26.0;
+  const double plot_height = row_height * static_cast<double>(count);
+  const double height = top + plot_height + bottom;
+  const double plot_width = width - left - right;
+  const double baseline_y = top + plot_height;
+  const auto x_for = [&](double value) { return left + (value - ticks.min) * plot_width / (ticks.max - ticks.min); };
+  const double guide_start_x = x_for(std::max(ticks.min, 0.0));
+
+  out << "<div class=\"metric-chart metric-dot-chart" << (group.wide ? " metric-chart--wide" : "")
+      << "\"><div class=\"metric-chart-title\">" << html_escape(group.title);
   if (!group.unit.empty())
     out << " <span>" << html_escape(group.unit) << "</span>";
-  out << "</div><svg viewBox=\"0 0 760 " << height << "\" role=\"img\" aria-label=\"" << html_escape(group.title)
-      << " statistic dot chart\">";
+  out << "</div><svg viewBox=\"0 0 " << width << " " << height << "\" role=\"img\" aria-label=\""
+      << html_escape(group.title) << " by " << html_escape(lower_case(group.category_axis)) << "\">";
 
-  for (int tick = 0; tick <= 4; ++tick) {
-    const double value = min_value + (max_value - min_value) * tick / 4.0;
+  for (double value : ticks.values) {
     const double x = x_for(value);
-    out << "<line class=\"chart-grid\" x1=\"" << x << "\" y1=\"" << top << "\" x2=\"" << x << "\" y2=\""
-        << (height - bottom) << "\"></line>";
-    out << "<text class=\"axis-value\" x=\"" << x << "\" y=\"" << (height - bottom + 24.0)
-        << "\" text-anchor=\"middle\">" << html_escape(format_metric_value(value)) << "</text>";
+    out << "<line class=\"chart-grid\" x1=\"" << x << "\" y1=\"" << top << "\" x2=\"" << x << "\" y2=\"" << baseline_y
+        << "\"></line>";
+    out << "<text class=\"axis-value\" x=\"" << x << "\" y=\"" << (baseline_y + 15.0) << "\" text-anchor=\"middle\">"
+        << html_escape(format_metric_value(value)) << "</text>";
   }
-  if (has_negative) {
+  if (ticks.min < 0.0) {
     const double zero_x = x_for(0.0);
     out << "<line class=\"zero-baseline\" x1=\"" << zero_x << "\" y1=\"" << top << "\" x2=\"" << zero_x << "\" y2=\""
-        << (height - bottom) << "\"></line>";
+        << baseline_y << "\"></line>";
   }
-  render_horizontal_svg_axis(out, left, width - right, height - bottom, height - 10.0, group.x_axis);
-  render_vertical_svg_axis(out, left, height - bottom, top, 18.0, group.y_axis);
+  render_axis_line(out, left, baseline_y, width - right, baseline_y);
+  render_axis_line(out, left, baseline_y, left, top);
+  render_axis_title_x(out, left + plot_width / 2.0, height - 6.0, group.value_axis);
+  render_axis_title_y(out, 11.0, top + plot_height / 2.0, group.category_axis);
 
-  for (std::size_t i = 0; i < group.indices.size(); ++i) {
+  for (std::size_t i = 0; i < count; ++i) {
     const std::size_t index = group.indices[i];
     const auto &metric = metrics[index];
     const double x = x_for(metric.value);
-    const double y = top + (i + 0.5) * plot_height / group.indices.size();
+    const double y = top + (static_cast<double>(i) + 0.5) * row_height;
     const std::string label = statistic_label(metric.name, group.label_prefix);
-    const bool label_to_left = x > width - right - 72.0;
-    const double value_x = label_to_left ? x - 12.0 : x + 12.0;
-    const char *text_anchor = label_to_left ? "end" : "start";
+    const bool label_to_left = x > width - right - 40.0;
     out << "<line class=\"dot-row-line\" x1=\"" << left << "\" y1=\"" << y << "\" x2=\"" << (width - right)
         << "\" y2=\"" << y << "\"></line>";
     out << "<line class=\"guide-line\" x1=\"" << guide_start_x << "\" y1=\"" << y << "\" x2=\"" << x << "\" y2=\"" << y
         << "\"></line>";
-    out << "<text class=\"dot-label\" x=\"" << (left - 14.0) << "\" y=\"" << (y + 4.0) << "\" text-anchor=\"end\">"
+    out << "<text class=\"dot-label\" x=\"" << (left - 9.0) << "\" y=\"" << (y + 3.4) << "\" text-anchor=\"end\">"
         << html_escape(label) << "</text>";
     out << "<circle class=\"metric-point\" data-metric=\"" << html_escape(metric.name) << "\" cx=\"" << x << "\" cy=\""
-        << y << "\" r=\"7\"></circle>";
-    out << "<text class=\"point-value\" x=\"" << value_x << "\" y=\"" << (y + 4.0) << "\" text-anchor=\"" << text_anchor
-        << "\">" << html_escape(format_metric_value(metric.value)) << "</text>";
+        << y << "\" r=\"5\"><title>"
+        << html_escape(label + ": " + format_metric_value(metric.value) +
+                       (metric.unit.empty() ? "" : " " + metric.unit))
+        << "</title></circle>";
+    out << "<text class=\"point-value\" x=\"" << (label_to_left ? x - 9.0 : x + 9.0) << "\" y=\"" << (y + 3.4)
+        << "\" text-anchor=\"" << (label_to_left ? "end" : "start") << "\">"
+        << html_escape(format_metric_value(metric.value)) << "</text>";
   }
   out << "</svg></div>";
 }
 
-std::string sweep_category_label(const MetricValue &metric, const MetricChartGroup &group) {
-  std::string category = sweep_prefix(metric.name);
-  if (category.empty()) {
-    return statistic_label(metric.name, group.label_prefix);
+const char *bar_color(const MetricChartGroup &group, const BarLayout &layout, const BarItem &item) {
+  switch (group.color_rule) {
+    case ColorRule::SequentialByCategory:
+      return ramp_color(item.category_index, layout.categories.size());
+    case ColorRule::OrdinalSeries:
+      return series_color(item.series_index);
+    case ColorRule::SingleHue:
+      break;
   }
-  const bool looks_like_fourcc =
-      category.size() <= 5 && category.find('x') == std::string::npos && category.find('_') == std::string::npos;
-  if (looks_like_fourcc) {
-    std::transform(category.begin(), category.end(), category.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-    return category;
-  }
-  return humanize_metric_name(category);
+  return kSingleHue;
 }
 
-void render_vertical_bar_chart(std::ostream &out, const std::vector<MetricValue> &metrics,
-                               const MetricChartGroup &group) {
-  struct BarItem {
-    std::size_t metric_index = 0;
-    std::size_t category_index = 0;
-    std::size_t series_index = 0;
-    std::string category;
-    std::string series;
-  };
-
-  std::vector<std::string> categories;
-  std::vector<std::string> series;
-  std::vector<BarItem> items;
-  double max_value = 0.0;
-  for (std::size_t metric_index : group.indices) {
-    const auto &metric = metrics[metric_index];
-    const std::string category = sweep_category_label(metric, group);
-    std::string series_label = sweep_series_label(metric.name);
-    if (series_label.empty()) {
-      series_label = group.title;
-    }
-    auto category_it = std::find(categories.begin(), categories.end(), category);
-    if (category_it == categories.end()) {
-      categories.push_back(category);
-      category_it = categories.end() - 1;
-    }
-    auto series_it = std::find(series.begin(), series.end(), series_label);
-    if (series_it == series.end()) {
-      series.push_back(series_label);
-      series_it = series.end() - 1;
-    }
-    items.push_back({metric_index, static_cast<std::size_t>(category_it - categories.begin()),
-                     static_cast<std::size_t>(series_it - series.begin()), category, series_label});
-    max_value = std::max(max_value, std::max(0.0, metric.value));
+std::string bar_tooltip(const MetricValue &metric, const BarLayout &layout, const BarItem &item) {
+  std::string text = layout.categories[item.category_index];
+  if (layout.series.size() > 1) {
+    text += " " + layout.series[item.series_index];
   }
-  if (categories.empty() || series.empty()) {
+  text += ": " + format_metric_value(metric.value);
+  if (!metric.unit.empty()) {
+    text += " " + metric.unit;
+  }
+  return text;
+}
+
+// A compact ramp key, so a colour that encodes the category axis can be read.
+void render_ramp_legend(std::ostream &out, const BarLayout &layout) {
+  if (layout.categories.size() < 2) {
     return;
   }
-
-  constexpr double width = 760.0;
-  constexpr double height = 330.0;
-  constexpr double left = 118.0;
-  constexpr double right = 40.0;
-  constexpr double top = 28.0;
-  constexpr double bottom = 100.0;
-  constexpr double x_inset = 34.0;
-  const double baseline_y = height - bottom;
-  const double plot_height = baseline_y - top;
-  const double plot_width = width - left - right - (x_inset * 2.0);
-  const double category_slot = plot_width / categories.size();
-  const double y_max = std::max(1.0, max_value * 1.18);
-  const double group_width = std::min(category_slot * 0.7, 92.0);
-  const double bar_gap = series.size() > 1 ? 4.0 : 0.0;
-  const double bar_width =
-      std::max(4.0, std::min(34.0, (group_width - bar_gap * static_cast<double>(series.size() - 1)) / series.size()));
-  const double occupied_width = bar_width * series.size() + bar_gap * static_cast<double>(series.size() - 1);
-  const auto y_for = [&](double value) { return top + (y_max - std::max(0.0, value)) * plot_height / y_max; };
-
-  out << "<div class=\"metric-chart metric-vertical-bars\"><div class=\"metric-chart-title\">"
-      << html_escape(group.title);
-  if (!group.unit.empty())
-    out << " <span>" << html_escape(group.unit) << "</span>";
-  out << "</div><svg viewBox=\"0 0 760 330\" role=\"img\" aria-label=\"" << html_escape(group.title)
-      << " vertical bar chart\">";
-
-  for (int tick = 0; tick <= 4; ++tick) {
-    const double value = y_max * tick / 4.0;
-    const double y = y_for(value);
-    out << "<line class=\"chart-grid\" x1=\"" << left << "\" y1=\"" << y << "\" x2=\"" << (width - right) << "\" y2=\""
-        << y << "\"></line>";
-    out << "<text class=\"axis-value\" x=\"" << (left - 10.0) << "\" y=\"" << (y + 4.0) << "\" text-anchor=\"end\">"
-        << html_escape(format_metric_value(value)) << "</text>";
+  out << "<div class=\"chart-ramp-key\"><span>" << html_escape(layout.categories.front()) << "</span><i>";
+  for (std::size_t i = 0; i < kSequentialRampSize; ++i) {
+    out << "<b style=\"background:" << kSequentialRamp[i] << "\"></b>";
   }
+  out << "</i><span>" << html_escape(layout.categories.back()) << "</span></div>";
+}
 
-  render_horizontal_svg_axis(out, left, width - right, baseline_y, height - 10.0, group.x_axis);
-  render_vertical_svg_axis(out, left, baseline_y, top, 18.0, group.y_axis);
-
-  for (const auto &item : items) {
-    const auto &metric = metrics[item.metric_index];
-    const double center_x = left + x_inset + category_slot * (item.category_index + 0.5);
-    const double x = center_x - occupied_width / 2.0 + item.series_index * (bar_width + bar_gap);
-    const double y = y_for(metric.value);
-    const std::size_t tone = series.size() == 1 ? item.category_index % 4 : item.series_index % 4;
-    out << "<rect class=\"vertical-bar tone-" << tone << "\" data-metric=\"" << html_escape(metric.name) << "\" x=\""
-        << x << "\" y=\"" << y << "\" width=\"" << bar_width << "\" height=\"" << (baseline_y - y)
-        << "\" rx=\"2\"><title>"
-        << html_escape(item.category + " " + item.series + ": " + format_metric_value(metric.value) +
-                       (metric.unit.empty() ? "" : " " + metric.unit))
-        << "</title></rect>";
-    if (categories.size() <= 6 && series.size() == 1) {
-      out << "<text class=\"bar-point-value\" x=\"" << (x + bar_width / 2.0) << "\" y=\"" << (y - 7.0)
-          << "\" text-anchor=\"middle\">" << html_escape(format_metric_value(metric.value)) << "</text>";
-    }
+void render_series_legend(std::ostream &out, const BarLayout &layout) {
+  if (layout.series.size() < 2) {
+    return;
   }
-
-  for (std::size_t i = 0; i < categories.size(); ++i) {
-    const double x = left + x_inset + category_slot * (i + 0.5);
-    out << "<text class=\"axis-label\" transform=\"translate(" << (x + 3.0) << "," << (baseline_y + 27.0)
-        << ") rotate(-45)\" text-anchor=\"end\">" << html_escape(categories[i]) << "</text>";
-  }
-  out << "</svg>";
-  if (series.size() > 1) {
-    out << "<div class=\"chart-series-legend\">";
-    for (std::size_t i = 0; i < series.size(); ++i) {
-      out << "<span><i class=\"tone-" << (i % 4) << "\"></i>" << html_escape(series[i]) << "</span>";
-    }
-    out << "</div>";
+  out << "<div class=\"chart-series-legend\">";
+  for (std::size_t i = 0; i < layout.series.size(); ++i) {
+    out << "<span><i style=\"background:" << series_color(i) << "\"></i>" << html_escape(layout.series[i]) << "</span>";
   }
   out << "</div>";
 }
 
-void render_horizontal_chart(std::ostream &out, const std::vector<MetricValue> &metrics,
-                             const MetricChartGroup &group) {
-  double max_magnitude = 0.0;
-  for (std::size_t index : group.indices)
-    max_magnitude = std::max(max_magnitude, std::fabs(metrics[index].value));
-  if (max_magnitude < 0.000001)
-    max_magnitude = 1.0;
+void render_vertical_bar_chart(std::ostream &out, const std::vector<MetricValue> &metrics,
+                               const MetricChartGroup &group) {
+  const BarLayout layout = build_bar_layout(metrics, group);
+  if (layout.categories.empty() || layout.series.empty()) {
+    return;
+  }
+  const std::size_t category_count = layout.categories.size();
+  const AxisTicks ticks = nice_ticks(0.0, layout.max_value, 6);
 
-  out << "<div class=\"metric-chart metric-bars\"><div class=\"metric-chart-title\">" << html_escape(group.title);
+  std::size_t longest_category = 1;
+  for (const auto &category : layout.categories) {
+    longest_category = std::max(longest_category, category.size());
+  }
+  // Rotate only when a horizontal label would not fit its slot; rotated labels
+  // need a deeper bottom margin or the axis title lands on top of them.
+  // A wide chart takes the whole row, so it needs a wider coordinate system too:
+  // stretching the 520-unit box across ~950px scaled every label up by 1.8x.
+  const double width = group.wide ? 780.0 : 460.0;
+  const double left = value_axis_margin(ticks);
+  constexpr double right = 14.0;
+  constexpr double top = 16.0;
+  constexpr double plot_height = 190.0;
+  const double slot = (width - left - right) / static_cast<double>(category_count);
+  const bool rotate_labels = static_cast<double>(longest_category) * 6.2 > slot - 4.0;
+  const double bottom = rotate_labels ? 68.0 : 40.0;
+  const double height = top + plot_height + bottom;
+  const double baseline_y = top + plot_height;
+  const double plot_width = width - left - right;
+  constexpr double bar_gap = 2.0;
+  const double series_count = static_cast<double>(layout.series.size());
+  const double bar_width = std::max(3.0, std::min(30.0, (slot * 0.66 - bar_gap * (series_count - 1.0)) / series_count));
+  const double occupied = bar_width * series_count + bar_gap * (series_count - 1.0);
+  const auto y_for = [&](double value) { return baseline_y - (std::max(0.0, value) / ticks.max) * plot_height; };
+
+  out << "<div class=\"metric-chart metric-vertical-bars" << (group.wide ? " metric-chart--wide" : "")
+      << "\"><div class=\"metric-chart-title\">" << html_escape(group.title);
   if (!group.unit.empty())
     out << " <span>" << html_escape(group.unit) << "</span>";
-  out << "</div><div class=\"horizontal-bar-plot\"><div class=\"horizontal-y-axis\"><span>Y: "
-      << html_escape(group.x_axis) << "</span></div><div class=\"bar-list\">";
-  for (std::size_t item = 0; item < group.indices.size(); ++item) {
-    const std::size_t index = group.indices[item];
-    const auto &metric = metrics[index];
-    const double bar_width = 100.0 * std::fabs(metric.value) / max_magnitude;
-    out << "<div class=\"bar-row\" data-metric=\"" << html_escape(metric.name) << "\"><div class=\"bar-label\">"
-        << html_escape(humanize_metric_name(metric.name)) << "</div><div class=\"bar-track\"><span class=\"bar-fill"
-        << (metric.value < 0.0 ? " negative" : "") << " tone-" << (item % 4) << "\" style=\"width:" << std::fixed
-        << std::setprecision(3) << bar_width << "%\"><i></i></span></div><div class=\"bar-value\">"
-        << html_escape(format_metric_value(metric.value));
-    if (!metric.unit.empty())
-      out << " " << html_escape(metric.unit);
-    out << "</div></div>";
+  out << "</div><svg viewBox=\"0 0 " << width << " " << height << "\" role=\"img\" aria-label=\""
+      << html_escape(group.value_axis) << " by " << html_escape(lower_case(group.category_axis)) << "\">";
+
+  for (double value : ticks.values) {
+    const double y = y_for(value);
+    out << "<line class=\"chart-grid\" x1=\"" << left << "\" y1=\"" << y << "\" x2=\"" << (width - right) << "\" y2=\""
+        << y << "\"></line>";
+    out << "<text class=\"axis-value\" x=\"" << (left - 7.0) << "\" y=\"" << (y + 3.4) << "\" text-anchor=\"end\">"
+        << html_escape(format_metric_value(value)) << "</text>";
   }
-  out << "</div><div class=\"horizontal-x-axis\"><span>X: " << html_escape(group.y_axis) << "</span></div></div></div>";
+  render_axis_line(out, left, baseline_y, width - right, baseline_y);
+  render_axis_title_y(out, 11.0, top + plot_height / 2.0, group.value_axis);
+  render_axis_title_x(out, left + plot_width / 2.0, height - 5.0, group.category_axis);
+
+  // With many bars a number over every one is unreadable, so label the extremes
+  // plus every other bar -- printed reports have no tooltips to fall back on.
+  double series_min = 0.0;
+  double series_max = 0.0;
+  bool have_extremes = false;
+  for (const auto &item : layout.items) {
+    const double value = metrics[item.metric_index].value;
+    if (!have_extremes) {
+      series_min = value;
+      series_max = value;
+      have_extremes = true;
+    }
+    series_min = std::min(series_min, value);
+    series_max = std::max(series_max, value);
+  }
+  std::size_t widest_value = 1;
+  for (const auto &item : layout.items) {
+    widest_value = std::max(widest_value, format_metric_value(metrics[item.metric_index].value).size());
+  }
+  const bool label_all = slot >= static_cast<double>(widest_value) * 6.2 + 4.0;
+
+  for (const auto &item : layout.items) {
+    const auto &metric = metrics[item.metric_index];
+    const double center_x = left + slot * (static_cast<double>(item.category_index) + 0.5);
+    const double x = center_x - occupied / 2.0 + static_cast<double>(item.series_index) * (bar_width + bar_gap);
+    const double y = y_for(metric.value);
+    out << "<rect class=\"vertical-bar\" data-metric=\"" << html_escape(metric.name) << "\" x=\"" << x << "\" y=\"" << y
+        << "\" width=\"" << bar_width << "\" height=\"" << std::max(0.8, baseline_y - y) << "\" rx=\"2\" fill=\""
+        << bar_color(group, layout, item) << "\"><title>" << html_escape(bar_tooltip(metric, layout, item))
+        << "</title></rect>";
+    const bool is_extreme = metric.value == series_min || metric.value == series_max;
+    if (layout.series.size() == 1 && (label_all || is_extreme || item.category_index % 2 == 0)) {
+      out << "<text class=\"bar-point-value\" x=\"" << (x + bar_width / 2.0) << "\" y=\"" << (y - 4.0)
+          << "\" text-anchor=\"middle\">" << html_escape(format_metric_value(metric.value)) << "</text>";
+    }
+  }
+
+  for (std::size_t i = 0; i < category_count; ++i) {
+    const double x = left + slot * (static_cast<double>(i) + 0.5);
+    if (rotate_labels) {
+      out << "<text class=\"axis-label\" transform=\"translate(" << (x + 3.0) << "," << (baseline_y + 13.0)
+          << ") rotate(-40)\" text-anchor=\"end\">" << html_escape(layout.categories[i]) << "</text>";
+    } else {
+      out << "<text class=\"axis-label\" x=\"" << x << "\" y=\"" << (baseline_y + 14.0) << "\" text-anchor=\"middle\">"
+          << html_escape(layout.categories[i]) << "</text>";
+    }
+  }
+  out << "</svg>";
+  if (group.color_rule == ColorRule::SequentialByCategory) {
+    render_ramp_legend(out, layout);
+  }
+  render_series_legend(out, layout);
+  out << "</div>";
+}
+
+// Horizontal bars are SVG like every other chart and carry a real value axis with
+// ticks. The previous CSS-div version normalised every bar against the largest,
+// so the longest bar was always full width and no scale existed at all.
+void render_horizontal_chart(std::ostream &out, const std::vector<MetricValue> &metrics,
+                             const MetricChartGroup &group) {
+  const BarLayout layout = build_bar_layout(metrics, group);
+  if (layout.categories.empty() || layout.series.empty()) {
+    return;
+  }
+  const std::size_t category_count = layout.categories.size();
+  const AxisTicks ticks = nice_ticks(0.0, layout.max_value, 6);
+
+  std::size_t longest_category = 1;
+  for (const auto &category : layout.categories) {
+    longest_category = std::max(longest_category, category.size());
+  }
+
+  const double width = group.wide ? 780.0 : 460.0;
+  const double left = std::min(240.0, 22.0 + static_cast<double>(longest_category) * 6.2);
+  constexpr double right = 44.0;
+  constexpr double top = 26.0;
+  constexpr double bottom = 34.0;
+  const double row_height = layout.series.size() > 1 ? 12.0 * static_cast<double>(layout.series.size()) + 8.0 : 22.0;
+  const double plot_height = row_height * static_cast<double>(category_count);
+  const double height = top + plot_height + bottom;
+  const double plot_width = width - left - right;
+  const auto x_for = [&](double value) { return left + (std::max(0.0, value) / ticks.max) * plot_width; };
+
+  out << "<div class=\"metric-chart metric-bars" << (group.wide ? " metric-chart--wide" : "")
+      << "\"><div class=\"metric-chart-title\">" << html_escape(group.title);
+  if (!group.unit.empty())
+    out << " <span>" << html_escape(group.unit) << "</span>";
+  out << "</div><svg viewBox=\"0 0 " << width << " " << height << "\" role=\"img\" aria-label=\""
+      << html_escape(group.value_axis) << " by " << html_escape(lower_case(group.category_axis)) << "\">";
+
+  for (double value : ticks.values) {
+    const double x = x_for(value);
+    out << "<line class=\"chart-grid\" x1=\"" << x << "\" y1=\"" << top << "\" x2=\"" << x << "\" y2=\""
+        << (top + plot_height) << "\"></line>";
+    out << "<text class=\"axis-value\" x=\"" << x << "\" y=\"" << (top + plot_height + 14.0)
+        << "\" text-anchor=\"middle\">" << html_escape(format_metric_value(value)) << "</text>";
+  }
+  render_axis_line(out, left, top, left, top + plot_height);
+  render_axis_title_x(out, left + plot_width / 2.0, height - 4.0, group.value_axis);
+  // The category-axis title sits above its label column rather than rotated
+  // alongside it, where it overlapped the labels themselves.
+  out << "<text class=\"axis-caption\" x=\"0\" y=\"12\" text-anchor=\"start\">" << html_escape(group.category_axis)
+      << "</text>";
+
+  const double bar_height = layout.series.size() > 1 ? 10.0 : row_height - 8.0;
+  for (const auto &item : layout.items) {
+    const auto &metric = metrics[item.metric_index];
+    const double row_top = top + row_height * static_cast<double>(item.category_index);
+    const double y = layout.series.size() > 1
+                         ? row_top + 4.0 + static_cast<double>(item.series_index) * (bar_height + 2.0)
+                         : row_top + 4.0;
+    out << "<rect class=\"horizontal-bar\" data-metric=\"" << html_escape(metric.name) << "\" x=\"" << left << "\" y=\""
+        << y << "\" width=\"" << std::max(0.8, x_for(metric.value) - left) << "\" height=\"" << bar_height
+        << "\" rx=\"2\" fill=\"" << bar_color(group, layout, item) << "\"><title>"
+        << html_escape(bar_tooltip(metric, layout, item)) << "</title></rect>";
+    if (layout.series.size() == 1) {
+      out << "<text class=\"bar-point-value\" x=\"" << (x_for(metric.value) + 5.0) << "\" y=\""
+          << (y + bar_height - 1.5) << "\" text-anchor=\"start\">" << html_escape(format_metric_value(metric.value))
+          << "</text>";
+    }
+  }
+
+  for (std::size_t i = 0; i < category_count; ++i) {
+    const double row_top = top + row_height * static_cast<double>(i);
+    out << "<text class=\"axis-label\" x=\"" << (left - 8.0) << "\" y=\"" << (row_top + row_height / 2.0 + 3.4)
+        << "\" text-anchor=\"end\">" << html_escape(layout.categories[i]) << "</text>";
+  }
+  out << "</svg>";
+  if (group.color_rule == ColorRule::SequentialByCategory) {
+    render_ramp_legend(out, layout);
+  }
+  render_series_legend(out, layout);
+  out << "</div>";
 }
 
 struct TimeoutProbePoint {
@@ -786,22 +1167,22 @@ void render_t13_distribution_chart(std::ostream &out, const std::vector<TimeoutP
   if (points.size() < 2) {
     return;
   }
-  constexpr double width = 760.0;
-  constexpr double height = 300.0;
-  constexpr double left = 108.0;
-  constexpr double right = 32.0;
-  constexpr double top = 34.0;
-  constexpr double bottom = 92.0;
-  constexpr double point_inset = 28.0;
+  constexpr double width = 780.0;
+  constexpr double height = 250.0;
+  constexpr double left = 44.0;
+  constexpr double right = 18.0;
+  constexpr double top = 16.0;
+  constexpr double bottom = 62.0;
+  constexpr double point_inset = 18.0;
   const double plot_width = width - left - right - (point_inset * 2.0);
   const double plot_height = height - top - bottom;
   const auto x_for = [&](std::size_t index) { return left + point_inset + plot_width * index / (points.size() - 1); };
-  const auto y_for = [&](double ratio) { return top + 10.0 + (100.0 - ratio) * (plot_height - 20.0) / 100.0; };
+  const auto y_for = [&](double ratio) { return top + 8.0 + (100.0 - ratio) * (plot_height - 16.0) / 100.0; };
   const double baseline_y = top + plot_height;
 
-  out << "<div class=\"metric-chart metric-xy-chart t13-distribution-chart\"><div class=\"metric-chart-title\">Timeout "
-         "Hit Distribution <span>%</span></div><svg viewBox=\"0 0 760 300\" role=\"img\" aria-label=\"t13 timeout hit "
-         "distribution\">";
+  out << "<div class=\"metric-chart metric-xy-chart t13-distribution-chart metric-chart--wide\">"
+         "<div class=\"metric-chart-title\">Timeout hit distribution <span>%</span></div>"
+         "<svg viewBox=\"0 0 780 250\" role=\"img\" aria-label=\"Hit ratio by poll timeout\">";
   out << "<rect class=\"hit-zone hit-zone-high\" x=\"" << left << "\" y=\"" << top << "\" width=\""
       << (width - left - right) << "\" height=\"" << (plot_height * 0.25) << "\"></rect>";
   out << "<rect class=\"hit-zone hit-zone-mid\" x=\"" << left << "\" y=\"" << (top + plot_height * 0.25)
@@ -813,11 +1194,12 @@ void render_t13_distribution_chart(std::ostream &out, const std::vector<TimeoutP
     const double y = y_for(value);
     out << "<line class=\"chart-grid\" x1=\"" << left << "\" y1=\"" << y << "\" x2=\"" << (width - right) << "\" y2=\""
         << y << "\"></line>";
-    out << "<text class=\"axis-value\" x=\"" << (left - 9.0) << "\" y=\"" << (y + 4.0) << "\" text-anchor=\"end\">"
+    out << "<text class=\"axis-value\" x=\"" << (left - 7.0) << "\" y=\"" << (y + 3.4) << "\" text-anchor=\"end\">"
         << html_escape(format_metric_value(value)) << "</text>";
   }
-  render_horizontal_svg_axis(out, left, width - right, baseline_y, height - 9.0, "Timeout (ms)");
-  render_vertical_svg_axis(out, left, baseline_y, top, 17.0, "Hit ratio (%)");
+  render_axis_line(out, left, baseline_y, width - right, baseline_y);
+  render_axis_title_x(out, left + (width - left - right) / 2.0, height - 5.0, "Probed timeout (ms)");
+  render_axis_title_y(out, 11.0, top + plot_height / 2.0, "Hit ratio (%)");
 
   std::ostringstream path;
   std::ostringstream area;
@@ -843,13 +1225,14 @@ void render_t13_distribution_chart(std::ostream &out, const std::vector<TimeoutP
     const double ratio = 100.0 * point.hits / point.total;
     const double x = x_for(i);
     const double y = y_for(ratio);
-    const double value_y = y < top + 24.0 ? y + 24.0 : y - 11.0;
+    const double value_y = y < top + 16.0 ? y + 16.0 : y - 8.0;
     out << "<circle class=\"metric-point t13-probe-point\" data-timeout-ms=\"" << point.timeout_ms << "\" cx=\"" << x
-        << "\" cy=\"" << y << "\" r=\"6\"></circle>";
+        << "\" cy=\"" << y << "\" r=\"4.5\"><title>" << point.timeout_ms << "ms: " << point.hits << "/" << point.total
+        << " hits</title></circle>";
     out << "<text class=\"point-value\" x=\"" << x << "\" y=\"" << value_y << "\" text-anchor=\"middle\">" << point.hits
         << "/" << point.total << "</text>";
-    out << "<text class=\"axis-label\" transform=\"translate(" << (x + 2.0) << "," << (baseline_y + 25.0)
-        << ") rotate(-45)\" text-anchor=\"end\">" << point.timeout_ms << "ms</text>";
+    out << "<text class=\"axis-label\" transform=\"translate(" << (x + 3.0) << "," << (baseline_y + 13.0)
+        << ") rotate(-40)\" text-anchor=\"end\">" << point.timeout_ms << "</text>";
   }
   out << "</svg></div>";
 }
@@ -894,19 +1277,19 @@ bool render_t13_threshold_chart(std::ostream &out, const std::vector<MetricValue
     min_value = std::min(min_value, marker.value);
     max_value = std::max(max_value, marker.value);
   }
-  const double padding = std::max((max_value - min_value) * 0.12, 1.0);
-  min_value = std::max(0.0, min_value - padding);
-  max_value += padding;
-  const double span = std::max(1.0, max_value - min_value);
+  const AxisTicks ticks = nice_ticks(0.0, max_value, 5);
+  min_value = ticks.min;
+  const double span = std::max(1.0, ticks.max - ticks.min);
 
-  constexpr double width = 760.0;
-  constexpr double height = 300.0;
-  constexpr double left = 180.0;
-  constexpr double right = 34.0;
-  constexpr double top = 30.0;
-  constexpr double bottom = 72.0;
-  const double baseline_y = height - bottom;
-  const double plot_height = baseline_y - top;
+  constexpr double width = 780.0;
+  constexpr double left = 120.0;
+  constexpr double right = 24.0;
+  constexpr double top = 16.0;
+  constexpr double bottom = 40.0;
+  const double row_height = 26.0;
+  const double plot_height = row_height * static_cast<double>(markers.size());
+  const double height = top + plot_height + bottom;
+  const double baseline_y = top + plot_height;
   const auto x_for = [&](double value) { return left + (width - left - right) * (value - min_value) / span; };
   const double cliff_x = x_for(metrics[cliff_index].value);
   double production_x = width - right;
@@ -917,38 +1300,41 @@ bool render_t13_threshold_chart(std::ostream &out, const std::vector<MetricValue
     production_x = x_for(production->value);
   }
 
-  out << "<div class=\"metric-chart t13-threshold-chart\"><div class=\"metric-chart-title\">Timeout Thresholds "
-         "<span>ms</span></div><svg viewBox=\"0 0 760 300\" role=\"img\" aria-label=\"t13 timeout thresholds\">";
+  out << "<div class=\"metric-chart t13-threshold-chart metric-chart--wide\"><div class=\"metric-chart-title\">Timeout "
+         "thresholds <span>ms</span></div><svg viewBox=\"0 0 "
+      << width << " " << height << "\" role=\"img\" aria-label=\"Poll timeout by threshold type\">";
   out << "<rect class=\"threshold-zone threshold-risk\" x=\"" << left << "\" y=\"" << top << "\" width=\""
       << std::max(0.0, cliff_x - left) << "\" height=\"" << plot_height << "\"></rect>";
   out << "<rect class=\"threshold-zone threshold-margin\" x=\"" << cliff_x << "\" y=\"" << top << "\" width=\""
       << std::max(0.0, production_x - cliff_x) << "\" height=\"" << plot_height << "\"></rect>";
   out << "<rect class=\"threshold-zone threshold-safe\" x=\"" << production_x << "\" y=\"" << top << "\" width=\""
       << std::max(0.0, width - right - production_x) << "\" height=\"" << plot_height << "\"></rect>";
-  for (int tick = 0; tick <= 4; ++tick) {
-    const double value = min_value + span * tick / 4.0;
+  for (double value : ticks.values) {
     const double x = x_for(value);
     out << "<line class=\"chart-grid\" x1=\"" << x << "\" y1=\"" << top << "\" x2=\"" << x << "\" y2=\"" << baseline_y
         << "\"></line>";
-    out << "<text class=\"axis-value\" x=\"" << x << "\" y=\"" << (baseline_y + 24.0) << "\" text-anchor=\"middle\">"
+    out << "<text class=\"axis-value\" x=\"" << x << "\" y=\"" << (baseline_y + 15.0) << "\" text-anchor=\"middle\">"
         << html_escape(format_metric_value(value)) << "</text>";
   }
-  render_horizontal_svg_axis(out, left, width - right, baseline_y, height - 10.0, "Timeout (ms)");
-  render_vertical_svg_axis(out, left, baseline_y, top, 18.0, "Threshold type");
+  render_axis_line(out, left, baseline_y, width - right, baseline_y);
+  render_axis_line(out, left, baseline_y, left, top);
+  render_axis_title_x(out, left + (width - left - right) / 2.0, height - 5.0, "Poll timeout (ms)");
+  render_axis_title_y(out, 11.0, top + plot_height / 2.0, "Threshold");
   for (std::size_t i = 0; i < markers.size(); ++i) {
     const auto &marker = markers[i];
     const double x = x_for(marker.value);
-    const double y = top + (i + 0.5) * plot_height / markers.size();
+    const double y = top + (static_cast<double>(i) + 0.5) * row_height;
     out << "<line class=\"threshold-row\" x1=\"" << left << "\" y1=\"" << y << "\" x2=\"" << (width - right)
         << "\" y2=\"" << y << "\"></line>";
     out << "<line class=\"guide-line\" x1=\"" << x << "\" y1=\"" << y << "\" x2=\"" << x << "\" y2=\"" << baseline_y
         << "\"></line>";
-    out << "<text class=\"threshold-label\" x=\"" << (left - 14.0) << "\" y=\"" << (y + 4.0)
-        << "\" text-anchor=\"end\">" << html_escape(marker.label) << "</text>";
+    out << "<text class=\"threshold-label\" x=\"" << (left - 9.0) << "\" y=\"" << (y + 3.4) << "\" text-anchor=\"end\">"
+        << html_escape(marker.label) << "</text>";
     out << "<circle class=\"threshold-point marker-" << (i % 4) << "\" data-metric=\""
-        << html_escape(marker.metric_name) << "\" cx=\"" << x << "\" cy=\"" << y << "\" r=\"7\"></circle>";
-    const bool value_to_left = x > width - right - 72.0;
-    out << "<text class=\"point-value\" x=\"" << (value_to_left ? x - 12.0 : x + 12.0) << "\" y=\"" << (y + 4.0)
+        << html_escape(marker.metric_name) << "\" cx=\"" << x << "\" cy=\"" << y << "\" r=\"5\"><title>"
+        << html_escape(marker.label + ": " + format_metric_value(marker.value) + " ms") << "</title></circle>";
+    const bool value_to_left = x > width - right - 40.0;
+    out << "<text class=\"point-value\" x=\"" << (value_to_left ? x - 9.0 : x + 9.0) << "\" y=\"" << (y + 3.4)
         << "\" text-anchor=\"" << (value_to_left ? "end" : "start") << "\">"
         << html_escape(format_metric_value(marker.value)) << "</text>";
   }
@@ -1012,6 +1398,87 @@ void render_plain_metrics(std::ostream &out, const std::vector<MetricValue> &met
   }
 }
 
+// A format or resolution that was enumerated but could not be measured emits no
+// metrics at all, so it disappears from the chart completely. List those under it
+// so "the camera only supports two formats" can be told apart from "we only
+// managed to measure two of them".
+void render_chart_omissions(std::ostream &out, const TestResult &test, const std::vector<MetricValue> &metrics,
+                            const std::vector<MetricChartGroup> &groups) {
+  const PrefixSweepSpec *spec = nullptr;
+  for (const auto &candidate : kPrefixSweepSpecs) {
+    if (test.id == candidate.test_id) {
+      spec = &candidate;
+      break;
+    }
+  }
+  if (spec == nullptr) {
+    return;
+  }
+
+  // One category appears on every chart of the sweep (latency and throughput), so
+  // it must only be counted once.
+  std::vector<std::string> charted;
+  for (const auto &group : groups) {
+    if (group.category_kind != spec->category_kind) {
+      continue;
+    }
+    const BarLayout layout = build_bar_layout(metrics, group);
+    for (const auto &category : layout.categories) {
+      if (std::find(charted.begin(), charted.end(), category) == charted.end()) {
+        charted.push_back(category);
+      }
+    }
+  }
+
+  // Later detail lines supersede earlier ones for the same category: a format
+  // that logged "sizeimage=..." and then failed to stream should report the
+  // failure, not the geometry.
+  std::vector<std::pair<std::string, std::string>> omitted;
+  for (const auto &detail : test.details) {
+    const std::size_t colon = detail.find(':');
+    if (colon == std::string::npos || colon == 0) {
+      continue;
+    }
+    const std::string name = detail.substr(0, colon);
+    if (name.find(' ') != std::string::npos) {
+      continue;
+    }
+    const bool plausible = spec->category_kind == CategoryKind::Resolution ? looks_like_resolution_label(name)
+                                                                           : name.size() >= 3 && name.size() <= 5;
+    if (!plausible) {
+      continue;
+    }
+    const std::string label = spec->category_kind == CategoryKind::Fourcc ? upper_case(name) : name;
+    if (std::find(charted.begin(), charted.end(), label) != charted.end()) {
+      continue;
+    }
+    std::string reason = detail.substr(colon + 1);
+    while (!reason.empty() && reason.front() == ' ') {
+      reason.erase(0, 1);
+    }
+    auto it = std::find_if(omitted.begin(), omitted.end(),
+                           [&](const std::pair<std::string, std::string> &entry) { return entry.first == label; });
+    if (it == omitted.end()) {
+      omitted.push_back({label, reason});
+    } else {
+      it->second = reason;
+    }
+  }
+  if (omitted.empty()) {
+    return;
+  }
+
+  out << "<div class=\"chart-omissions\"><strong>Not measured</strong> (" << omitted.size() << " of "
+      << (charted.size() + omitted.size()) << " enumerated): ";
+  for (std::size_t i = 0; i < omitted.size(); ++i) {
+    if (i) {
+      out << "; ";
+    }
+    out << html_escape(omitted[i].first) << " <code>" << html_escape(omitted[i].second) << "</code>";
+  }
+  out << "</div>";
+}
+
 void render_test_metrics(std::ostream &out, const TestResult &test) {
   const auto &metrics = test.metrics;
   std::vector<bool> used;
@@ -1020,7 +1487,7 @@ void render_test_metrics(std::ostream &out, const TestResult &test) {
   if (test.id == "t13-poll-timeout-cliff") {
     has_visuals = render_t13_visuals(out, test, used);
   }
-  const auto groups = group_metrics(metrics, used);
+  const auto groups = group_metrics(metrics, used, test.id);
   if (!groups.empty())
     out << "<div class=\"metric-visuals\">";
   for (const auto &group : groups) {
@@ -1034,6 +1501,7 @@ void render_test_metrics(std::ostream &out, const TestResult &test) {
   }
   if (!groups.empty())
     out << "</div>";
+  render_chart_omissions(out, test, metrics, groups);
   has_visuals = has_visuals || !groups.empty();
   render_plain_metrics(out, metrics, used, has_visuals);
 }
@@ -1232,73 +1700,62 @@ table.overview .summary-text { color: #475569; }
 .test-section-header .badge.warn { background: #fef3c7; color: var(--warn); }
 .test-section-header .badge.skipped { background: #f1f5f9; color: var(--skip); }
 .test-body { padding: 16px; }
-.metric-visuals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 12px; margin-bottom: 12px; }
-.metric-chart { border: 1px solid #dbe4ee; border-radius: 6px; background: #fff; padding: 14px; overflow: hidden; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
-.metric-chart-title { color: #1e293b; font-size: 13px; font-weight: 750; margin-bottom: 6px; }
+/* Charts use a ~520-unit viewBox so one SVG unit renders at roughly one CSS
+   pixel: with the old 760-unit box inside a 360px column every label was scaled
+   down to about 7px. Wide charts (many categories, or horizontal rows) take the
+   full row instead of being squeezed into a column. */
+.metric-visuals { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 12px; margin-bottom: 12px; }
+.metric-chart { border: 1px solid #dbe4ee; border-radius: 6px; background: #fff; padding: 14px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
+.metric-chart--wide { grid-column: 1 / -1; }
+.metric-chart-title { color: #1e293b; font-size: 13px; font-weight: 750; margin-bottom: 8px; }
 .metric-chart-title span { color: #94a3b8; font-size: 10px; font-weight: 600; margin-left: 4px; }
-.metric-chart svg { display: block; width: 100%; max-width: 100%; height: auto; overflow: hidden; }
+.metric-chart svg { display: block; width: 100%; max-width: 100%; height: auto; overflow: visible; }
 .metric-xy-chart svg { min-width: 0; }
-.chart-grid { stroke: #e2e8f0; stroke-width: 1; vector-effect: non-scaling-stroke; }
-.chart-axis { stroke: #94a3b8; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-.axis-arrow { fill: none; stroke: #64748b; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-.axis-caption { fill: #475569; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; font-weight: 700; }
-.guide-line { stroke: #94a3b8; stroke-width: 1; stroke-dasharray: 4 5; vector-effect: non-scaling-stroke; }
-.dot-row-line { stroke: #f1f5f9; stroke-width: 10; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.zero-baseline { stroke: #475569; stroke-width: 1.5; stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
-.metric-line { fill: none; stroke: #2563eb; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.metric-point { fill: #0f8aa6; stroke: #fff; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
-.axis-value, .axis-label, .point-value, .dot-label, .bar-point-value { font-family: 'JetBrains Mono', monospace; fill: #64748b; font-size: 13px; }
+.chart-grid { stroke: #eef2f7; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart-axis { stroke: #cbd5e1; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.axis-caption { fill: #475569; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 11.5px; font-weight: 700; }
+.guide-line { stroke: #cbd5e1; stroke-width: 1; stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
+.dot-row-line { stroke: #f5f8fb; stroke-width: 16; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.zero-baseline { stroke: #94a3b8; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.metric-line { fill: none; stroke: #2a78d6; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.metric-point { fill: #2a78d6; stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.axis-value, .axis-label, .point-value, .dot-label, .bar-point-value { font-family: 'JetBrains Mono', monospace; fill: #64748b; font-size: 11px; }
 .dot-label { fill: #475569; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 700; }
-.point-value, .bar-point-value { fill: #1e293b; font-weight: 700; }
-.vertical-bar { vector-effect: non-scaling-stroke; }
-.vertical-bar.tone-0 { fill: #2563eb; }
-.vertical-bar.tone-1 { fill: #0f8aa6; }
-.vertical-bar.tone-2 { fill: #d97706; }
-.vertical-bar.tone-3 { fill: #e2553d; }
-.chart-series-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; margin-top: 2px; color: #64748b; font-size: 10px; }
+.point-value, .bar-point-value { fill: #1e293b; font-size: 10.5px; font-weight: 700; }
+/* Bar fills come from the renderer: a sequential ramp when the category axis is
+   an ordered quantity, one accent when it is nominal, the ordinal ramp for the
+   Mean/P95/Max series. No tone-* cycle -- that gave distant categories the same
+   colour and reused the verdict colours for plain data. */
+.vertical-bar, .horizontal-bar { vector-effect: non-scaling-stroke; }
+.chart-series-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; margin-top: 8px; color: #475569; font-size: 11px; }
 .chart-series-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.chart-series-legend i { width: 8px; height: 8px; border-radius: 2px; }
-.chart-series-legend i.tone-0 { background: #2563eb; }
-.chart-series-legend i.tone-1 { background: #0f8aa6; }
-.chart-series-legend i.tone-2 { background: #d97706; }
-.chart-series-legend i.tone-3 { background: #e2553d; }
+.chart-series-legend i { width: 9px; height: 9px; border-radius: 2px; }
+.chart-ramp-key { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: #64748b; font-size: 10.5px; }
+.chart-ramp-key i { display: flex; flex: 0 0 110px; height: 8px; border-radius: 2px; overflow: hidden; }
+.chart-ramp-key b { flex: 1; }
+.chart-omissions { margin: 0 0 12px; padding: 8px 11px; border-left: 3px solid #cbd5e1; background: #f8fafc; border-radius: 0 4px 4px 0; color: #475569; font-size: 12px; }
+.chart-omissions strong { color: #1e293b; }
+.chart-omissions code { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #b42318; }
 .hit-zone { opacity: 0.48; }
 .hit-zone-high { fill: #dcfce7; }
 .hit-zone-mid { fill: #fef3c7; }
 .hit-zone-low { fill: #fee2e2; }
 .distribution-area { fill: #bae6fd; opacity: 0.58; }
-.distribution-line { stroke: #087f9b; stroke-width: 3; }
-.t13-probe-point { fill: #087f9b; }
-.threshold-zone { rx: 5; ry: 5; }
+.distribution-line { stroke: #1c5cab; stroke-width: 2; }
+.t13-probe-point { fill: #1c5cab; }
+.threshold-zone { rx: 4; ry: 4; }
 .threshold-risk { fill: #fecaca; }
 .threshold-margin { fill: #fde68a; }
 .threshold-safe { fill: #bbf7d0; }
-.threshold-row { stroke: rgba(255, 255, 255, 0.82); stroke-width: 10; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.threshold-label { fill: #475569; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; font-weight: 700; }
+.threshold-row { stroke: rgba(255, 255, 255, 0.82); stroke-width: 16; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.threshold-label { fill: #475569; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 11px; font-weight: 700; }
+/* The threshold markers are a risk ordering (first miss -> cliff -> production),
+   so they keep a semantic red-to-green scale rather than the data palette. */
 .threshold-point.marker-0 { fill: #dc2626; }
 .threshold-point.marker-1 { fill: #d97706; }
-.threshold-point.marker-2 { fill: #0f8aa6; }
+.threshold-point.marker-2 { fill: #2a78d6; }
 .threshold-point.marker-3 { fill: #15803d; }
-.threshold-point { stroke: #fff !important; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
-.horizontal-bar-plot { position: relative; padding: 2px 0 31px 22px; }
-.horizontal-y-axis { position: absolute; left: 5px; top: 1px; bottom: 31px; border-left: 1.5px solid #94a3b8; }
-.horizontal-y-axis::before { content: ''; position: absolute; top: -1px; left: -5px; border-width: 0 4px 8px; border-style: solid; border-color: transparent transparent #64748b; }
-.horizontal-y-axis span { position: absolute; top: 50%; left: -9px; color: #475569; font-size: 10px; font-weight: 700; white-space: nowrap; transform: translate(-50%, -50%) rotate(-90deg); }
-.horizontal-x-axis { position: absolute; right: 0; bottom: 18px; left: 39%; border-top: 1.5px solid #94a3b8; }
-.horizontal-x-axis::after { content: ''; position: absolute; top: -5px; right: -1px; border-width: 4px 0 4px 8px; border-style: solid; border-color: transparent transparent transparent #64748b; }
-.horizontal-x-axis span { position: absolute; top: 5px; right: 0; color: #475569; font-size: 10px; font-weight: 700; white-space: nowrap; }
-.bar-list { display: grid; gap: 9px; }
-.bar-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(80px, 2fr) minmax(54px, auto); align-items: center; gap: 10px; }
-.bar-label { color: #475569; font-size: 11px; overflow-wrap: anywhere; }
-.bar-track { height: 5px; border-radius: 3px; background: #e2e8f0; }
-.bar-fill { position: relative; display: block; height: 100%; min-width: 2px; border-radius: 3px; background: #2563eb; }
-.bar-fill i { position: absolute; right: -4px; top: 50%; width: 9px; height: 9px; border: 2px solid #fff; border-radius: 50%; background: inherit; transform: translateY(-50%); box-shadow: 0 0 0 1px currentColor; }
-.bar-fill.tone-0 { background: #2563eb; color: #2563eb; }
-.bar-fill.tone-1 { background: #0f8aa6; color: #0f8aa6; }
-.bar-fill.tone-2 { background: #d97706; color: #d97706; }
-.bar-fill.tone-3 { background: #e2553d; color: #e2553d; }
-.bar-fill.negative { background: #dc2626; color: #dc2626; }
-.bar-value { color: #1e293b; font-family: monospace; font-size: 11px; font-weight: 700; text-align: right; white-space: nowrap; }
+.threshold-point { stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .supporting-values { margin: 0 0 12px; }
 .supporting-title { color: #64748b; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
 .metric-kv-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 0 24px; margin: 0; border-top: 1px solid #e2e8f0; }
@@ -1331,20 +1788,17 @@ table.overview .summary-text { color: #475569; }
   table.overview td:nth-child(3) { grid-column: 2; grid-row: 2; }
   table.overview td:nth-child(4) { grid-column: 3; grid-row: 2; }
   table.overview td:nth-child(5) { grid-column: 1 / 4; grid-row: 3; }
-  .metric-xy-chart .axis-value, .metric-xy-chart .axis-label, .metric-dot-chart .axis-value,
-  .metric-dot-chart .dot-label, .metric-vertical-bars .axis-value, .metric-vertical-bars .axis-label,
-  .t13-threshold-chart .axis-value, .t13-threshold-chart .threshold-label { font-size: 19px; }
-  .metric-xy-chart .point-value, .metric-dot-chart .point-value, .metric-vertical-bars .bar-point-value,
-  .t13-threshold-chart .point-value { font-size: 20px; }
-  .metric-chart .axis-caption { font-size: 18px; }
-  .metric-point { stroke-width: 3; }
-  .bar-row { grid-template-columns: minmax(100px, 1fr) minmax(90px, 1.4fr); }
-  .bar-value { grid-column: 2; }
+  /* The chart viewBox now matches its rendered width, so the label sizes no
+     longer need to be scaled up to compensate for a 760-unit box. */
   .export-actions { position: static; flex-direction: row; padding: 12px; background: #f8fafc; }
 }
 @media print { body { background: white; } .container { padding: 20px; } .header { break-inside: avoid; }
                .test-section, .metric-chart, .result-distribution { break-inside: avoid; }
                .export-actions { display: none; }
+               /* A printed column is narrower than a screen row, so a narrow chart
+                  would be blown up while a wide one shrank. Cap the narrow ones and
+                  let the wide ones use the full text width. */
+               .metric-chart:not(.metric-chart--wide) svg { max-width: 500px; }
                @page { margin: 15mm 10mm; size: A4; } }
 </style></head><body>
 <div class="export-actions">
