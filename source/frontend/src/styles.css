@@ -2261,37 +2261,44 @@ summary span {
   gap: 8px;
 }
 
-.action-btn {
+/* Action Card Group — radio-style selectable buttons */
+.action-card-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.action-card {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: 6px;
+  justify-content: center;
+  padding: 5px 14px;
+  border-radius: 5px;
+  border: 1px solid transparent;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.primary-action {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-}
-
-.primary-action:hover {
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
-}
-
-.secondary-action {
-  background: var(--bg-surface);
+  background: transparent;
   color: var(--text-secondary);
-  border: 1px solid var(--border-subtle);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  user-select: none;
 }
 
-.secondary-action:hover {
-  background: var(--bg-elevated);
+.action-card:hover {
   color: var(--text-primary);
+  background: var(--bg-surface);
+}
+
+.action-card-active {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 /* Dynamic Input Validation Errors */

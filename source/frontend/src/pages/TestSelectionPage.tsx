@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { HardDrive, CheckCircle2, CheckSquare, Square, RotateCcw, Filter } from "lucide-react";
+import { HardDrive, CheckCircle2, Filter } from "lucide-react";
 import { TestDefinition, TriggerMode } from "../types";
 import { SelectableCard } from "../components/SelectableCard";
 import { InfoPopover } from "../components/InfoPopover";
@@ -14,9 +14,10 @@ const TAG_DEFINITIONS: Array<{ id: string; label: string; class: string }> = [
   { id: "benchmark", label: "Benchmark", class: "chip-benchmark" }
 ];
 
+type ActionMode = "select-all" | "clear-all" | "reset-stable";
+
 type Props = {
   groupedTests: Array<[string, TestDefinition[]]>;
-  _selectedTests?: string[];
   setSelectedTests: (tests: string[]) => void;
   tests: TestDefinition[];
   isTestSelected: (test: TestDefinition) => boolean;
@@ -28,7 +29,6 @@ type Props = {
 
 export function TestSelectionPage({
   groupedTests,
-  _selectedTests,
   setSelectedTests,
   tests,
   isTestSelected,
@@ -37,43 +37,62 @@ export function TestSelectionPage({
   backends,
   onToggleBackend
 }: Props) {
-  const [activeTags, setActiveTags] = useState<string[]>(["stable", "device-specific"]);
+  const [activeTags, setActiveTags] = useState<string[]>(["stable"]);
+  const [activeAction, setActiveAction] = useState<ActionMode>("reset-stable");
 
   const allTests = tests.length ? tests : groupedTests.flatMap(([, items]) => items);
   const selectedCount = allTests.filter((t) => isTestSelected(t)).length;
 
-  function toggleTagFilter(tagId: string) {
-    setActiveTags((prev) =>
-      prev.includes(tagId) ? prev.filter((t) => t !== tagId) : [...prev, tagId]
-    );
+  // Tests that are supported in current trigger + backend mode
+  function isSupportedTest(t: TestDefinition) {
+    const isTrig = t.supported_trigger_modes?.includes(triggerMode);
+    const isBack = !t.requires_dmabuf || backends.includes("dmabuf");
+    return isTrig && isBack;
   }
 
-  function handleSelectMatching() {
-    const matchingIds = allTests
-      .filter((t) => {
-        const isTrig = t.supported_trigger_modes?.includes(triggerMode);
-        const isBack = !t.requires_dmabuf || backends.includes("dmabuf");
-        if (!isTrig || !isBack) return false;
-        return t.tags?.some((tag) => activeTags.includes(tag));
-      })
-      .map((t) => t.id);
-    setSelectedTests(matchingIds);
+  // When a tag pill is clicked: toggle the tag, then auto-select tests matching any active tag
+  function handleTagClick(tagId: string) {
+    const newActiveTags = activeTags.includes(tagId)
+      ? activeTags.filter((t) => t !== tagId)
+      : [...activeTags, tagId];
+
+    setActiveTags(newActiveTags);
+
+    // Auto-select tests that have at least one active tag
+    if (newActiveTags.length > 0) {
+      const matchingIds = allTests
+        .filter((t) => isSupportedTest(t) && t.tags?.some((tag) => newActiveTags.includes(tag)))
+        .map((t) => t.id);
+      setSelectedTests(matchingIds);
+      setActiveAction("reset-stable"); // reset to neutral when tags change manually
+    } else {
+      // No tags active → clear all
+      setSelectedTests([]);
+    }
+  }
+
+  function handleSelectAll() {
+    // All tags active, all supported tests selected
+    setActiveTags(TAG_DEFINITIONS.map((td) => td.id));
+    setSelectedTests(allTests.filter(isSupportedTest).map((t) => t.id));
+    setActiveAction("select-all");
   }
 
   function handleClearAll() {
+    // No tags active, no tests selected
+    setActiveTags([]);
     setSelectedTests([]);
+    setActiveAction("clear-all");
   }
 
-  function handleResetDefault() {
-    const defaultIds = allTests
-      .filter((t) => {
-        const isTrig = t.supported_trigger_modes?.includes(triggerMode);
-        const isBack = !t.requires_dmabuf || backends.includes("dmabuf");
-        if (!isTrig || !isBack) return false;
-        return t.tags?.includes("stable");
-      })
+  function handleResetStable() {
+    // Only stable tag active, only stable-tagged supported tests selected
+    setActiveTags(["stable"]);
+    const stableIds = allTests
+      .filter((t) => isSupportedTest(t) && t.tags?.includes("stable"))
       .map((t) => t.id);
-    setSelectedTests(defaultIds);
+    setSelectedTests(stableIds);
+    setActiveAction("reset-stable");
   }
 
   return (
@@ -93,6 +112,7 @@ export function TestSelectionPage({
 
       <div className="panel combined-toolbar-panel">
         <div className="filter-toolbar">
+          {/* Backend selector */}
           <div className="filter-group">
             <span className="toolbar-label">
               <HardDrive size={15} />
@@ -113,6 +133,7 @@ export function TestSelectionPage({
 
           <div className="toolbar-divider" />
 
+          {/* Tag filters — clicking auto-selects matching tests */}
           <div className="filter-group">
             <span className="toolbar-label">
               <Filter size={15} />
@@ -124,7 +145,7 @@ export function TestSelectionPage({
                   key={def.id}
                   type="button"
                   className={`tag-pill ${def.class} ${activeTags.includes(def.id) ? "active" : ""}`}
-                  onClick={() => toggleTagFilter(def.id)}
+                  onClick={() => handleTagClick(def.id)}
                 >
                   <span>{def.label}</span>
                 </button>
@@ -134,16 +155,31 @@ export function TestSelectionPage({
 
           <div className="toolbar-divider" />
 
+          {/* Action cards — radio-style, only one active at a time */}
           <div className="filter-group actions-group">
-            <button type="button" className="action-btn primary-action" onClick={handleSelectMatching}>
-              <CheckSquare size={14} /> Select Matching
-            </button>
-            <button type="button" className="action-btn secondary-action" onClick={handleClearAll}>
-              <Square size={14} /> Clear All
-            </button>
-            <button type="button" className="action-btn secondary-action" onClick={handleResetDefault}>
-              <RotateCcw size={14} /> Reset (Stable)
-            </button>
+            <div className="action-card-group">
+              <button
+                type="button"
+                className={`action-card ${activeAction === "select-all" ? "action-card-active" : ""}`}
+                onClick={handleSelectAll}
+              >
+                Select All
+              </button>
+              <button
+                type="button"
+                className={`action-card ${activeAction === "clear-all" ? "action-card-active" : ""}`}
+                onClick={handleClearAll}
+              >
+                Clear All
+              </button>
+              <button
+                type="button"
+                className={`action-card ${activeAction === "reset-stable" ? "action-card-active" : ""}`}
+                onClick={handleResetStable}
+              >
+                Reset Default (Stable)
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -166,6 +202,14 @@ export function TestSelectionPage({
                   const isBackendSupported = !test.requires_dmabuf || backends.includes("dmabuf");
                   const isSupported = isTriggerSupported && isBackendSupported;
 
+                  // A test is "dimmed" (deactivated) if it has no active tag match AND is not selected
+                  const hasActiveTag =
+                    activeTags.length === 0
+                      ? false
+                      : test.tags?.some((tag) => activeTags.includes(tag));
+                  const isSelected = isTestSelected(test);
+                  const isDimmed = !isSelected && !hasActiveTag;
+
                   let subtitleText = test.name;
                   if (!isTriggerSupported) {
                     subtitleText = `${test.name} · unavailable in ${triggerMode} mode`;
@@ -176,9 +220,9 @@ export function TestSelectionPage({
                   return (
                     <SelectableCard
                       key={test.id}
-                      selected={isTestSelected(test)}
+                      selected={isSelected}
                       onToggle={() => isSupported && onToggleTest(test.id)}
-                      disabled={!isSupported}
+                      disabled={!isSupported || isDimmed}
                       title={test.id}
                       subtitle={subtitleText}
                       badges={
