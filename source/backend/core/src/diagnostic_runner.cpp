@@ -2883,7 +2883,7 @@ RunResult DiagnosticRunner::run(const RunConfig &config) {
   result.output_directory = config.output_directory;
   result.run_mode = config.run_mode;
 
-  const auto tests = select_tests(config.test_selectors, config.include_long_tests, config.include_experimental_tests);
+  const auto tests = select_tests(config.test_selectors);
 
   DeviceProfile master_profile;
   if (!config.master.profile_id.empty()) {

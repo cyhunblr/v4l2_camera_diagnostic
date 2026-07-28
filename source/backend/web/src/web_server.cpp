@@ -407,10 +407,10 @@ Json::Value test_to_json(const TestDefinition &test) {
     }
   }
   out["requires_dmabuf"] = test.requires_dmabuf;
-  out["long_running"] = test.long_running;
-  out["experimental"] = test.experimental;
-  out["risky"] = test.risky;
-  out["implemented_in_core"] = test.implemented_in_core;
+  out["tags"] = Json::Value(Json::arrayValue);
+  for (const auto &tag : test.tags) {
+    out["tags"].append(tag);
+  }
   return out;
 }
 
@@ -559,8 +559,10 @@ RunConfig run_config_from_json(const Json::Value &root, const WebServerOptions &
       config.run_mode = mode;
     }
   }
-  config.include_long_tests = root.get("include_long_tests", false).asBool();
-  config.include_experimental_tests = root.get("include_experimental_tests", false).asBool();
+  // test_selectors is fully populated by frontend
+  for (const auto &value : root["test_selectors"]) {
+    config.test_selectors.push_back(value.asString());
+  }
   config.threshold_config_id = root.get("threshold_config_id", "default").asString();
 
   auto parse_camera = [](const Json::Value &item) {

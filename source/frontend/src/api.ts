@@ -6,48 +6,36 @@ export const DEFAULT_TESTS: TestDefinition[] = [
     name: "Open / Close Cycle Test",
     category: "Basic Driver Reliability",
     description: "Tests basic v4l2 device open and close file handle operations.",
-    implemented_in_core: true,
-    long_running: false,
-    experimental: false,
-    risky: false,
     uses_trigger: false,
-    supported_trigger_modes: ["free-run", "software", "hardware"]
+    supported_trigger_modes: ["free-run", "software", "hardware"],
+    tags: ["stable"]
   },
   {
     id: "t02-query-caps",
     name: "V4L2 Capability Query",
     category: "Basic Driver Reliability",
     description: "Queries V4L2 device capabilities and streaming flags.",
-    implemented_in_core: true,
-    long_running: false,
-    experimental: false,
-    risky: false,
     uses_trigger: false,
-    supported_trigger_modes: ["free-run", "software", "hardware"]
+    supported_trigger_modes: ["free-run", "software", "hardware"],
+    tags: ["stable"]
   },
   {
     id: "t07-poll-timeout-sweep",
     name: "Poll Timeout Sweep",
     category: "Streaming & Latency",
     description: "Sweeps poll timeout durations to verify driver event notifications.",
-    implemented_in_core: true,
-    long_running: true,
-    experimental: false,
-    risky: false,
     uses_trigger: true,
-    supported_trigger_modes: ["free-run", "software", "hardware"]
+    supported_trigger_modes: ["free-run", "software", "hardware"],
+    tags: ["long-running"]
   },
   {
     id: "t12-zero-copy-dmabuf",
     name: "Zero-Copy DMABUF Transfer",
     category: "Advanced Memory",
     description: "Verifies zero-copy memory pointer sharing via DMABUF handles.",
-    implemented_in_core: true,
-    long_running: false,
-    experimental: true,
-    risky: true,
     uses_trigger: false,
-    supported_trigger_modes: ["free-run", "software"]
+    supported_trigger_modes: ["free-run", "software"],
+    tags: ["device-specific", "stress"]
   }
 ];
 

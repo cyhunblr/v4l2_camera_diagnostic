@@ -3,6 +3,7 @@
 **Layer:** 3 — Buffer & memory  
 **Category:** dmabuf  
 **Trigger modes:** Hardware | Software | FreeRun  
+**Tags:** `device-specific`  
 
 ## Purpose
 

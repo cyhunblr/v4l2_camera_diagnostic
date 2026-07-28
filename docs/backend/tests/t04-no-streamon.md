@@ -3,6 +3,7 @@
 **Layer:** 2 — State-machine correctness  
 **Category:** stream-state  
 **Trigger modes:** Hardware | Software | FreeRun  
+**Tags:** `stable`  
 
 ## Purpose
 

@@ -2135,16 +2135,19 @@ summary span {
   border-radius: 6px;
   background: var(--bg-inset);
   overflow: hidden;
+  min-width: 95px;
 }
 
 .threshold-input-wrapper input {
   border: none;
   background: transparent;
-  padding: 4px 8px;
-  width: 75px;
+  padding: 4px 6px;
+  width: 50px;
+  min-width: 40px;
+  flex: 1;
   color: var(--text-primary);
   font-family: inherit;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .threshold-input-wrapper input:focus {
@@ -2152,11 +2155,13 @@ summary span {
 }
 
 .threshold-unit {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   color: var(--text-secondary);
-  padding-right: 6px;
+  padding: 0 6px 0 2px;
   text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .reset-param-btn {
@@ -2164,10 +2169,11 @@ summary span {
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 4px;
+  padding: 3px 5px;
   border-radius: 4px;
   display: grid;
   place-items: center;
+  flex-shrink: 0;
   transition: all 0.15s ease;
 }
 
@@ -2175,4 +2181,186 @@ summary span {
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 15%, transparent);
 }
+
+/* Tag Chips & Filter Pills */
+.chip-stable {
+  background: color-mix(in srgb, #22c55e 18%, transparent);
+  color: #22c55e;
+  border: 1px solid color-mix(in srgb, #22c55e 30%, transparent);
+}
+
+.chip-device {
+  background: color-mix(in srgb, #eab308 18%, transparent);
+  color: #eab308;
+  border: 1px solid color-mix(in srgb, #eab308 30%, transparent);
+}
+
+.chip-stress {
+  background: color-mix(in srgb, #ef4444 18%, transparent);
+  color: #ef4444;
+  border: 1px solid color-mix(in srgb, #ef4444 30%, transparent);
+}
+
+.chip-long {
+  background: color-mix(in srgb, #8b5cf6 18%, transparent);
+  color: #8b5cf6;
+  border: 1px solid color-mix(in srgb, #8b5cf6 30%, transparent);
+}
+
+.chip-benchmark {
+  background: color-mix(in srgb, #06b6d4 18%, transparent);
+  color: #06b6d4;
+  border: 1px solid color-mix(in srgb, #06b6d4 30%, transparent);
+}
+
+.tag-filter-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  opacity: 0.55;
+  filter: grayscale(40%);
+}
+
+.tag-pill:hover {
+  opacity: 0.85;
+  filter: none;
+}
+
+.tag-pill.active {
+  opacity: 1;
+  filter: none;
+  font-weight: 800;
+  box-shadow: 0 0 10px color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.compact-grid {
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)) !important;
+  gap: 12px !important;
+}
+
+/* Actions Group */
+.actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.primary-action {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.primary-action:hover {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.secondary-action {
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}
+
+.secondary-action:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+/* Dynamic Input Validation Errors */
+.threshold-input-wrapper:has(input.invalid),
+.threshold-input-wrapper input.invalid {
+  border-color: var(--error) !important;
+  background: color-mix(in srgb, var(--error) 12%, transparent) !important;
+}
+
+.threshold-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--error);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.save-error-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--error);
+  font-size: 12px;
+  font-weight: 600;
+  margin-right: 12px;
+}
+
+/* Threshold Card Header & Card Reset */
+.threshold-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.threshold-card-header .threshold-card-title {
+  margin: 0;
+}
+
+.card-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.card-reset-btn:hover {
+  background: color-mix(in srgb, var(--warn) 20%, transparent);
+}
+
+.threshold-card.has-modifications {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.config-filter-bar {
+  margin: 12px 0;
+  padding: 10px 14px;
+  background: var(--bg-surface);
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+}
+
 

@@ -3,6 +3,7 @@
 **Layer:** 3 — Buffer & memory  
 **Category:** metadata  
 **Trigger modes:** Hardware | Software | FreeRun  
+**Tags:** `stable`  
 
 ## Purpose
 

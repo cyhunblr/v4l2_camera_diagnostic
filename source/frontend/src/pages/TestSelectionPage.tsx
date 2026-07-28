@@ -1,21 +1,26 @@
-import { ListChecks, HardDrive, Sliders, CheckCircle2 } from "lucide-react";
+import { useState } from "react";
+import { HardDrive, CheckCircle2, CheckSquare, Square, RotateCcw, Filter } from "lucide-react";
 import { TestDefinition, TriggerMode } from "../types";
 import { SelectableCard } from "../components/SelectableCard";
 import { InfoPopover } from "../components/InfoPopover";
 
-const GROUP_SELECTORS = ["implemented", "stable", "all"];
 const BACKEND_OPTIONS = ["mmap", "dmabuf", "userptr"];
+
+const TAG_DEFINITIONS: Array<{ id: string; label: string; class: string }> = [
+  { id: "stable", label: "Stable", class: "chip-stable" },
+  { id: "device-specific", label: "Device Specific", class: "chip-device" },
+  { id: "stress", label: "Stress", class: "chip-stress" },
+  { id: "long-running", label: "Long Running", class: "chip-long" },
+  { id: "benchmark", label: "Benchmark", class: "chip-benchmark" }
+];
 
 type Props = {
   groupedTests: Array<[string, TestDefinition[]]>;
-  selectedTests: string[];
+  _selectedTests?: string[];
+  setSelectedTests: (tests: string[]) => void;
+  tests: TestDefinition[];
   isTestSelected: (test: TestDefinition) => boolean;
-  onSetGroupSelector: (selector: string) => void;
   onToggleTest: (testId: string) => void;
-  includeLong: boolean;
-  onIncludeLongChange: (value: boolean) => void;
-  includeExperimental: boolean;
-  onIncludeExperimentalChange: (value: boolean) => void;
   triggerMode: TriggerMode;
   backends: string[];
   onToggleBackend: (backend: string) => void;
@@ -23,21 +28,53 @@ type Props = {
 
 export function TestSelectionPage({
   groupedTests,
-  selectedTests,
+  _selectedTests,
+  setSelectedTests,
+  tests,
   isTestSelected,
-  onSetGroupSelector,
   onToggleTest,
-  includeLong,
-  onIncludeLongChange,
-  includeExperimental,
-  onIncludeExperimentalChange,
   triggerMode,
   backends,
   onToggleBackend
 }: Props) {
-  // Count total supported & selected tests
-  const allTests = groupedTests.flatMap(([, items]) => items);
+  const [activeTags, setActiveTags] = useState<string[]>(["stable", "device-specific"]);
+
+  const allTests = tests.length ? tests : groupedTests.flatMap(([, items]) => items);
   const selectedCount = allTests.filter((t) => isTestSelected(t)).length;
+
+  function toggleTagFilter(tagId: string) {
+    setActiveTags((prev) =>
+      prev.includes(tagId) ? prev.filter((t) => t !== tagId) : [...prev, tagId]
+    );
+  }
+
+  function handleSelectMatching() {
+    const matchingIds = allTests
+      .filter((t) => {
+        const isTrig = t.supported_trigger_modes?.includes(triggerMode);
+        const isBack = !t.requires_dmabuf || backends.includes("dmabuf");
+        if (!isTrig || !isBack) return false;
+        return t.tags?.some((tag) => activeTags.includes(tag));
+      })
+      .map((t) => t.id);
+    setSelectedTests(matchingIds);
+  }
+
+  function handleClearAll() {
+    setSelectedTests([]);
+  }
+
+  function handleResetDefault() {
+    const defaultIds = allTests
+      .filter((t) => {
+        const isTrig = t.supported_trigger_modes?.includes(triggerMode);
+        const isBack = !t.requires_dmabuf || backends.includes("dmabuf");
+        if (!isTrig || !isBack) return false;
+        return t.tags?.includes("stable");
+      })
+      .map((t) => t.id);
+    setSelectedTests(defaultIds);
+  }
 
   return (
     <div className="page test-selection-page">
@@ -48,7 +85,9 @@ export function TestSelectionPage({
         </div>
         <div className="test-summary-pill">
           <CheckCircle2 size={15} />
-          <span><strong>{selectedCount}</strong> of <strong>{allTests.length}</strong> tests active</span>
+          <span>
+            <strong>{selectedCount}</strong> of <strong>{allTests.length}</strong> tests active
+          </span>
         </div>
       </header>
 
@@ -76,17 +115,18 @@ export function TestSelectionPage({
 
           <div className="filter-group">
             <span className="toolbar-label">
-              <ListChecks size={15} />
-              Preset:
+              <Filter size={15} />
+              Tag Filters:
             </span>
-            <div className="segmented-control">
-              {GROUP_SELECTORS.map((selector) => (
+            <div className="tag-filter-pills">
+              {TAG_DEFINITIONS.map((def) => (
                 <button
-                  key={selector}
-                  className={selectedTests.includes(selector) ? "selected" : ""}
-                  onClick={() => onSetGroupSelector(selector)}
+                  key={def.id}
+                  type="button"
+                  className={`tag-pill ${def.class} ${activeTags.includes(def.id) ? "active" : ""}`}
+                  onClick={() => toggleTagFilter(def.id)}
                 >
-                  {selector}
+                  <span>{def.label}</span>
                 </button>
               ))}
             </div>
@@ -94,85 +134,86 @@ export function TestSelectionPage({
 
           <div className="toolbar-divider" />
 
-          <div className="filter-group">
-            <span className="toolbar-label">
-              <Sliders size={15} />
-              Filter:
-            </span>
-            <div className="filter-toggles">
-              <button
-                type="button"
-                className={`toggle-switch-pill ${includeLong ? "active" : ""}`}
-                onClick={() => onIncludeLongChange(!includeLong)}
-              >
-                <span>Long-running</span>
-                <span className="switch-track"><span className="switch-thumb" /></span>
-              </button>
-
-              <button
-                type="button"
-                className={`toggle-switch-pill ${includeExperimental ? "active" : ""}`}
-                onClick={() => onIncludeExperimentalChange(!includeExperimental)}
-              >
-                <span>Experimental</span>
-                <span className="switch-track"><span className="switch-thumb" /></span>
-              </button>
-            </div>
+          <div className="filter-group actions-group">
+            <button type="button" className="action-btn primary-action" onClick={handleSelectMatching}>
+              <CheckSquare size={14} /> Select Matching
+            </button>
+            <button type="button" className="action-btn secondary-action" onClick={handleClearAll}>
+              <Square size={14} /> Clear All
+            </button>
+            <button type="button" className="action-btn secondary-action" onClick={handleResetDefault}>
+              <RotateCcw size={14} /> Reset (Stable)
+            </button>
           </div>
         </div>
       </div>
 
       <div className="test-groups">
         {groupedTests.map(([category, items]) => {
-            const categorySelectedCount = items.filter((t) => isTestSelected(t)).length;
-            return (
-              <details key={category} open className="test-category-group">
-                <summary className="category-summary">
-                  <span className="category-name">{category}</span>
-                  <span className="category-badge">{categorySelectedCount} / {items.length} selected</span>
-                </summary>
-                <div className="card-grid horizontal-grid">
-                  {items.map((test) => {
-                    const isSupported = test.supported_trigger_modes?.includes(triggerMode);
-                    return (
-                      <SelectableCard
-                        key={test.id}
-                        selected={isTestSelected(test)}
-                        onToggle={() => onToggleTest(test.id)}
-                        disabled={!isSupported}
-                        title={test.id}
-                        subtitle={!isSupported ? `${test.name} · unavailable in ${triggerMode}` : test.name}
-                        badges={
-                          <div className="test-card-badges">
-                            {test.implemented_in_core && <span className="chip chip-core">Core</span>}
-                            {test.experimental && <span className="chip chip-exp">Experimental</span>}
-                            {test.long_running && <span className="chip chip-long">Long</span>}
-                          </div>
-                        }
-                        layout="horizontal"
-                        cornerAction={
-                          <InfoPopover
-                            content={
-                              <div>
-                                <p>{test.description}</p>
-                                <p className="info-popover-meta">
-                                  {test.implemented_in_core ? "implemented" : "not implemented"} ·{" "}
-                                  {test.long_running ? "long-running" : "quick"} ·{" "}
-                                  {test.experimental ? "experimental" : test.risky ? "risky" : "stable"}
-                                </p>
-                              </div>
-                            }
-                          />
-                        }
-                      />
-                    );
-                  })}
-                </div>
-              </details>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
+          const categorySelectedCount = items.filter((t) => isTestSelected(t)).length;
 
+          return (
+            <details key={category} open className="test-category-group">
+              <summary className="category-summary">
+                <span className="category-name">{category}</span>
+                <span className="category-badge">
+                  {categorySelectedCount} / {items.length} selected
+                </span>
+              </summary>
+              <div className="card-grid horizontal-grid">
+                {items.map((test) => {
+                  const isTriggerSupported = test.supported_trigger_modes?.includes(triggerMode);
+                  const isBackendSupported = !test.requires_dmabuf || backends.includes("dmabuf");
+                  const isSupported = isTriggerSupported && isBackendSupported;
+
+                  let subtitleText = test.name;
+                  if (!isTriggerSupported) {
+                    subtitleText = `${test.name} · unavailable in ${triggerMode} mode`;
+                  } else if (!isBackendSupported) {
+                    subtitleText = `${test.name} · requires dmabuf backend`;
+                  }
+
+                  return (
+                    <SelectableCard
+                      key={test.id}
+                      selected={isTestSelected(test)}
+                      onToggle={() => isSupported && onToggleTest(test.id)}
+                      disabled={!isSupported}
+                      title={test.id}
+                      subtitle={subtitleText}
+                      badges={
+                        <div className="test-card-badges">
+                          {test.tags?.map((tag) => {
+                            const def = TAG_DEFINITIONS.find((td) => td.id === tag);
+                            return (
+                              <span key={tag} className={`chip ${def?.class ?? "chip-default"}`}>
+                                {def?.label ?? tag}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      }
+                      layout="horizontal"
+                      cornerAction={
+                        <InfoPopover
+                          content={
+                            <div>
+                              <p>{test.description}</p>
+                              <p className="info-popover-meta">
+                                Tags: {test.tags?.join(", ") || "none"}
+                              </p>
+                            </div>
+                          }
+                        />
+                      }
+                    />
+                  );
+                })}
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

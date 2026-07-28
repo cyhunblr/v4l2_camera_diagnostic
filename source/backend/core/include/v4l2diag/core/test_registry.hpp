@@ -14,16 +14,12 @@ struct TestDefinition {
   std::string description;
   bool uses_trigger = false;
   bool requires_dmabuf = false;
-  bool long_running = false;
-  bool experimental = false;
-  bool risky = false;
-  bool implemented_in_core = false;
+  std::vector<std::string> tags;
   unsigned trigger_mode_mask = 0x07;
 };
 
 std::vector<TestDefinition> built_in_tests();
-std::vector<TestDefinition> select_tests(const std::vector<std::string> &selectors, bool include_long_tests,
-                                         bool include_experimental_tests);
+std::vector<TestDefinition> select_tests(const std::vector<std::string> &selectors);
 bool find_test_definition(const std::string &id, TestDefinition *definition);
 bool supports_trigger_mode(const TestDefinition &test, TriggerMode mode);
 

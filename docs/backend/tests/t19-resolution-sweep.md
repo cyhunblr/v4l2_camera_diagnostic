@@ -3,6 +3,7 @@
 **Layer:** 5 — Latency  
 **Category:** format  
 **Trigger modes:** Hardware | Software | FreeRun  
+**Tags:** `benchmark`  
 
 ## Purpose
 

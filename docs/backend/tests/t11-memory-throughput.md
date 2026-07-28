@@ -3,6 +3,7 @@
 **Layer:** 3 — Buffer & memory  
 **Category:** memory  
 **Trigger modes:** Hardware | Software | FreeRun  
+**Tags:** `benchmark`  
 
 ## Purpose
 

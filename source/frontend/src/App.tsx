@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
 import { getInitialTheme, applyTheme, ThemeMode } from "./theme";
 import { useRunPolling } from "./hooks/useRunPolling";
@@ -14,9 +14,18 @@ import { ThresholdConfigPage } from "./pages/ThresholdConfigPage";
 import { ReportFormatsPage } from "./pages/ReportFormatsPage";
 import { LiveOutputPage } from "./pages/LiveOutputPage";
 import { ResultsPage } from "./pages/ResultsPage";
-import { CameraAssignment, Device, PageId, Profile, TestDefinition, TestSummary, TriggerMode } from "./types";
+import {
+  CameraAssignment,
+  Device,
+  PageId,
+  Profile,
+  TestDefinition,
+  TestSummary,
+  TriggerMode,
+  getTestLayerName
+} from "./types";
 
-const GROUP_SELECTORS = ["all", "implemented", "stable"];
+
 
 type ToastState = {
   message: string;
@@ -37,8 +46,6 @@ export default function App() {
   const [backends, setBackends] = useState(["mmap"]);
   const [selectedTests, setSelectedTests] = useState(["implemented"]);
   const [reports, setReports] = useState(["json", "html"]);
-  const [includeLong, setIncludeLong] = useState(false);
-  const [includeExperimental, setIncludeExperimental] = useState(false);
   const [selectedThresholdId, setSelectedThresholdId] = useState("default");
   const [severityFilter, setSeverityFilter] = useState("all");
   const [autoScroll, setAutoScroll] = useState(true);
@@ -70,7 +77,7 @@ export default function App() {
     setToast({ message, tone: "success" });
   }
 
-  async function loadBasics() {
+  const loadBasics = useCallback(async () => {
     try {
       const [deviceRes, profileRes, testRes] = await Promise.all([
         api.getDevices(),
@@ -91,12 +98,11 @@ export default function App() {
     } catch {
       showError("Cannot connect to diagnostic server. Is it running?");
     }
-  }
+  }, []);
 
   useEffect(() => {
     loadBasics();
-    // Load once on mount; loadBasics is stable enough for this purpose.
-  }, []);
+  }, [loadBasics]);
 
   useEffect(() => {
     if (singleProfileId && !profiles.some((profile) => profile.id === singleProfileId)) {
@@ -152,10 +158,11 @@ export default function App() {
   const groupedTests = useMemo(() => {
     const groups = new Map<string, TestDefinition[]>();
     for (const test of tests) {
-      if (!groups.has(test.category)) {
-        groups.set(test.category, []);
+      const layerName = getTestLayerName(test.id);
+      if (!groups.has(layerName)) {
+        groups.set(layerName, []);
       }
-      groups.get(test.category)!.push(test);
+      groups.get(layerName)!.push(test);
     }
     return [...groups.entries()];
   }, [tests]);
@@ -185,29 +192,15 @@ export default function App() {
     setter(values.includes(value) ? values.filter((item) => item !== value) : [...values, value]);
   }
 
-  /* Returns true when a test is covered by the current selector state. */
+  /* Returns true when a test is selected. */
   function isTestSelected(test: TestDefinition): boolean {
     if (selectedTests.includes("all")) return true;
-    if (selectedTests.includes("implemented") && test.implemented_in_core) return true;
-    if (selectedTests.includes("stable") && !test.risky) return true;
     return selectedTests.includes(test.id);
   }
 
-  /* Toggle an individual test. Drops group selectors and works with explicit IDs. */
+  /* Toggle an individual test. */
   function toggleTest(testId: string) {
-    const hasGroup = selectedTests.some((s) => GROUP_SELECTORS.includes(s));
-    if (hasGroup) {
-      // Expand the group to explicit IDs first, then toggle.
-      const expanded = tests.map((t) => t.id).filter((id) => isTestSelected(tests.find((t) => t.id === id)!));
-      const next = expanded.includes(testId) ? expanded.filter((id) => id !== testId) : [...expanded, testId];
-      setSelectedTests(next);
-    } else {
-      toggleListValue(testId, selectedTests, setSelectedTests);
-    }
-  }
-
-  function setTestGroupSelector(selector: string) {
-    setSelectedTests([selector]);
+    toggleListValue(testId, selectedTests, setSelectedTests);
   }
 
   function toggleTheme() {
@@ -242,10 +235,8 @@ export default function App() {
           master,
           slaves,
           memory_backends: backends,
-          test_selectors: selectedTests.length ? selectedTests : ["implemented"],
+          test_selectors: selectedTests.length ? selectedTests : ["stable"],
           report_formats: reports,
-          include_long_tests: includeLong,
-          include_experimental_tests: includeExperimental,
           threshold_config_id: selectedThresholdId
         });
         setActivePage("output");
@@ -323,14 +314,11 @@ export default function App() {
         {activePage === "tests" && (
           <TestSelectionPage
             groupedTests={groupedTests}
-            selectedTests={selectedTests}
+
+            setSelectedTests={setSelectedTests}
+            tests={tests}
             isTestSelected={isTestSelected}
-            onSetGroupSelector={setTestGroupSelector}
             onToggleTest={toggleTest}
-            includeLong={includeLong}
-            onIncludeLongChange={setIncludeLong}
-            includeExperimental={includeExperimental}
-            onIncludeExperimentalChange={setIncludeExperimental}
             triggerMode={triggerMode}
             backends={backends}
             onToggleBackend={(backend) => toggleListValue(backend, backends, setBackends)}
@@ -341,6 +329,7 @@ export default function App() {
           <ThresholdConfigPage
             selectedThresholdId={selectedThresholdId}
             onSelectedChange={setSelectedThresholdId}
+            selectedTests={selectedTests}
             onError={showError}
           />
         )}

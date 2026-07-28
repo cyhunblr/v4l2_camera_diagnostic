@@ -3,6 +3,7 @@
 **Layer:** 5 — Latency  
 **Category:** trigger  
 **Trigger modes:** Hardware  
+**Tags:** `device-specific`  
 
 ## Purpose
 

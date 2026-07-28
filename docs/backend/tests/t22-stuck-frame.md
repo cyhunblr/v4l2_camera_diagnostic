@@ -3,6 +3,7 @@
 **Layer:** 6 — Integrity  
 **Category:** quality  
 **Trigger modes:** Hardware | Software | FreeRun  
+**Tags:** `stable`  
 
 ## Purpose
 

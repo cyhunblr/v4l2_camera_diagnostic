@@ -43,8 +43,7 @@ void print_usage() {
       << "  --output-dir DIR           Report output directory. Default: reports.\n"
       << "  --thresholds ID            Verdict threshold config id. Default: default.\n"
       << "  --run-mode MODE            sequential or parallel. Default: sequential.\n"
-      << "  --include-long             Include long-running tests when selecting all/stable/categories.\n"
-      << "  --include-experimental     Include experimental tests when selecting all/categories.\n";
+      << "  --run-mode MODE            sequential or parallel. Default: sequential.\n";
 }
 
 std::string arg_value(int *i, int argc, char **argv) {
@@ -191,15 +190,17 @@ int command_tests(int argc, char **argv) {
 
   const auto tests = built_in_tests();
   for (const auto &test : tests) {
-    if (!show_all && test.experimental) {
+    if (!show_all && std::find(test.tags.begin(), test.tags.end(), "stress") != test.tags.end()) {
       continue;
     }
     std::cout << test.id << " [" << test.category << "]";
-    std::cout << " implemented=" << (test.implemented_in_core ? "yes" : "no");
     std::cout << " trigger=" << (test.uses_trigger ? "yes" : "no");
     std::cout << " dmabuf=" << (test.requires_dmabuf ? "yes" : "no");
-    std::cout << " long=" << (test.long_running ? "yes" : "no");
-    std::cout << " risky=" << (test.risky ? "yes" : "no") << "\n";
+    std::cout << " tags=[";
+    for (size_t j = 0; j < test.tags.size(); ++j) {
+      std::cout << test.tags[j] << (j + 1 < test.tags.size() ? "," : "");
+    }
+    std::cout << "]\n";
     std::cout << "  " << test.name << "\n";
     std::cout << "  " << test.description << "\n";
   }
@@ -333,10 +334,6 @@ int command_run(int argc, char **argv) {
         std::cerr << "Unknown run mode.\n";
         return 2;
       }
-    } else if (arg == "--include-long") {
-      config.include_long_tests = true;
-    } else if (arg == "--include-experimental") {
-      config.include_experimental_tests = true;
     } else {
       std::cerr << "Unknown option: " << arg << "\n";
       return 2;

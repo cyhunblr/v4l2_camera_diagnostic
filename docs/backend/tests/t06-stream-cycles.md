@@ -3,11 +3,11 @@
 **Layer:** 2 — State-machine correctness  
 **Category:** stream-state  
 **Trigger modes:** Hardware | Software | FreeRun  
-**Flags:** experimental, risky — **not part of the default sweep**
+**Tags:** `stress`  
 
-> **Opt-in only.** Run it with `--include-experimental` on the CLI, or the "include experimental" checkbox in the web UI. Naming it directly (`--tests t06-stream-cycles`) also runs it, since an exact id is an explicit opt-in.
+> **Stress Test.** Run it by activating the `Stress` tag filter in the web UI, or specifying `--tests stress` / `--tests t06-stream-cycles` on the CLI.
 >
-> The test is gated because cycling STREAMON hard enough to be meaningful is destructive on hardware where several sensors share a deserializer and fsync source: every STREAMON re-initialises the whole camera group over I2C. In the field this has wedged the capture channel badly enough to reset the board. The guards described below keep that from running away, but the safest default is not to run it at all.
+> The test is tagged as `stress` because cycling STREAMON hard enough to be meaningful is destructive on hardware where several sensors share a deserializer and fsync source: every STREAMON re-initialises the whole camera group over I2C. In the field this has wedged the capture channel badly enough to reset the board. The guards described below keep that from running away, but the safest default is not to run it at all.
 
 ## Purpose
 

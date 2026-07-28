@@ -109,8 +109,6 @@ struct RunConfig {
   // user config in the threshold directory. See ThresholdRegistry.
   std::string threshold_config_id = "default";
   RunMode run_mode = RunMode::Sequential;
-  bool include_long_tests = false;
-  bool include_experimental_tests = false;
 
   // Optional callback invoked after each test completes. Useful for streaming
   // per-test progress to a web client without waiting for the full run.

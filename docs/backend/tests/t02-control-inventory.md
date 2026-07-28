@@ -3,6 +3,7 @@
 **Layer:** 1 — Discovery  
 **Category:** discovery  
 **Trigger modes:** Hardware | Software | FreeRun  
+**Tags:** `stable`  
 
 ## Purpose
 

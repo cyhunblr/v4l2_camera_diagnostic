@@ -3,6 +3,7 @@
 **Layer:** 5 — Latency  
 **Category:** io-mode  
 **Trigger modes:** Hardware | Software | FreeRun  
+**Tags:** `device-specific`  
 
 ## Purpose
 

@@ -3,6 +3,7 @@
 **Layer:** 7 — Stability  
 **Category:** stability  
 **Trigger modes:** Hardware | Software | FreeRun  
+**Tags:** `stable`  
 
 ## Purpose
 

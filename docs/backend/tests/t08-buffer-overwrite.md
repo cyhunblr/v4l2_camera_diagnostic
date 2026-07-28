@@ -3,6 +3,7 @@
 **Layer:** 3 — Buffer & memory  
 **Category:** buffering  
 **Trigger modes:** Hardware | Software  
+**Tags:** `stress`  
 
 ## Purpose
 

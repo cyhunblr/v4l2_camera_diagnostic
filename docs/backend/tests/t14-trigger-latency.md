@@ -3,6 +3,7 @@
 **Layer:** 5 — Latency  
 **Category:** latency  
 **Trigger modes:** Hardware | Software  
+**Tags:** `benchmark`  
 
 ## Purpose
 

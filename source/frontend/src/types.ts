@@ -95,13 +95,10 @@ export type TestDefinition = {
   name: string;
   category: string;
   description: string;
-  implemented_in_core: boolean;
-  long_running: boolean;
-  /** Gated behind "include experimental"; `risky` alone does not gate a test. */
-  experimental: boolean;
-  risky: boolean;
   uses_trigger: boolean;
+  requires_dmabuf?: boolean;
   supported_trigger_modes: TriggerMode[];
+  tags: string[];
 };
 
 export type LogLine = {
@@ -160,8 +157,6 @@ export type StartRunPayload = {
   memory_backends: string[];
   test_selectors: string[];
   report_formats: string[];
-  include_long_tests: boolean;
-  include_experimental_tests: boolean;
   threshold_config_id?: string;
 };
 
@@ -174,3 +169,17 @@ export type ThresholdConfig = {
   values: Record<string, Record<string, number>>;
   params: Record<string, Record<string, number>>;
 };
+
+export function getTestLayerName(testId: string): string {
+  const match = testId.match(/^t(\d{2})/);
+  if (!match) return "Other Diagnostics";
+  const num = parseInt(match[1], 10);
+  if (num >= 1 && num <= 2) return "Layer 1 — Discovery";
+  if (num >= 3 && num <= 6) return "Layer 2 — State-machine correctness";
+  if (num >= 7 && num <= 12) return "Layer 3 — Buffer & memory";
+  if (num === 13) return "Layer 4 — Polling / timeout";
+  if (num >= 14 && num <= 19) return "Layer 5 — Latency";
+  if (num >= 20 && num <= 22) return "Layer 6 — Integrity";
+  if (num >= 23 && num <= 26) return "Layer 7 — Stability";
+  return "Other Diagnostics";
+}

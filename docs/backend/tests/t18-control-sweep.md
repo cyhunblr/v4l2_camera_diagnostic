@@ -3,6 +3,7 @@
 **Layer:** 5 — Latency  
 **Category:** controls  
 **Trigger modes:** Hardware | Software | FreeRun  
+**Tags:** `stress`, `benchmark`  
 
 ## Purpose
 

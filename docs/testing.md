@@ -179,64 +179,64 @@ Tests are grouped into 7 logical layers that run in dependency order:
 
 #### Layer 1 — Discovery
 
-| ID | Name | Category | Notes |
-| --- | --- | --- | --- |
-| t01-device-compliance | V4L2 device compliance | discovery | no trigger required; includes memory backend probe |
-| t02-control-inventory | V4L2 control inventory | discovery | no trigger required |
+| ID | Name | Category | Tags | Notes |
+| --- | --- | --- | --- | --- |
+| t01-device-compliance | V4L2 device compliance | discovery | `stable` | no trigger required; includes memory backend probe |
+| t02-control-inventory | V4L2 control inventory | discovery | `stable` | no trigger required |
 
 #### Layer 2 — State-machine correctness
 
-| ID | Name | Category | Notes |
-| --- | --- | --- | --- |
-| t03-pipeline-ready | Pipeline readiness after STREAMON | stream-state | times the first frame without `poll()`; also reports how long STREAMON itself takes |
-| t04-no-streamon | Frame capture without STREAMON | stream-state | |
-| t05-pollerr-handling | POLLERR/POLLHUP handling | stream-state | experimental, risky |
-| t06-stream-cycles | STREAMON/STREAMOFF cycle reliability | stream-state | **experimental, risky** — opt-in only; can wedge hardware whose sensors share a deserializer |
+| ID | Name | Category | Tags | Notes |
+| --- | --- | --- | --- | --- |
+| t03-pipeline-ready | Pipeline readiness after STREAMON | stream-state | `stable` | times the first frame without `poll()`; also reports how long STREAMON itself takes |
+| t04-no-streamon | Frame capture without STREAMON | stream-state | `stable` | |
+| t05-pollerr-handling | POLLERR/POLLHUP handling | stream-state | `stress` | checks DQBUF rejection after STREAMOFF |
+| t06-stream-cycles | STREAMON/STREAMOFF cycle reliability | stream-state | `stress` | rapid stream setup/teardown cycles |
 
 #### Layer 3 — Buffer & memory
 
-| ID | Name | Category | Notes |
-| --- | --- | --- | --- |
-| t07-multi-buffer | Multi-buffer configurations | buffering | |
-| t08-buffer-overwrite | Buffer overwrite behavior | buffering | risky; no free-run (Hardware/Software only) |
-| t09-buffer-recycling | Buffer recycling timing | buffering | |
-| t10-buffer-flags | V4L2 buffer flag analysis | metadata | |
-| t11-memory-throughput | Memory access throughput | memory | no trigger required |
-| t12-dmabuf-cache-sync | DMA_BUF_IOCTL_SYNC cache coherency | dmabuf | **requires DMABUF backend** |
+| ID | Name | Category | Tags | Notes |
+| --- | --- | --- | --- | --- |
+| t07-multi-buffer | Multi-buffer configurations | buffering | `stable` | |
+| t08-buffer-overwrite | Buffer overwrite behavior | buffering | `stress` | no free-run (Hardware/Software only) |
+| t09-buffer-recycling | Buffer recycling timing | buffering | `stable` | |
+| t10-buffer-flags | V4L2 buffer flag analysis | metadata | `stable` | |
+| t11-memory-throughput | Memory access throughput | memory | `benchmark` | no trigger required |
+| t12-dmabuf-cache-sync | DMA_BUF_IOCTL_SYNC cache coherency | dmabuf | `device-specific` | **requires DMABUF backend** |
 
 #### Layer 4 — Polling / timeout
 
-| ID | Name | Category | Notes |
-| --- | --- | --- | --- |
-| t13-poll-timeout-cliff | Poll timeout cliff finder | polling | adaptive binary search + stability tracking |
+| ID | Name | Category | Tags | Notes |
+| --- | --- | --- | --- | --- |
+| t13-poll-timeout-cliff | Poll timeout cliff finder | polling | `stable` | adaptive binary search + stability tracking |
 
 #### Layer 5 — Latency
 
-| ID | Name | Category | Notes |
-| --- | --- | --- | --- |
-| t14-trigger-latency | Trigger to DQBUF latency | latency | no free-run (Hardware/Software only) |
-| t15-nonblock-vs-block | NON_BLOCK vs BLOCK comparison | io-mode | |
-| t16-gpio-pulse-width | GPIO pulse width characterization | trigger | Hardware trigger only |
-| t17-format-comparison | Format comparison | format | |
-| t18-control-sweep | Control parameter sweep | controls | experimental, risky |
-| t19-resolution-sweep | Resolution sweep | format | **not yet implemented** |
+| ID | Name | Category | Tags | Notes |
+| --- | --- | --- | --- | --- |
+| t14-trigger-latency | Trigger to DQBUF latency | latency | `benchmark` | no free-run (Hardware/Software only) |
+| t15-nonblock-vs-block | NON_BLOCK vs BLOCK comparison | io-mode | `device-specific` | |
+| t16-gpio-pulse-width | GPIO pulse width characterization | trigger | `device-specific` | Hardware trigger only |
+| t17-format-comparison | Format comparison | format | `benchmark` | |
+| t18-control-sweep | Control parameter sweep | controls | `stress`, `benchmark` | sweeps writable V4L2 controls |
+| t19-resolution-sweep | Resolution sweep | format | `benchmark` | sweeps supported resolutions |
 
 #### Layer 6 — Integrity
 
-| ID | Name | Category | Notes |
-| --- | --- | --- | --- |
-| t20-sequence-continuity | Sequence number continuity | sequence | |
-| t21-timestamp-monotonicity | Timestamp monotonicity | metadata | |
-| t22-stuck-frame | Stuck frame detection | quality | |
+| ID | Name | Category | Tags | Notes |
+| --- | --- | --- | --- | --- |
+| t20-sequence-continuity | Sequence number continuity | sequence | `stable` | |
+| t21-timestamp-monotonicity | Timestamp monotonicity | metadata | `stable` | |
+| t22-stuck-frame | Stuck frame detection | quality | `stable` | |
 
 #### Layer 7 — Stability
 
-| ID | Name | Category | Notes |
-| --- | --- | --- | --- |
-| t23-sustained-capture | Sustained capture stability | stability | long-running (60 s) |
-| t24-latency-under-load | Latency under CPU load | stability | |
-| t25-multi-camera | Multi-camera contention | stability | long-running |
-| t26-cold-start | Cold-start warm-up cost | stability | |
+| ID | Name | Category | Tags | Notes |
+| --- | --- | --- | --- | --- |
+| t23-sustained-capture | Sustained capture stability | stability | `long-running` | long-running capture session |
+| t24-latency-under-load | Latency under CPU load | stability | `benchmark` | latency while CPU cores saturated |
+| t25-multi-camera | Multi-camera contention | stability | `long-running` | cross-device jitter under concurrent capture |
+| t26-cold-start | Cold-start warm-up cost | stability | `stable` | frames to steady-state |
 
 Tests marked **not yet implemented** report `Skipped` at runtime.
 A test being reported as `Skipped` is always one of the following expected
