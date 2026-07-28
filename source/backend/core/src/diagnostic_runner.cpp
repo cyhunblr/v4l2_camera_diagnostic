@@ -100,17 +100,6 @@ static void emit_data(const LogFn &log, const std::string &camera, const std::st
   emit(log, camera, test, msg, "info", "data");
 }
 
-// Format a stats block as a multi-line string matching legacy output style.
-static std::string format_stats(const std::string &label, const Stats &s) {
-  char buf[512];
-  snprintf(buf, sizeof(buf),
-           "%s: n=%zu mean=%.3f stddev=%.3f median=%.3f\n"
-           "  min=%.3f max=%.3f p5=%.3f p95=%.3f p99=%.3f\n"
-           "  jitter=%.3f outliers=%zu",
-           label.c_str(), s.count, s.mean, s.stddev, s.median, s.min, s.max, s.p5, s.p95, s.p99, s.jitter, s.outliers);
-  return buf;
-}
-
 // Format a histogram as a multi-line ASCII bar chart.
 static std::string format_histogram(const std::string &label, const std::vector<double> &data, int bins = 10) {
   if (data.empty())
@@ -540,10 +529,6 @@ void run_trigger_latency(const std::string &camera_path, MemoryBackend backend, 
   }
   const Stats sl = compute_stats(latencies);
   push_stats_metrics(r.metrics, "latency", sl);
-  emit_data(log, camera_path, "t14",
-            format_stats("GPIO\xe2\x86\x92"
-                         "DQBUF latency (ms)",
-                         sl));
   emit_data(log, camera_path, "t14", format_histogram("Latency distribution", latencies, 10));
   r.status = TestStatus::Pass;
   r.summary = "Captured " + std::to_string(latencies.size()) + "/" + std::to_string(SAMPLES) +

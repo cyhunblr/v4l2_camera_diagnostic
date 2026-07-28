@@ -488,8 +488,6 @@ export default function App() {
             runStatus={runStatus}
             elapsedSec={elapsedSec}
             secSinceLastLog={secSinceLastLog}
-            actionInProgress={actionInProgress}
-            onRequestStop={requestStop}
             outputRef={outputRef}
           />
         )}

@@ -1,5 +1,5 @@
 import { RefObject } from "react";
-import { Square, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { LogLine } from "../types";
 
 function formatLogTimestamp(utcString: string | undefined): string {
@@ -9,6 +9,10 @@ function formatLogTimestamp(utcString: string | undefined): string {
     return match[1].replace(/Z$/, "");
   }
   return utcString;
+}
+
+function shouldShowLogLine(line: LogLine): boolean {
+  return !(line.log_type === "data" && line.test === "t14" && line.message.startsWith("GPIO→DQBUF latency"));
 }
 
 type Props = {
@@ -23,8 +27,6 @@ type Props = {
   runStatus: string;
   elapsedSec: number;
   secSinceLastLog: number;
-  actionInProgress: boolean;
-  onRequestStop: () => void;
   outputRef: RefObject<HTMLDivElement>;
 };
 
@@ -40,10 +42,10 @@ export function LiveOutputPage({
   runStatus,
   elapsedSec,
   secSinceLastLog,
-  actionInProgress,
-  onRequestStop,
   outputRef
 }: Props) {
+  const displayedLogs = visibleLogs.filter(shouldShowLogLine);
+
   return (
     <div className="output-view">
       <header className="topbar">
@@ -73,53 +75,49 @@ export function LiveOutputPage({
               <option value="error">Error</option>
             </select>
           </label>
-          <label className="toggle-control">
-            <input type="checkbox" checked={autoScroll} onChange={(e) => onAutoScrollChange(e.target.checked)} />
-            <span>Auto-scroll</span>
-          </label>
+          <button
+            type="button"
+            className={`output-toggle-button ${autoScroll ? "selected" : ""}`}
+            onClick={() => onAutoScrollChange(!autoScroll)}
+            aria-pressed={autoScroll}
+          >
+            Auto-scroll
+          </button>
           <button className="icon-button" onClick={onClearLogs} title="Clear logs" aria-label="Clear logs">
             <Trash2 size={16} />
           </button>
-          {isRunning && (
-            <button className="stop-pill" onClick={onRequestStop} disabled={actionInProgress}>
-              <Square size={14} /> Stop
-            </button>
-          )}
         </div>
       </header>
       <div className="terminal-container full-height">
         <div className="terminal-header">
           <span className="col-time">TIME</span>
           <span className="col-level">LEVEL</span>
-          <span className="col-source">SOURCE</span>
           <span className="col-msg">MESSAGE</span>
         </div>
         <div className="terminal-output" ref={outputRef}>
-          {visibleLogs.length === 0 && (
+          {displayedLogs.length === 0 && (
             <div className="log-line muted">
               {isRunning
                 ? "Running diagnostic, awaiting first output..."
                 : "No log output yet. Start a diagnostic run from the sidebar."}
             </div>
           )}
-          {visibleLogs.map((line) => (
+          {displayedLogs.map((line) => (
             <div className={`log-line ${line.severity} ${line.log_type || "progress"}`} key={line.offset}>
               {line.log_type === "section_start" ? (
                 <>
                   <span className="section-ts" title={line.timestamp_utc}>{formatLogTimestamp(line.timestamp_utc)}</span>
-                  <code className="section-camera">{line.camera || "system"}</code>
                   <p className="section-title">{line.message}</p>
+                  <code className="section-camera">{line.camera || "system"}</code>
                 </>
               ) : line.log_type === "data" ? (
                 <>
-                  <code className="data-camera">{line.camera || "system"}</code>
                   <pre className="data-block">{line.message}</pre>
                 </>
               ) : (
                 <>
                   <span title={line.timestamp_utc}>{formatLogTimestamp(line.timestamp_utc)}</span>
                   <strong>{line.severity}</strong>
-                  <code>{line.camera || "system"}</code>
                   <p>{line.message}</p>
                 </>
               )}

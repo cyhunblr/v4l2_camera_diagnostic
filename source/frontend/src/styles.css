@@ -1033,7 +1033,7 @@ summary span {
 }
 
 .output-filter-control,
-.toggle-control {
+.output-toggle-button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1043,7 +1043,7 @@ summary span {
 }
 
 .output-filter-control span,
-.toggle-control span {
+.output-toggle-button {
   white-space: nowrap;
 }
 
@@ -1051,17 +1051,18 @@ summary span {
   min-width: 112px;
 }
 
-.toggle-control {
-  padding: 0 10px;
+.output-toggle-button {
+  padding: 0 12px;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   background: var(--bg-elevated);
+  cursor: pointer;
 }
 
-.toggle-control input {
-  width: 15px;
-  height: 15px;
-  accent-color: var(--accent);
+.output-toggle-button.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-elevated));
+  color: var(--accent);
 }
 
 /* Terminal Output Container & Sticky Header */
@@ -1077,7 +1078,7 @@ summary span {
 
 .terminal-header {
   display: grid;
-  grid-template-columns: 110px 70px 140px 1fr;
+  grid-template-columns: 110px 70px 1fr;
   gap: 10px;
   padding: 10px 14px;
   background: var(--bg-elevated);
@@ -1101,7 +1102,7 @@ summary span {
 
 .log-line {
   display: grid;
-  grid-template-columns: 110px 70px 140px 1fr;
+  grid-template-columns: 110px 70px 1fr;
   gap: 10px;
   align-items: start;
   padding: 5px 0;
@@ -1138,7 +1139,7 @@ summary span {
 
 /* Section start — test header bar */
 .log-line.section_start {
-  grid-template-columns: 120px auto 1fr;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 15%, transparent), transparent);
   border-left: 3px solid var(--accent);
   border-bottom: none;
@@ -1172,13 +1173,6 @@ summary span {
   padding: 8px 12px;
   border-bottom: none;
   margin-left: 16px;
-}
-
-.log-line.data .data-camera {
-  display: block;
-  color: var(--info);
-  font-size: 11px;
-  margin-bottom: 4px;
 }
 
 .log-line.data .data-block {
@@ -1548,30 +1542,6 @@ summary span {
 }
 
 .run-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Stop pill in output view */
-.stop-pill {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  background: var(--error);
-  color: #ffffff;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.stop-pill:hover {
-  filter: brightness(0.9);
-}
-
-.stop-pill:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
