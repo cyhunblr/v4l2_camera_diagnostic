@@ -1,4 +1,4 @@
-# t14 — NON_BLOCK vs BLOCK Comparison
+# t15 — NON_BLOCK vs BLOCK Comparison
 
 **Layer:** 5 — Latency  
 **Category:** io-mode  
@@ -25,9 +25,9 @@ Compares non-blocking (O_NONBLOCK + spin-poll) and blocking (O_NONBLOCK cleared 
 ## Implementation
 
 Function: `run_nonblock_vs_block` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t14-nonblock-vs-block` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t15-nonblock-vs-block` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t14-nonblock-vs-block.md`
+> The source file contains `// Docs: docs/backend/tests/t15-nonblock-vs-block.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

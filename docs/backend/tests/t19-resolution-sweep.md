@@ -1,4 +1,4 @@
-# t18 — Resolution Sweep
+# t19 — Resolution Sweep
 
 **Layer:** 5 — Latency  
 **Category:** format  
@@ -25,9 +25,9 @@ Enumerates all supported frame sizes (resolutions) for the current pixel format 
 ## Implementation
 
 Function: `run_resolution_sweep` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t18-resolution-sweep` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t19-resolution-sweep` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t18-resolution-sweep.md`
+> The source file contains `// Docs: docs/backend/tests/t19-resolution-sweep.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

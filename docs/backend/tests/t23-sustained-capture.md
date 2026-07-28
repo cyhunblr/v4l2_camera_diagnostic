@@ -1,4 +1,4 @@
-# t22 — Sustained Capture
+# t23 — Sustained Capture
 
 **Layer:** 7 — Stability  
 **Category:** stability  
@@ -23,9 +23,9 @@ Measures long-duration capture reliability by continuously acquiring frames over
 ## Implementation
 
 Function: `run_sustained_capture` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t22-sustained-capture` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t23-sustained-capture` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t22-sustained-capture.md`
+> The source file contains `// Docs: docs/backend/tests/t23-sustained-capture.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

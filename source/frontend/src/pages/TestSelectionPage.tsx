@@ -1,4 +1,4 @@
-import { ListChecks } from "lucide-react";
+import { ListChecks, HardDrive, Sliders, CheckCircle2 } from "lucide-react";
 import { TestDefinition, TriggerMode } from "../types";
 import { SelectableCard } from "../components/SelectableCard";
 import { InfoPopover } from "../components/InfoPopover";
@@ -35,26 +35,36 @@ export function TestSelectionPage({
   backends,
   onToggleBackend
 }: Props) {
+  // Count total supported & selected tests
+  const allTests = groupedTests.flatMap(([, items]) => items);
+  const selectedCount = allTests.filter((t) => isTestSelected(t)).length;
+
   return (
-    <div className="page">
+    <div className="page test-selection-page">
       <header className="topbar">
         <div>
           <p className="eyebrow">Configure</p>
           <h2>Test Selection</h2>
         </div>
+        <div className="test-summary-pill">
+          <CheckCircle2 size={15} />
+          <span><strong>{selectedCount}</strong> of <strong>{allTests.length}</strong> tests active</span>
+        </div>
       </header>
 
-      <div className="panel">
+      <div className="panel backend-panel">
         <div className="panel-title">
-          <h3>Memory Backend</h3>
+          <HardDrive size={18} />
+          <h3>Memory Backend &amp; Execution Strategy</h3>
         </div>
         <div className="choice-row compact">
           {BACKEND_OPTIONS.map((backend) => (
             <button
               key={backend}
-              className={backends.includes(backend) ? "selected" : ""}
+              className={`choice-btn ${backends.includes(backend) ? "selected" : ""}`}
               onClick={() => onToggleBackend(backend)}
             >
+              <span className="choice-dot" />
               {backend}
             </button>
           ))}
@@ -64,71 +74,99 @@ export function TestSelectionPage({
       <div className="panel">
         <div className="panel-title">
           <ListChecks size={18} />
-          <h3>Tests</h3>
+          <h3>Test Preset &amp; Filters</h3>
         </div>
         <div className="test-groups">
-          <div className="choice-row compact">
-            {GROUP_SELECTORS.map((selector) => (
-              <button
-                key={selector}
-                className={selectedTests.includes(selector) ? "selected" : ""}
-                onClick={() => onSetGroupSelector(selector)}
-              >
-                {selector}
-              </button>
-            ))}
-          </div>
-          <div className="choice-row compact">
-            <label className="inline-checkbox">
-              <input type="checkbox" checked={includeLong} onChange={(e) => onIncludeLongChange(e.target.checked)} />
-              include long-running
-            </label>
-            <label className="inline-checkbox">
-              <input
-                type="checkbox"
-                checked={includeExperimental}
-                onChange={(e) => onIncludeExperimentalChange(e.target.checked)}
-              />
-              include experimental
-            </label>
-          </div>
-
-          {groupedTests.map(([category, items]) => (
-            <details key={category}>
-              <summary>{category} <span>{items.length}</span></summary>
-              <div className="card-grid horizontal-grid">
-                {items.map((test) => (
-                  <SelectableCard
-                    key={test.id}
-                    selected={isTestSelected(test)}
-                    onToggle={() => onToggleTest(test.id)}
-                    disabled={!test.supported_trigger_modes?.includes(triggerMode)}
-                    title={test.id}
-                    subtitle={!test.supported_trigger_modes?.includes(triggerMode)
-                      ? `${test.name} · unavailable in ${triggerMode}`
-                      : test.name}
-                    layout="horizontal"
-                    cornerAction={
-                      <InfoPopover
-                        content={
-                          <div>
-                            <p>{test.description}</p>
-                            <p className="info-popover-meta">
-                              {test.implemented_in_core ? "implemented" : "not implemented"} ·{" "}
-                              {test.long_running ? "long-running" : "quick"} ·{" "}
-                              {test.experimental ? "experimental" : test.risky ? "risky" : "stable"}
-                            </p>
-                          </div>
-                        }
-                      />
-                    }
-                  />
+          <div className="filter-toolbar">
+            <div className="preset-selector">
+              <span className="toolbar-label">Preset:</span>
+              <div className="segmented-control">
+                {GROUP_SELECTORS.map((selector) => (
+                  <button
+                    key={selector}
+                    className={selectedTests.includes(selector) ? "selected" : ""}
+                    onClick={() => onSetGroupSelector(selector)}
+                  >
+                    {selector}
+                  </button>
                 ))}
               </div>
-            </details>
-          ))}
+            </div>
+
+            <div className="filter-toggles">
+              <button
+                type="button"
+                className={`toggle-switch-pill ${includeLong ? "active" : ""}`}
+                onClick={() => onIncludeLongChange(!includeLong)}
+              >
+                <Sliders size={13} />
+                <span>Long-running</span>
+                <span className="switch-track"><span className="switch-thumb" /></span>
+              </button>
+
+              <button
+                type="button"
+                className={`toggle-switch-pill ${includeExperimental ? "active" : ""}`}
+                onClick={() => onIncludeExperimentalChange(!includeExperimental)}
+              >
+                <Sliders size={13} />
+                <span>Experimental</span>
+                <span className="switch-track"><span className="switch-thumb" /></span>
+              </button>
+            </div>
+          </div>
+
+          {groupedTests.map(([category, items]) => {
+            const categorySelectedCount = items.filter((t) => isTestSelected(t)).length;
+            return (
+              <details key={category} open className="test-category-group">
+                <summary className="category-summary">
+                  <span className="category-name">{category}</span>
+                  <span className="category-badge">{categorySelectedCount} / {items.length} selected</span>
+                </summary>
+                <div className="card-grid horizontal-grid">
+                  {items.map((test) => {
+                    const isSupported = test.supported_trigger_modes?.includes(triggerMode);
+                    return (
+                      <SelectableCard
+                        key={test.id}
+                        selected={isTestSelected(test)}
+                        onToggle={() => onToggleTest(test.id)}
+                        disabled={!isSupported}
+                        title={test.id}
+                        subtitle={!isSupported ? `${test.name} · unavailable in ${triggerMode}` : test.name}
+                        badges={
+                          <div className="test-card-badges">
+                            {test.implemented_in_core && <span className="chip chip-core">Core</span>}
+                            {test.experimental && <span className="chip chip-exp">Experimental</span>}
+                            {test.long_running && <span className="chip chip-long">Long</span>}
+                          </div>
+                        }
+                        layout="horizontal"
+                        cornerAction={
+                          <InfoPopover
+                            content={
+                              <div>
+                                <p>{test.description}</p>
+                                <p className="info-popover-meta">
+                                  {test.implemented_in_core ? "implemented" : "not implemented"} ·{" "}
+                                  {test.long_running ? "long-running" : "quick"} ·{" "}
+                                  {test.experimental ? "experimental" : test.risky ? "risky" : "stable"}
+                                </p>
+                              </div>
+                            }
+                          />
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              </details>
+            );
+          })}
         </div>
       </div>
     </div>
   );
 }
+

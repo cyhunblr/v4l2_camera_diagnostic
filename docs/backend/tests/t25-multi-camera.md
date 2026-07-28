@@ -1,4 +1,4 @@
-# t24 — Multi-Camera
+# t25 — Multi-Camera
 
 **Layer:** 7 — Stability  
 **Category:** stability  
@@ -11,7 +11,7 @@ Evaluates the system's ability to capture frames from multiple cameras simultane
 ## How It Works
 
 1. **Precondition check:** requires `config.cameras.size() > 1`. If only one camera is configured, the test is skipped.
-2. **Run-once guard:** the test opens every configured camera itself, so only the first camera/group to reach `t24-multi-camera` in a given run executes it; any other dispatch (including concurrent ones under `RunMode::Parallel`) is skipped with a note that it already ran.
+2. **Run-once guard:** the test opens every configured camera itself, so only the first camera/group to reach `t25-multi-camera` in a given run executes it; any other dispatch (including concurrent ones under `RunMode::Parallel`) is skipped with a note that it already ran.
 3. Opens V4L2 sessions on **all** configured camera paths (2 buffers each).
 4. Warms up all sessions.
 5. For each of `sample_count` rounds:
@@ -24,9 +24,9 @@ Evaluates the system's ability to capture frames from multiple cameras simultane
 ## Implementation
 
 Function: `run_multi_camera` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t24-multi-camera` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t25-multi-camera` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t24-multi-camera.md`
+> The source file contains `// Docs: docs/backend/tests/t25-multi-camera.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

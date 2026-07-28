@@ -1,4 +1,4 @@
-# t06 — Multi-Buffer Configurations
+# t07 — Multi-Buffer Configurations
 
 **Layer:** 3 — Buffer & memory  
 **Category:** buffering  
@@ -20,9 +20,9 @@ Probes the driver's buffer allocation behavior by requesting 1 through 5 buffers
 ## Implementation
 
 Function: `run_multi_buffer` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t06-multi-buffer` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t07-multi-buffer` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t06-multi-buffer.md`
+> The source file contains `// Docs: docs/backend/tests/t07-multi-buffer.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

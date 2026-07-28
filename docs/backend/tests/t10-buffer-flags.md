@@ -1,4 +1,4 @@
-# t09 — V4L2 Buffer Flag Analysis
+# t10 — V4L2 Buffer Flag Analysis
 
 **Layer:** 3 — Buffer & memory  
 **Category:** metadata  
@@ -25,9 +25,9 @@ Collects and analyzes the V4L2 buffer flags reported on each dequeued frame over
 ## Implementation
 
 Function: `run_buffer_flags` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t09-buffer-flags` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t10-buffer-flags` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t09-buffer-flags.md`
+> The source file contains `// Docs: docs/backend/tests/t10-buffer-flags.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

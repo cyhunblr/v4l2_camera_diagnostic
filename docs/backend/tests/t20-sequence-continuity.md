@@ -1,4 +1,4 @@
-# t19 — Sequence Continuity
+# t20 — Sequence Continuity
 
 **Layer:** 6 — Integrity  
 **Category:** sequence  
@@ -23,9 +23,9 @@ Verifies that the V4L2 driver delivers frames with strictly incrementing sequenc
 ## Implementation
 
 Function: `run_sequence_continuity` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t19-sequence-continuity` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t20-sequence-continuity` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t19-sequence-continuity.md`
+> The source file contains `// Docs: docs/backend/tests/t20-sequence-continuity.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

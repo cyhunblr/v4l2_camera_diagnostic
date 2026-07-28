@@ -1,11 +1,11 @@
-# t05 — STREAMON/STREAMOFF Cycle Reliability
+# t06 — STREAMON/STREAMOFF Cycle Reliability
 
 **Layer:** 2 — State-machine correctness  
 **Category:** stream-state  
 **Trigger modes:** Hardware | Software | FreeRun  
 **Flags:** experimental, risky — **not part of the default sweep**
 
-> **Opt-in only.** Run it with `--include-experimental` on the CLI, or the "include experimental" checkbox in the web UI. Naming it directly (`--tests t05-stream-cycles`) also runs it, since an exact id is an explicit opt-in.
+> **Opt-in only.** Run it with `--include-experimental` on the CLI, or the "include experimental" checkbox in the web UI. Naming it directly (`--tests t06-stream-cycles`) also runs it, since an exact id is an explicit opt-in.
 >
 > The test is gated because cycling STREAMON hard enough to be meaningful is destructive on hardware where several sensors share a deserializer and fsync source: every STREAMON re-initialises the whole camera group over I2C. In the field this has wedged the capture channel badly enough to reset the board. The guards described below keep that from running away, but the safest default is not to run it at all.
 
@@ -16,7 +16,7 @@ Exercises repeated STREAMON/STREAMOFF cycles to detect resource leaks, race cond
 ## How It Works
 
 1. **Full cycles (20 iterations):** Each cycle opens the device, starts streaming with 2 buffers, warms up (3 frames), captures 5 frames, and closes. A cycle is counted as a failure if any step fails or fewer than 5 frames are captured. The first-frame latency from each cycle is recorded.
-2. **Rapid cycles (50 iterations):** Each cycle opens the device, starts streaming, warms up (1 frame, covering sensors that discard their first frame after STREAMON — see [t25](t25-cold-start.md)), captures a single frame, and closes with a settle delay between cycles. This stresses the open/close path.
+2. **Rapid cycles (50 iterations):** Each cycle opens the device, starts streaming, warms up (1 frame, covering sensors that discard their first frame after STREAMON — see [t26](t26-cold-start.md)), captures a single frame, and closes with a settle delay between cycles. This stresses the open/close path.
 3. Results are compared against thresholds for full failure count and rapid success percentage.
 
 > **Hardware-protection guard.**
@@ -40,9 +40,9 @@ Exercises repeated STREAMON/STREAMOFF cycles to detect resource leaks, race cond
 ## Implementation
 
 Function: `run_stream_cycles` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t05-stream-cycles` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t06-stream-cycles` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t05-stream-cycles.md`
+> The source file contains `// Docs: docs/backend/tests/t06-stream-cycles.md`
 > above the function as a back-reference to this document.
 
 ## Parameters
@@ -122,4 +122,4 @@ number actually attempted — an early stop must not flatter the score.
 | rapid_aborted / full_aborted = 1 | The camera group stopped coming back after STREAMON. On shared-deserializer hardware this is where a runaway loop can reset the board — treat it as a hardware/driver fault, not a tuning problem, and read the kernel log |
 | rapid_skipped = 1, streamon_ms_max in the seconds | Every STREAMON re-initialises a shared camera group. Not a tuning problem: raising `slow_start_ms` to force the rapid phase through risks the board. Investigate the sensor/deserializer driver instead |
 | first_frame_latency degrades over time | Memory fragmentation or DMA channel exhaustion |
-| All rapid cycles fail | Driver cannot start streaming without a longer settle period, or the sensor discards more than `rapid_warmup` frames after STREAMON — cross-check [t25](t25-cold-start.md) and raise `rapid_warmup` to match |
+| All rapid cycles fail | Driver cannot start streaming without a longer settle period, or the sensor discards more than `rapid_warmup` frames after STREAMON — cross-check [t26](t26-cold-start.md) and raise `rapid_warmup` to match |

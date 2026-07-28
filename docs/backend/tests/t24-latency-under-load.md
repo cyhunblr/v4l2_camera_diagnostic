@@ -1,4 +1,4 @@
-# t23 — Latency Under Load
+# t24 — Latency Under Load
 
 **Layer:** 7 — Stability  
 **Category:** stability  
@@ -27,9 +27,9 @@ Measures how CPU contention affects camera capture latency by comparing a baseli
 ## Implementation
 
 Function: `run_latency_under_load` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t23-latency-under-load` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t24-latency-under-load` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t23-latency-under-load.md`
+> The source file contains `// Docs: docs/backend/tests/t24-latency-under-load.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

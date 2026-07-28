@@ -1,4 +1,4 @@
-# t03 — Frame Capture Without STREAMON
+# t04 — Frame Capture Without STREAMON
 
 **Layer:** 2 — State-machine correctness  
 **Category:** stream-state  
@@ -19,9 +19,9 @@ Validates that the V4L2 driver correctly prevents frame delivery before `VIDIOC_
 ## Implementation
 
 Function: `run_no_streamon` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t03-no-streamon` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t04-no-streamon` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t03-no-streamon.md`
+> The source file contains `// Docs: docs/backend/tests/t04-no-streamon.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

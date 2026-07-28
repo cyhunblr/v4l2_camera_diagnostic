@@ -1,4 +1,4 @@
-# t10 — Memory Access Throughput
+# t11 — Memory Access Throughput
 
 **Layer:** 3 — Buffer & memory  
 **Category:** memory  
@@ -20,9 +20,9 @@ Benchmarks the raw memcpy throughput from device-mapped V4L2 buffers to user-spa
 ## Implementation
 
 Function: `run_memory_throughput` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t10-memory-throughput` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t11-memory-throughput` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t10-memory-throughput.md`
+> The source file contains `// Docs: docs/backend/tests/t11-memory-throughput.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

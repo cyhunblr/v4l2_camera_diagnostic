@@ -1,4 +1,4 @@
-# t08 — Buffer Recycling Timing
+# t09 — Buffer Recycling Timing
 
 **Layer:** 3 — Buffer & memory  
 **Category:** buffering  
@@ -24,9 +24,9 @@ Measures the driver's sensitivity to the delay between DQBUF (dequeue) and QBUF 
 ## Implementation
 
 Function: `run_buffer_recycling` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t08-buffer-recycling` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t09-buffer-recycling` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t08-buffer-recycling.md`
+> The source file contains `// Docs: docs/backend/tests/t09-buffer-recycling.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

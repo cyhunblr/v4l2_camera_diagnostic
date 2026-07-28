@@ -1,4 +1,4 @@
-# t13 — Trigger to DQBUF Latency
+# t14 — Trigger to DQBUF Latency
 
 **Layer:** 5 — Latency  
 **Category:** latency  
@@ -23,9 +23,9 @@ Measures the end-to-end latency from trigger signal emission to frame dequeue (D
 ## Implementation
 
 Function: `run_trigger_latency` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t13-trigger-latency` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t14-trigger-latency` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t13-trigger-latency.md`
+> The source file contains `// Docs: docs/backend/tests/t14-trigger-latency.md`
 > above the function as a back-reference to this document.
 
 ## Parameters
@@ -75,7 +75,7 @@ This test does not apply warn/fail thresholds on latency values — it is primar
 - **latency_p95 close to latency_mean**: Consistent pipeline — low jitter, suitable for real-time applications.
 - **latency_jitter > 10 ms**: Significant variability — may indicate ISP processing variation, kernel scheduling delays, or trigger timing drift.
 - **frames_missed > 0**: Some triggers did not produce a frame within 100 ms — possible trigger edge issues, sensor busy states, or buffer starvation.
-- **latency_min very low (< 5 ms)**: May indicate a stale/pre-buffered frame rather than a fresh capture — check t19 (sequence continuity).
+- **latency_min very low (< 5 ms)**: May indicate a stale/pre-buffered frame rather than a fresh capture — check t20 (sequence continuity).
 - **latency_stddev increasing with sample count**: Thermal drift or sensor AGC adaptation during the measurement window.
 
 ## Failure Modes

@@ -1,4 +1,4 @@
-# t17 — Control Parameter Sweep
+# t18 — Control Parameter Sweep
 
 **Layer:** 5 — Latency  
 **Category:** controls  
@@ -23,9 +23,9 @@ Enumerates all V4L2 controls on the device and, when ISX021-specific controls ar
 ## Implementation
 
 Function: `run_control_sweep` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t17-control-sweep` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t18-control-sweep` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t17-control-sweep.md`
+> The source file contains `// Docs: docs/backend/tests/t18-control-sweep.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

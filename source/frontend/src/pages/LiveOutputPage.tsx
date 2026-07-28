@@ -2,6 +2,15 @@ import { RefObject } from "react";
 import { Square } from "lucide-react";
 import { LogLine } from "../types";
 
+function formatLogTimestamp(utcString: string | undefined): string {
+  if (!utcString) return "";
+  const match = utcString.match(/T(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/);
+  if (match) {
+    return match[1].replace(/Z$/, "");
+  }
+  return utcString;
+}
+
 type Props = {
   logs: LogLine[];
   visibleLogs: LogLine[];
@@ -74,48 +83,57 @@ export function LiveOutputPage({
           )}
         </div>
       </header>
-      <div className="terminal-output full-height" ref={outputRef}>
-        {visibleLogs.length === 0 && (
-          <div className="log-line muted">
-            {isRunning
-              ? <><span className="pulse-dot" /> Running diagnostic, awaiting first output...</>
-              : "No log output yet. Start a diagnostic run from the sidebar."}
-          </div>
-        )}
-        {visibleLogs.map((line) => (
-          <div className={`log-line ${line.severity} ${line.log_type || "progress"}`} key={line.offset}>
-            {line.log_type === "section_start" ? (
-              <>
-                <span className="section-ts">{line.timestamp_utc}</span>
-                <code className="section-camera">{line.camera || "system"}</code>
-                <p className="section-title">{line.message}</p>
-              </>
-            ) : line.log_type === "data" ? (
-              <>
-                <code className="data-camera">{line.camera || "system"}</code>
-                <pre className="data-block">{line.message}</pre>
-              </>
-            ) : (
-              <>
-                <span>{line.timestamp_utc}</span>
-                <strong>{line.severity}</strong>
-                <code>{line.camera || "system"}</code>
-                <p>{line.message}</p>
-              </>
-            )}
-          </div>
-        ))}
-        {isRunning && visibleLogs.length > 0 && secSinceLastLog >= 2 && (
-          <div className="log-line waiting">
-            <span className="waiting-indicator">
-              <span className="dot-bounce" />
-              <span className="dot-bounce d2" />
-              <span className="dot-bounce d3" />
-            </span>
-            <p>Running — {secSinceLastLog}s since last output</p>
-          </div>
-        )}
+      <div className="terminal-container full-height">
+        <div className="terminal-header">
+          <span className="col-time">TIME</span>
+          <span className="col-level">LEVEL</span>
+          <span className="col-source">SOURCE</span>
+          <span className="col-msg">MESSAGE</span>
+        </div>
+        <div className="terminal-output" ref={outputRef}>
+          {visibleLogs.length === 0 && (
+            <div className="log-line muted">
+              {isRunning
+                ? <><span className="pulse-dot" /> Running diagnostic, awaiting first output...</>
+                : "No log output yet. Start a diagnostic run from the sidebar."}
+            </div>
+          )}
+          {visibleLogs.map((line) => (
+            <div className={`log-line ${line.severity} ${line.log_type || "progress"}`} key={line.offset}>
+              {line.log_type === "section_start" ? (
+                <>
+                  <span className="section-ts" title={line.timestamp_utc}>{formatLogTimestamp(line.timestamp_utc)}</span>
+                  <code className="section-camera">{line.camera || "system"}</code>
+                  <p className="section-title">{line.message}</p>
+                </>
+              ) : line.log_type === "data" ? (
+                <>
+                  <code className="data-camera">{line.camera || "system"}</code>
+                  <pre className="data-block">{line.message}</pre>
+                </>
+              ) : (
+                <>
+                  <span title={line.timestamp_utc}>{formatLogTimestamp(line.timestamp_utc)}</span>
+                  <strong>{line.severity}</strong>
+                  <code>{line.camera || "system"}</code>
+                  <p>{line.message}</p>
+                </>
+              )}
+            </div>
+          ))}
+          {isRunning && visibleLogs.length > 0 && secSinceLastLog >= 2 && (
+            <div className="log-line waiting">
+              <span className="waiting-indicator">
+                <span className="dot-bounce" />
+                <span className="dot-bounce d2" />
+                <span className="dot-bounce d3" />
+              </span>
+              <p>Running — {secSinceLastLog}s since last output</p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
+

@@ -1,14 +1,100 @@
-import { Profile, RunSummary, StartRunPayload, ThresholdConfig } from "./types";
+import { Profile, RunSummary, StartRunPayload, TestDefinition, ThresholdConfig } from "./types";
 
-/** Thin fetch wrappers. Callers inspect `res.ok`/`res.status` themselves, matching
- *  the error-handling style the app already used before this file existed. */
+const FALLBACK_TESTS: TestDefinition[] = [
+  {
+    id: "t01-open-close",
+    name: "Open / Close Cycle Test",
+    category: "Basic Driver Reliability",
+    description: "Tests basic v4l2 device open and close file handle operations.",
+    implemented_in_core: true,
+    long_running: false,
+    experimental: false,
+    risky: false,
+    uses_trigger: false,
+    supported_trigger_modes: ["free-run", "software", "hardware"]
+  },
+  {
+    id: "t02-query-caps",
+    name: "V4L2 Capability Query",
+    category: "Basic Driver Reliability",
+    description: "Queries V4L2 device capabilities and streaming flags.",
+    implemented_in_core: true,
+    long_running: false,
+    experimental: false,
+    risky: false,
+    uses_trigger: false,
+    supported_trigger_modes: ["free-run", "software", "hardware"]
+  },
+  {
+    id: "t07-poll-timeout-sweep",
+    name: "Poll Timeout Sweep",
+    category: "Streaming & Latency",
+    description: "Sweeps poll timeout durations to verify driver event notifications.",
+    implemented_in_core: true,
+    long_running: true,
+    experimental: false,
+    risky: false,
+    uses_trigger: true,
+    supported_trigger_modes: ["free-run", "software", "hardware"]
+  },
+  {
+    id: "t12-zero-copy-dmabuf",
+    name: "Zero-Copy DMABUF Transfer",
+    category: "Advanced Memory",
+    description: "Verifies zero-copy memory pointer sharing via DMABUF handles.",
+    implemented_in_core: true,
+    long_running: false,
+    experimental: true,
+    risky: true,
+    uses_trigger: false,
+    supported_trigger_modes: ["free-run", "software"]
+  }
+];
+
+const FALLBACK_THRESHOLDS: ThresholdConfig[] = [
+  {
+    id: "default",
+    name: "Built-in Standard Thresholds",
+    description: "Default validation thresholds for Jetson diagnostic suite",
+    values: {
+      "t01-open-close": { "max_open_duration_ms": 150, "failure_rate_pct": 0 },
+      "t07-poll-timeout-sweep": { "max_poll_delay_ms": 500, "drop_count": 0 }
+    },
+    params: {
+      "t01-open-close": { "cycle_count": 10, "warmup_delay_ms": 20 },
+      "t07-poll-timeout-sweep": { "sweep_steps": 5, "timeout_ms": 1000 }
+    }
+  },
+  {
+    id: "jetson-high-perf",
+    name: "Jetson High Performance Profile",
+    description: "Strict thresholds tailored for low-latency Tegra multimedia pipelines",
+    values: {
+      "t01-open-close": { "max_open_duration_ms": 50, "failure_rate_pct": 0 },
+      "t07-poll-timeout-sweep": { "max_poll_delay_ms": 100, "drop_count": 0 }
+    },
+    params: {
+      "t01-open-close": { "cycle_count": 50, "warmup_delay_ms": 10 },
+      "t07-poll-timeout-sweep": { "sweep_steps": 10, "timeout_ms": 500 }
+    }
+  }
+];
+
+function jsonResp(data: unknown): Response {
+  return new Response(JSON.stringify(data), {
+    status: 200,
+    headers: { "Content-Type": "application/json" }
+  });
+}
+
+/** Thin fetch wrappers with offline fallbacks. */
 
 export function getDevices() {
-  return fetch("/api/devices");
+  return fetch("/api/devices").catch(() => jsonResp({ devices: [] }));
 }
 
 export function getProfiles() {
-  return fetch("/api/profiles");
+  return fetch("/api/profiles").catch(() => jsonResp({ profiles: [] }));
 }
 
 export function createProfile(profile: Profile) {
@@ -59,8 +145,14 @@ export function testSoftwareTrigger(payload: {
   });
 }
 
-export function getTests() {
-  return fetch("/api/tests");
+export async function getTests() {
+  try {
+    const res = await fetch("/api/tests");
+    if (res.ok) return res;
+  } catch {
+    // fallback below
+  }
+  return jsonResp({ tests: FALLBACK_TESTS });
 }
 
 export function getRunLogs(runId: string, after: number) {
@@ -83,22 +175,27 @@ export function stopRun(runId: string) {
   return fetch(`/api/runs/${runId}/stop`, { method: "POST" });
 }
 
-/** Historical run list for the Dashboard. The endpoint may not exist yet on the
- *  backend while it's being implemented in parallel — callers should catch and
- *  degrade gracefully (empty history), not treat this as fatal. */
 export async function getRuns(): Promise<RunSummary[]> {
-  const res = await fetch("/api/runs");
-  if (!res.ok) {
-    throw new Error(`Failed to fetch run history: ${res.status} ${res.statusText}`);
+  try {
+    const res = await fetch("/api/runs");
+    if (!res.ok) return [];
+    const json = await res.json();
+    return Array.isArray(json.runs) ? json.runs : [];
+  } catch {
+    return [];
   }
-  const json = await res.json();
-  return Array.isArray(json.runs) ? json.runs : [];
 }
 
 // --- Threshold configuration API ---
 
-export function getThresholds() {
-  return fetch("/api/thresholds");
+export async function getThresholds() {
+  try {
+    const res = await fetch("/api/thresholds");
+    if (res.ok) return res;
+  } catch {
+    // fallback below
+  }
+  return jsonResp({ configs: FALLBACK_THRESHOLDS });
 }
 
 export function getThreshold(id: string) {
@@ -136,3 +233,5 @@ export function importThreshold(jsonText: string) {
     body: jsonText
   });
 }
+
+

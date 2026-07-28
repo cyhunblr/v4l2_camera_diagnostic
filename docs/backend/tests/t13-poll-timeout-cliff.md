@@ -1,4 +1,4 @@
-# t12 — Poll Timeout Cliff Finder
+# t13 — Poll Timeout Cliff Finder
 
 **Layer:** 4 — Polling / timeout  
 **Category:** polling  
@@ -19,9 +19,9 @@ Finds the minimum stable poll timeout at which the camera pipeline delivers fram
 ## Implementation
 
 Function: `run_poll_timeout_cliff` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t12-poll-timeout-cliff` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t13-poll-timeout-cliff` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t12-poll-timeout-cliff.md`
+> The source file contains `// Docs: docs/backend/tests/t13-poll-timeout-cliff.md`
 > above the function as a back-reference to this document.
 
 ## Parameters
@@ -40,7 +40,7 @@ Registry: `t12-poll-timeout-cliff` in [test_registry.cpp](../../../source/backen
 > `send()` returns. So `cliff_ms` is the minimum `poll()` timeout *after the
 > pulse has already elapsed*, not the total trigger-to-frame latency. Do not
 > compare `cliff_ms` directly against latency measured from trigger send (e.g.
-> `t13-trigger-latency`'s `latency_mean`) — use `cliff_total_ms` for that.
+> `t14-trigger-latency`'s `latency_mean`) — use `cliff_total_ms` for that.
 
 | Metric Key | Unit | Description |
 | ----------- | ------ | ------------- |
@@ -86,7 +86,7 @@ A summary box is also emitted to the log:
 `Cliff (post-pulse)` is `cliff_ms` (the `poll()` timeout measured after the
 trigger pulse already elapsed); `Cliff (total)` is `cliff_total_ms`
 (`cliff_ms + pulse_width_ms`), directly comparable to trigger-to-frame
-latency figures from other tests (e.g. `t13-trigger-latency`).
+latency figures from other tests (e.g. `t14-trigger-latency`).
 
 ## Verdict Logic
 

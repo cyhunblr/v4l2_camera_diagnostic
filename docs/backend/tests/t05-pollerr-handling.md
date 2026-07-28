@@ -1,4 +1,4 @@
-# t04 — POLLERR/POLLHUP Handling
+# t05 — POLLERR/POLLHUP Handling
 
 **Layer:** 2 — State-machine correctness  
 **Category:** stream-state  
@@ -21,9 +21,9 @@ Verifies that after `VIDIOC_STREAMOFF`, the driver correctly rejects DQBUF attem
 ## Implementation
 
 Function: `run_pollerr_handling` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t04-pollerr-handling` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t05-pollerr-handling` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t04-pollerr-handling.md`
+> The source file contains `// Docs: docs/backend/tests/t05-pollerr-handling.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

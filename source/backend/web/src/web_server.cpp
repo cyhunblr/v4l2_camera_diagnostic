@@ -47,6 +47,38 @@ std::string json_to_string(const Json::Value &value) {
   return Json::writeString(builder, value);
 }
 
+// A ThresholdConfig carries two per-test maps: `values` (verdict cut-offs) and
+// `params` (the knobs a test actually runs with). Both are persisted to disk and
+// both are editable in the UI, so both have to survive the API round trip.
+Json::Value test_key_map_to_json(const std::map<std::string, TestThresholds> &by_test) {
+  Json::Value out(Json::objectValue);
+  for (const auto &test : by_test) {
+    Json::Value keys(Json::objectValue);
+    for (const auto &kv : test.second) {
+      keys[kv.first] = kv.second;
+    }
+    out[test.first] = keys;
+  }
+  return out;
+}
+
+void json_to_test_key_map(const Json::Value &node, std::map<std::string, TestThresholds> *out) {
+  if (!node.isObject()) {
+    return;
+  }
+  for (const auto &test_id : node.getMemberNames()) {
+    const Json::Value &keys = node[test_id];
+    if (!keys.isObject()) {
+      continue;
+    }
+    for (const auto &key : keys.getMemberNames()) {
+      if (keys[key].isNumeric()) {
+        (*out)[test_id][key] = keys[key].asDouble();
+      }
+    }
+  }
+}
+
 Json::Value parse_json_body(const std::string &body) {
   if (body.empty()) {
     return Json::Value(Json::objectValue);
@@ -946,15 +978,8 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
       item["id"] = config.id;
       item["name"] = config.name;
       item["description"] = config.description;
-      Json::Value values(Json::objectValue);
-      for (const auto &test : config.values) {
-        Json::Value keys(Json::objectValue);
-        for (const auto &kv : test.second) {
-          keys[kv.first] = kv.second;
-        }
-        values[test.first] = keys;
-      }
-      item["values"] = values;
+      item["values"] = test_key_map_to_json(config.values);
+      item["params"] = test_key_map_to_json(config.params);
       out["configs"].append(item);
     }
     return json_to_string(out);
@@ -989,15 +1014,8 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
     out["id"] = config.id;
     out["name"] = config.name;
     out["description"] = config.description;
-    Json::Value values(Json::objectValue);
-    for (const auto &test : config.values) {
-      Json::Value keys(Json::objectValue);
-      for (const auto &kv : test.second) {
-        keys[kv.first] = kv.second;
-      }
-      values[test.first] = keys;
-    }
-    out["values"] = values;
+    out["values"] = test_key_map_to_json(config.values);
+    out["params"] = test_key_map_to_json(config.params);
     return json_to_string(out);
   }
 
@@ -1028,19 +1046,8 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
     config.id = body_json.get("id", "").asString();
     config.name = body_json.get("name", "").asString();
     config.description = body_json.get("description", "").asString();
-    const Json::Value &vals = body_json["values"];
-    if (vals.isObject()) {
-      for (const auto &test_id : vals.getMemberNames()) {
-        const Json::Value &keys = vals[test_id];
-        if (!keys.isObject())
-          continue;
-        for (const auto &key : keys.getMemberNames()) {
-          if (keys[key].isNumeric()) {
-            config.values[test_id][key] = keys[key].asDouble();
-          }
-        }
-      }
-    }
+    json_to_test_key_map(body_json["values"], &config.values);
+    json_to_test_key_map(body_json["params"], &config.params);
     ThresholdRegistry registry(default_threshold_directory());
     std::string error;
     if (!registry.add_or_update_config(config, &error)) {
@@ -1069,19 +1076,8 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
     config.id = id;
     config.name = body_json.get("name", id).asString();
     config.description = body_json.get("description", "").asString();
-    const Json::Value &vals = body_json["values"];
-    if (vals.isObject()) {
-      for (const auto &test_id : vals.getMemberNames()) {
-        const Json::Value &keys = vals[test_id];
-        if (!keys.isObject())
-          continue;
-        for (const auto &key : keys.getMemberNames()) {
-          if (keys[key].isNumeric()) {
-            config.values[test_id][key] = keys[key].asDouble();
-          }
-        }
-      }
-    }
+    json_to_test_key_map(body_json["values"], &config.values);
+    json_to_test_key_map(body_json["params"], &config.params);
     ThresholdRegistry registry(default_threshold_directory());
     std::string error;
     if (!registry.add_or_update_config(config, &error)) {
@@ -1432,7 +1428,7 @@ void WebServer::execute_run(std::shared_ptr<RunState> run) {
 
   append_log(run, "info", "Master camera: " + run->config.master.path, run->config.master.path);
   for (const auto &slave : run->config.slaves) {
-    append_log(run, "info", "Slave camera (t24 only): " + slave.path, slave.path);
+    append_log(run, "info", "Slave camera (t25 only): " + slave.path, slave.path);
   }
 
   ProfileRegistry profiles(options_.config_directory);

@@ -1,4 +1,4 @@
-# t15 — GPIO Pulse Width Characterization
+# t16 — GPIO Pulse Width Characterization
 
 **Layer:** 5 — Latency  
 **Category:** trigger  
@@ -30,9 +30,9 @@ Sweeps GPIO trigger pulse widths from 1 ms to 30 ms to characterize the camera's
 ## Implementation
 
 Function: `run_gpio_pulse_width` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t15-gpio-pulse-width` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t16-gpio-pulse-width` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t15-gpio-pulse-width.md`
+> The source file contains `// Docs: docs/backend/tests/t16-gpio-pulse-width.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

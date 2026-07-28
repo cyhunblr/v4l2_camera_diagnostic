@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SlidersHorizontal, Download, Upload, Plus, Trash2, Save } from "lucide-react";
+import { SlidersHorizontal, Download, Upload, Plus, Trash2, Save, RotateCcw } from "lucide-react";
 import { ThresholdConfig } from "../types";
 import * as api from "../api";
 
@@ -16,7 +16,7 @@ function formatTestName(testId: string): string {
 function unitForKey(key: string): string {
   if (key.endsWith("_ms")) return "ms";
   if (key.endsWith("_pct")) return "%";
-  return "count";
+  return "cnt";
 }
 
 /** Format key for display: remove unit suffix, replace _ with spaces. */
@@ -200,7 +200,7 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
     : [];
 
   return (
-    <div className="page">
+    <div className="page test-config-page">
       <header className="topbar">
         <div>
           <p className="eyebrow">Configure</p>
@@ -208,38 +208,44 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
         </div>
       </header>
 
-      <div className="panel">
+      <div className="panel config-toolbar-panel">
         <div className="panel-title">
           <SlidersHorizontal size={18} />
-          <h3>Parameters &amp; Verdicts</h3>
+          <h3>Preset Configuration Manager</h3>
         </div>
 
         <div className="threshold-toolbar">
-          <select
-            value={selectedThresholdId}
-            onChange={(e) => onSelectedChange(e.target.value)}
-          >
-            {configs.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} {c.id === "default" ? "(built-in)" : ""}
-              </option>
-            ))}
-          </select>
+          <div className="toolbar-select-group">
+            <label htmlFor="preset-select">Active Preset:</label>
+            <select
+              id="preset-select"
+              value={selectedThresholdId}
+              onChange={(e) => onSelectedChange(e.target.value)}
+            >
+              {configs.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} {c.id === "default" ? "(Built-in Default)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
 
-          <button className="icon-btn" onClick={() => setShowNew(true)} title="New config">
-            <Plus size={16} />
-          </button>
-          <button className="icon-btn" onClick={handleExport} title="Export" disabled={!editing}>
-            <Download size={16} />
-          </button>
-          <button className="icon-btn" onClick={handleImportClick} title="Import">
-            <Upload size={16} />
-          </button>
-          {!isDefault && (
-            <button className="icon-btn danger" onClick={handleDelete} title="Delete">
-              <Trash2 size={16} />
+          <div className="toolbar-actions">
+            <button className="icon-text-button" onClick={() => setShowNew(true)} title="New config">
+              <Plus size={15} /> New Preset
             </button>
-          )}
+            <button className="icon-text-button" onClick={handleExport} title="Export" disabled={!editing}>
+              <Download size={15} /> Export
+            </button>
+            <button className="icon-text-button" onClick={handleImportClick} title="Import">
+              <Upload size={15} /> Import
+            </button>
+            {!isDefault && (
+              <button className="icon-text-button danger" onClick={handleDelete} title="Delete">
+                <Trash2 size={15} /> Delete
+              </button>
+            )}
+          </div>
           <input
             ref={fileInputRef}
             type="file"
@@ -258,8 +264,8 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
               onChange={(e) => setNewId(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleCreate()}
             />
-            <button onClick={handleCreate}>Create</button>
-            <button onClick={() => setShowNew(false)}>Cancel</button>
+            <button className="primary-btn" onClick={handleCreate}>Create</button>
+            <button className="secondary-btn" onClick={() => setShowNew(false)}>Cancel</button>
           </div>
         )}
 
@@ -267,7 +273,7 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
           <div className="threshold-editor">
             {isDefault && (
               <p className="threshold-hint">
-                The default config is read-only. Create a new config to customize values.
+                The default preset is read-only. Create a custom preset to modify parameters.
               </p>
             )}
 
@@ -285,7 +291,7 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
                   <div className="config-two-col">
                     {hasParams && (
                       <div className="config-col">
-                        <p className="config-col-label">Parameters</p>
+                        <p className="config-col-label">Execution Parameters</p>
                         <div className="threshold-keys">
                           {Object.entries(testParams).map(([key, value]) => {
                             const defVal = defaultParams[key];
@@ -294,18 +300,30 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
                             return (
                               <div key={key} className={`threshold-row${modified ? " modified" : ""}`}>
                                 <span className="threshold-key-name">{formatKey(key)}</span>
-                                <input
-                                  type="number"
-                                  step="any"
-                                  value={value}
-                                  disabled={isDefault}
-                                  onChange={(e) => handleParamChange(testId, key, e.target.value)}
-                                />
-                                <span className="threshold-unit">{unit}</span>
+                                <div className="threshold-input-wrapper">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={value}
+                                    disabled={isDefault}
+                                    onChange={(e) => handleParamChange(testId, key, e.target.value)}
+                                  />
+                                  <span className="threshold-unit">{unit}</span>
+                                </div>
                                 {defVal !== undefined && (
-                                  <span className="threshold-default">default: {defVal}</span>
+                                  <span className="threshold-default" title={`Built-in default: ${defVal}`}>
+                                    def: {defVal}
+                                  </span>
                                 )}
-                                {modified && <span className="threshold-modified-dot" title="Modified from default">●</span>}
+                                {modified && !isDefault && (
+                                  <button
+                                    className="reset-param-btn"
+                                    onClick={() => handleParamChange(testId, key, String(defVal))}
+                                    title="Reset to default value"
+                                  >
+                                    <RotateCcw size={12} />
+                                  </button>
+                                )}
                               </div>
                             );
                           })}
@@ -314,7 +332,7 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
                     )}
                     {hasValues && (
                       <div className="config-col">
-                        <p className="config-col-label">Verdicts</p>
+                        <p className="config-col-label">Verdict Thresholds</p>
                         <div className="threshold-keys">
                           {Object.entries(testValues).map(([key, value]) => {
                             const defVal = defaultValues[key];
@@ -323,18 +341,30 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
                             return (
                               <div key={key} className={`threshold-row${modified ? " modified" : ""}`}>
                                 <span className="threshold-key-name">{formatKey(key)}</span>
-                                <input
-                                  type="number"
-                                  step="any"
-                                  value={value}
-                                  disabled={isDefault}
-                                  onChange={(e) => handleValueChange(testId, key, e.target.value)}
-                                />
-                                <span className="threshold-unit">{unit}</span>
+                                <div className="threshold-input-wrapper">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={value}
+                                    disabled={isDefault}
+                                    onChange={(e) => handleValueChange(testId, key, e.target.value)}
+                                  />
+                                  <span className="threshold-unit">{unit}</span>
+                                </div>
                                 {defVal !== undefined && (
-                                  <span className="threshold-default">default: {defVal}</span>
+                                  <span className="threshold-default" title={`Built-in default: ${defVal}`}>
+                                    def: {defVal}
+                                  </span>
                                 )}
-                                {modified && <span className="threshold-modified-dot" title="Modified from default">●</span>}
+                                {modified && !isDefault && (
+                                  <button
+                                    className="reset-param-btn"
+                                    onClick={() => handleValueChange(testId, key, String(defVal))}
+                                    title="Reset to default value"
+                                  >
+                                    <RotateCcw size={12} />
+                                  </button>
+                                )}
                               </div>
                             );
                           })}
@@ -359,3 +389,4 @@ export function ThresholdConfigPage({ selectedThresholdId, onSelectedChange, onE
     </div>
   );
 }
+

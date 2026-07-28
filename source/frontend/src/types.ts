@@ -155,7 +155,7 @@ export type StartRunPayload = {
   trigger_mode: TriggerMode;
   /** The single camera under test — the full test suite runs against it. */
   master: CameraAssignment;
-  /** Extra cameras that only participate in t24-multi-camera. Empty means t24 is skipped. */
+  /** Extra cameras that only participate in t25-multi-camera. Empty means t25 is skipped. */
   slaves: CameraAssignment[];
   memory_backends: string[];
   test_selectors: string[];

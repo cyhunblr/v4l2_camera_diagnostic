@@ -1,4 +1,4 @@
-# t16 — Format Comparison
+# t17 — Format Comparison
 
 **Layer:** 5 — Latency  
 **Category:** format  
@@ -21,9 +21,9 @@ Compares capture performance across all pixel formats the device advertises via 
 ## Implementation
 
 Function: `run_format_comparison` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t16-format-comparison` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t17-format-comparison` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t16-format-comparison.md`
+> The source file contains `// Docs: docs/backend/tests/t17-format-comparison.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

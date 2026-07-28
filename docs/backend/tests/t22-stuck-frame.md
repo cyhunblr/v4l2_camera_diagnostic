@@ -1,4 +1,4 @@
-# t21 — Stuck Frame
+# t22 — Stuck Frame
 
 **Layer:** 6 — Integrity  
 **Category:** quality  
@@ -22,9 +22,9 @@ Detects whether the camera is delivering identical (stuck/frozen) frame content 
 ## Implementation
 
 Function: `run_stuck_frame` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t21-stuck-frame` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t22-stuck-frame` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t21-stuck-frame.md`
+> The source file contains `// Docs: docs/backend/tests/t22-stuck-frame.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

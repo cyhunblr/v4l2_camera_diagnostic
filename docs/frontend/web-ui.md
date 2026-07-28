@@ -62,7 +62,7 @@ Use `--report-root DIR` to override this location. `uninstallation.sh` never del
 
 Choose **Single camera** to run the full diagnostic suite against one camera,
 or **Multi-camera** to also pick slave cameras that only participate in the
-t24 multi-camera cross-jitter test. The selected master is excluded from the
+t25 multi-camera cross-jitter test. The selected master is excluded from the
 slave list automatically.
 
 ## Profile Management

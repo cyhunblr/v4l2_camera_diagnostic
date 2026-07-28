@@ -145,7 +145,7 @@ Use `scripts/setup-dev-env.sh` for contributor tooling; it requires the same
 
 ## Camera Diagnostic Tests
 
-The modular runner contains 25 registered diagnostics, all fully implemented.
+The modular runner contains 26 registered diagnostics, all fully implemented.
 Each ID in the inventory below links to a detailed
 reference page under [`docs/backend/tests/`](backend/tests/) covering scope,
 inputs, output metrics, interpretation guidance, and a walkthrough of the
@@ -188,73 +188,74 @@ Tests are grouped into 7 logical layers that run in dependency order:
 
 | ID | Name | Category | Notes |
 | --- | --- | --- | --- |
-| t03-no-streamon | Frame capture without STREAMON | stream-state | |
-| t04-pollerr-handling | POLLERR/POLLHUP handling | stream-state | experimental, risky |
-| t05-stream-cycles | STREAMON/STREAMOFF cycle reliability | stream-state | **experimental, risky** — opt-in only; can wedge hardware whose sensors share a deserializer |
+| t03-pipeline-ready | Pipeline readiness after STREAMON | stream-state | times the first frame without `poll()`; also reports how long STREAMON itself takes |
+| t04-no-streamon | Frame capture without STREAMON | stream-state | |
+| t05-pollerr-handling | POLLERR/POLLHUP handling | stream-state | experimental, risky |
+| t06-stream-cycles | STREAMON/STREAMOFF cycle reliability | stream-state | **experimental, risky** — opt-in only; can wedge hardware whose sensors share a deserializer |
 
 #### Layer 3 — Buffer & memory
 
 | ID | Name | Category | Notes |
 | --- | --- | --- | --- |
-| t06-multi-buffer | Multi-buffer configurations | buffering | |
-| t07-buffer-overwrite | Buffer overwrite behavior | buffering | risky; no free-run (Hardware/Software only) |
-| t08-buffer-recycling | Buffer recycling timing | buffering | |
-| t09-buffer-flags | V4L2 buffer flag analysis | metadata | |
-| t10-memory-throughput | Memory access throughput | memory | no trigger required |
-| t11-dmabuf-cache-sync | DMA_BUF_IOCTL_SYNC cache coherency | dmabuf | **requires DMABUF backend** |
+| t07-multi-buffer | Multi-buffer configurations | buffering | |
+| t08-buffer-overwrite | Buffer overwrite behavior | buffering | risky; no free-run (Hardware/Software only) |
+| t09-buffer-recycling | Buffer recycling timing | buffering | |
+| t10-buffer-flags | V4L2 buffer flag analysis | metadata | |
+| t11-memory-throughput | Memory access throughput | memory | no trigger required |
+| t12-dmabuf-cache-sync | DMA_BUF_IOCTL_SYNC cache coherency | dmabuf | **requires DMABUF backend** |
 
 #### Layer 4 — Polling / timeout
 
 | ID | Name | Category | Notes |
 | --- | --- | --- | --- |
-| t12-poll-timeout-cliff | Poll timeout cliff finder | polling | adaptive binary search + stability tracking |
+| t13-poll-timeout-cliff | Poll timeout cliff finder | polling | adaptive binary search + stability tracking |
 
 #### Layer 5 — Latency
 
 | ID | Name | Category | Notes |
 | --- | --- | --- | --- |
-| t13-trigger-latency | Trigger to DQBUF latency | latency | no free-run (Hardware/Software only) |
-| t14-nonblock-vs-block | NON_BLOCK vs BLOCK comparison | io-mode | |
-| t15-gpio-pulse-width | GPIO pulse width characterization | trigger | Hardware trigger only |
-| t16-format-comparison | Format comparison | format | |
-| t17-control-sweep | Control parameter sweep | controls | experimental, risky |
-| t18-resolution-sweep | Resolution sweep | format | **not yet implemented** |
+| t14-trigger-latency | Trigger to DQBUF latency | latency | no free-run (Hardware/Software only) |
+| t15-nonblock-vs-block | NON_BLOCK vs BLOCK comparison | io-mode | |
+| t16-gpio-pulse-width | GPIO pulse width characterization | trigger | Hardware trigger only |
+| t17-format-comparison | Format comparison | format | |
+| t18-control-sweep | Control parameter sweep | controls | experimental, risky |
+| t19-resolution-sweep | Resolution sweep | format | **not yet implemented** |
 
 #### Layer 6 — Integrity
 
 | ID | Name | Category | Notes |
 | --- | --- | --- | --- |
-| t19-sequence-continuity | Sequence number continuity | sequence | |
-| t20-timestamp-monotonicity | Timestamp monotonicity | metadata | |
-| t21-stuck-frame | Stuck frame detection | quality | |
+| t20-sequence-continuity | Sequence number continuity | sequence | |
+| t21-timestamp-monotonicity | Timestamp monotonicity | metadata | |
+| t22-stuck-frame | Stuck frame detection | quality | |
 
 #### Layer 7 — Stability
 
 | ID | Name | Category | Notes |
 | --- | --- | --- | --- |
-| t22-sustained-capture | Sustained capture stability | stability | long-running (60 s) |
-| t23-latency-under-load | Latency under CPU load | stability | |
-| t24-multi-camera | Multi-camera contention | stability | long-running |
-| t25-cold-start | Cold-start warm-up cost | stability | |
+| t23-sustained-capture | Sustained capture stability | stability | long-running (60 s) |
+| t24-latency-under-load | Latency under CPU load | stability | |
+| t25-multi-camera | Multi-camera contention | stability | long-running |
+| t26-cold-start | Cold-start warm-up cost | stability | |
 
 Tests marked **not yet implemented** report `Skipped` at runtime.
 A test being reported as `Skipped` is always one of the following expected
 conditions in `run_test()`, never a missing implementation for an implemented
 test:
 
-- **Memory-backend skip** — `t11`'s DMABUF requirement (`requires_dmabuf`):
-  selecting `mmap` or `userptr` will correctly show `t11` as `Skipped` with
-  "Test requires DMABUF..." — `t11` is the one and only test with this
+- **Memory-backend skip** — `t12`'s DMABUF requirement (`requires_dmabuf`):
+  selecting `mmap` or `userptr` will correctly show `t12` as `Skipped` with
+  "Test requires DMABUF..." — `t12` is the one and only test with this
   memory-backend condition, and it is expected behavior, not a defect in the
   `mmap`/`userptr` path.
 - **Trigger-mode skip** — tests whose `trigger_mode_mask` does not include the
   selected run mode (checked by `supports_trigger_mode()`) are skipped
-  explicitly. Pulse-width characterization (`t15`) is hardware-only;
-  buffer-overwrite (`t07`) and trigger-latency (`t13`) require an active
+  explicitly. Pulse-width characterization (`t16`) is hardware-only;
+  buffer-overwrite (`t08`) and trigger-latency (`t14`) require an active
   hardware or software trigger and are skipped in free-run mode.
 - **Trigger-source skip** — an active-mode test is skipped when its profile,
   channel, GPIO, control device, or V4L2 control validation is unavailable.
-- **Missing `linux/dma-buf.h`** — `t11` additionally compiles to a `Skipped`
+- **Missing `linux/dma-buf.h`** — `t12` additionally compiles to a `Skipped`
   result ("linux/dma-buf.h not available...") on systems without the DMA-BUF
   sync header.
 

@@ -1,4 +1,4 @@
-# t11 — DMA_BUF_IOCTL_SYNC Cache Coherency
+# t12 — DMA_BUF_IOCTL_SYNC Cache Coherency
 
 **Layer:** 3 — Buffer & memory  
 **Category:** dmabuf  
@@ -23,9 +23,9 @@ Determines whether `DMA_BUF_IOCTL_SYNC` is required for cache-coherent reads on 
 ## Implementation
 
 Function: `run_dmabuf_cache_sync` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t11-dmabuf-cache-sync` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t12-dmabuf-cache-sync` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t11-dmabuf-cache-sync.md`
+> The source file contains `// Docs: docs/backend/tests/t12-dmabuf-cache-sync.md`
 > above the function as a back-reference to this document.
 
 ## Parameters

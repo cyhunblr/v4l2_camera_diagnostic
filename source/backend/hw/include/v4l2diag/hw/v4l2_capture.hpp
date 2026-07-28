@@ -71,6 +71,11 @@ class V4lSession {
   int fd() const {
     return fd_;
   }
+  // Tests that build their own v4l2_buffer need this to fill buf.memory —
+  // hard-coding V4L2_MEMORY_MMAP silently misbehaves under USERPTR/DMABUF.
+  v4l2_memory memory_type() const {
+    return memory_type_;
+  }
 
   bool setup_buffers(int count, MemoryBackend backend, std::string *error = nullptr);
   void release_buffers();

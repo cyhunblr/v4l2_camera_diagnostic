@@ -1,4 +1,4 @@
-# t07 — Buffer Overwrite Behavior
+# t08 — Buffer Overwrite Behavior
 
 **Layer:** 3 — Buffer & memory  
 **Category:** buffering  
@@ -24,9 +24,9 @@ Tests what happens when many triggers are sent without dequeuing buffers — sim
 ## Implementation
 
 Function: `run_buffer_overwrite` in [diagnostic_runner.cpp](../../../source/backend/core/src/diagnostic_runner.cpp)  
-Registry: `t07-buffer-overwrite` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
+Registry: `t08-buffer-overwrite` in [test_registry.cpp](../../../source/backend/core/src/test_registry.cpp)
 
-> The source file contains `// Docs: docs/backend/tests/t07-buffer-overwrite.md`
+> The source file contains `// Docs: docs/backend/tests/t08-buffer-overwrite.md`
 > above the function as a back-reference to this document.
 
 ## Parameters
