@@ -110,6 +110,15 @@ nav button:disabled:hover {
   color: #64748b;
 }
 
+nav button.locked {
+  cursor: not-allowed;
+}
+
+.nav-lock {
+  margin-left: auto;
+  opacity: 0.75;
+}
+
 .mobile-navigation {
   display: none;
 }
@@ -373,6 +382,13 @@ select,
   justify-content: center;
   gap: 7px;
   cursor: pointer;
+}
+
+.icon-text-button.primary-action {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font-weight: 700;
 }
 
 .icon-button {
@@ -875,6 +891,46 @@ summary span {
 }
 
 /* Stat tiles — Dashboard */
+.dashboard-command-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: 0 12px 30px var(--shadow);
+}
+
+.dashboard-command-panel .panel-title {
+  margin-bottom: 8px;
+}
+
+.dashboard-command-panel .panel-hint {
+  max-width: 720px;
+  margin-bottom: 0;
+}
+
+.dashboard-flow-state {
+  display: grid;
+  gap: 8px;
+  min-width: 180px;
+}
+
+.dashboard-flow-state span {
+  display: inline-flex;
+  justify-content: center;
+  padding: 7px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
 .stat-tile-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -971,7 +1027,41 @@ summary span {
 .output-header-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
+}
+
+.output-filter-control,
+.toggle-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.output-filter-control span,
+.toggle-control span {
+  white-space: nowrap;
+}
+
+.output-filter-control select {
+  min-width: 112px;
+}
+
+.toggle-control {
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.toggle-control input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
 }
 
 /* Terminal Output Container & Sticky Header */
@@ -1269,15 +1359,6 @@ summary span {
   gap: 10px;
 }
 
-.pulse-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--success);
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
 .elapsed {
   font-size: 14px;
   font-weight: 500;
@@ -1422,6 +1503,14 @@ summary span {
   .routing-footer {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .dashboard-command-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-flow-state {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .segmented-control {
@@ -2369,5 +2458,3 @@ summary span {
   border-radius: 8px;
   border: 1px solid var(--border-subtle);
 }
-
-

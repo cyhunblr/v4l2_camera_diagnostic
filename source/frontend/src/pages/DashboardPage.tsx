@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clock, Gauge, History, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, Gauge, History, Play, Route, XCircle } from "lucide-react";
 import { getRuns } from "../api";
 import { StatTile } from "../components/StatTile";
 import { RunSummary } from "../types";
 
 type Props = {
   onViewRun: (runId: string) => void;
+  onStartNewDiagnostic: () => void;
+  isRunning: boolean;
+  runStatus: string;
+  setupComplete: boolean;
 };
 
 function formatDuration(ms: number): string {
@@ -15,7 +19,7 @@ function formatDuration(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-export function DashboardPage({ onViewRun }: Props) {
+export function DashboardPage({ onViewRun, onStartNewDiagnostic, isRunning, runStatus, setupComplete }: Props) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +71,31 @@ export function DashboardPage({ onViewRun }: Props) {
           <p className="eyebrow">Diagnostic Control Center</p>
           <h2>Dashboard</h2>
         </div>
+        <button
+          className="icon-text-button primary-action"
+          onClick={onStartNewDiagnostic}
+          disabled={isRunning}
+          title={isRunning ? "Stop the current diagnostic before starting a new one." : undefined}
+        >
+          <Play size={16} /> Start a New Diagnostic
+        </button>
       </header>
+
+      <section className="dashboard-command-panel">
+        <div>
+          <div className="panel-title">
+            <Route size={18} />
+            <h3>Diagnostic Flow</h3>
+          </div>
+          <p className="panel-hint">
+            Start a guided run, then move through Cameras, Profiles, Test Selection, Test Configuration, and Report Formats in order.
+          </p>
+        </div>
+        <div className="dashboard-flow-state">
+          <span>Current run: {runStatus}</span>
+          <span>{setupComplete ? "Setup ready" : "Setup not started"}</span>
+        </div>
+      </section>
 
       <div className="stat-tile-row">
         <StatTile icon={<Gauge size={20} />} label="Total Runs" value={totalRuns} />

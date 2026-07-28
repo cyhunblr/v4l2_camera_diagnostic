@@ -1,5 +1,5 @@
 import { RefObject } from "react";
-import { Square } from "lucide-react";
+import { Square, Trash2 } from "lucide-react";
 import { LogLine } from "../types";
 
 function formatLogTimestamp(utcString: string | undefined): string {
@@ -52,7 +52,6 @@ export function LiveOutputPage({
           <h2>
             {runStatus === "idle" ? "No run started." : (
               <span className="status-line">
-                {isRunning && <span className="pulse-dot" />}
                 Run status: <strong>{runStatus}</strong>
                 {isRunning && (
                   <span className="elapsed">
@@ -65,17 +64,22 @@ export function LiveOutputPage({
           </h2>
         </div>
         <div className="output-header-actions">
-          <select value={severityFilter} onChange={(e) => onSeverityFilterChange(e.target.value)}>
-            <option value="all">all</option>
-            <option value="info">info</option>
-            <option value="warn">warn</option>
-            <option value="error">error</option>
-          </select>
-          <label className="inline-checkbox">
-            <input type="checkbox" checked={autoScroll} onChange={(e) => onAutoScrollChange(e.target.checked)} />
-            auto-scroll
+          <label className="output-filter-control">
+            <span>Level</span>
+            <select value={severityFilter} onChange={(e) => onSeverityFilterChange(e.target.value)}>
+              <option value="all">All</option>
+              <option value="info">Info</option>
+              <option value="warn">Warn</option>
+              <option value="error">Error</option>
+            </select>
           </label>
-          <button className="icon-button" onClick={onClearLogs} title="Clear logs">clear</button>
+          <label className="toggle-control">
+            <input type="checkbox" checked={autoScroll} onChange={(e) => onAutoScrollChange(e.target.checked)} />
+            <span>Auto-scroll</span>
+          </label>
+          <button className="icon-button" onClick={onClearLogs} title="Clear logs" aria-label="Clear logs">
+            <Trash2 size={16} />
+          </button>
           {isRunning && (
             <button className="stop-pill" onClick={onRequestStop} disabled={actionInProgress}>
               <Square size={14} /> Stop
@@ -94,7 +98,7 @@ export function LiveOutputPage({
           {visibleLogs.length === 0 && (
             <div className="log-line muted">
               {isRunning
-                ? <><span className="pulse-dot" /> Running diagnostic, awaiting first output...</>
+                ? "Running diagnostic, awaiting first output..."
                 : "No log output yet. Start a diagnostic run from the sidebar."}
             </div>
           )}
@@ -136,4 +140,3 @@ export function LiveOutputPage({
     </div>
   );
 }
-

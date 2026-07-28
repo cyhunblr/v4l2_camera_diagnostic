@@ -25,6 +25,8 @@ import {
   getTestLayerName
 } from "./types";
 
+const CONFIGURE_FLOW: PageId[] = ["cameras", "profiles", "tests", "config", "reports"];
+const TERMINAL_RUN_STATUSES = new Set(["completed", "stopped", "error"]);
 
 
 type ToastState = {
@@ -54,6 +56,8 @@ export default function App() {
   const [severityFilter, setSeverityFilter] = useState("all");
   const [autoScroll, setAutoScroll] = useState(true);
   const [activePage, setActivePage] = useState<PageId>("dashboard");
+  const [unlockedPages, setUnlockedPages] = useState<Set<PageId>>(() => new Set(["dashboard"]));
+  const [setupComplete, setSetupComplete] = useState(false);
   const [viewedRunId, setViewedRunId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(getInitialTheme());
@@ -61,6 +65,7 @@ export default function App() {
 
   const { confirmDialog, requestConfirm, closeConfirm } = useConfirmDialog();
   const {
+    runId,
     runStatus,
     isRunning,
     logs,
@@ -72,6 +77,7 @@ export default function App() {
     startRun,
     stopRun
   } = useRunPolling(showError);
+  const previousRunStatusRef = useRef(runStatus);
 
   function showError(message: string | null) {
     setToast(message ? { message, tone: "error" } : null);
@@ -118,6 +124,22 @@ export default function App() {
     () => [masterPath, ...slavePaths].filter((path): path is string => Boolean(path)),
     [masterPath, slavePaths]
   );
+
+  const unlockPage = useCallback((page: PageId) => {
+    setUnlockedPages((current) => {
+      if (current.has(page)) return current;
+      const next = new Set(current);
+      next.add(page);
+      return next;
+    });
+  }, []);
+
+  const resetDiagnosticFlow = useCallback(() => {
+    setViewedRunId(null);
+    setSetupComplete(false);
+    setUnlockedPages(new Set<PageId>(["dashboard", "cameras"]));
+    setActivePage("cameras");
+  }, []);
 
   useEffect(() => {
     setCameraAssignments((current) =>
@@ -176,6 +198,73 @@ export default function App() {
     [logs, severityFilter]
   );
 
+  const assignmentsReady = useMemo(() => {
+    if (!masterPath) return false;
+    if (triggerMode === "free-run") return true;
+    return involvedPaths.every((path) => {
+      const assignment = cameraAssignments.find((item) => item.path === path);
+      return Boolean(assignment?.profile_id && assignment?.trigger_channel_id);
+    });
+  }, [cameraAssignments, involvedPaths, masterPath, triggerMode]);
+
+  const testsReady = selectedTests.length > 0 || activeTags.length > 0;
+  const configReady = Boolean(selectedThresholdId);
+  const reportsReady = reports.length > 0;
+  const canStartDiagnostic = setupComplete && Boolean(masterPath) && assignmentsReady && testsReady && configReady && reportsReady;
+
+  const navigationAvailability = useMemo(() => {
+    const available = new Map<PageId, boolean>();
+    (["dashboard", ...CONFIGURE_FLOW, "output", "results"] as PageId[]).forEach((page) => {
+      available.set(page, page === "dashboard" || unlockedPages.has(page));
+    });
+    return available;
+  }, [unlockedPages]);
+
+  useEffect(() => {
+    if (masterPath) unlockPage("profiles");
+  }, [masterPath, unlockPage]);
+
+  useEffect(() => {
+    if (unlockedPages.has("profiles") && assignmentsReady && (activePage === "profiles" || unlockedPages.has("tests"))) {
+      unlockPage("tests");
+    }
+  }, [activePage, assignmentsReady, unlockPage, unlockedPages]);
+
+  useEffect(() => {
+    if (unlockedPages.has("tests") && testsReady && (activePage === "tests" || unlockedPages.has("config"))) {
+      unlockPage("config");
+    }
+  }, [activePage, testsReady, unlockPage, unlockedPages]);
+
+  useEffect(() => {
+    if (unlockedPages.has("config") && configReady && (activePage === "config" || unlockedPages.has("reports"))) {
+      unlockPage("reports");
+    }
+  }, [activePage, configReady, unlockPage, unlockedPages]);
+
+  useEffect(() => {
+    if (unlockedPages.has("reports") && reportsReady && (activePage === "reports" || setupComplete)) {
+      setSetupComplete(true);
+    }
+  }, [activePage, reportsReady, setupComplete, unlockedPages]);
+
+  useEffect(() => {
+    if (logs.length > 0) unlockPage("output");
+  }, [logs.length, unlockPage]);
+
+  useEffect(() => {
+    const previous = previousRunStatusRef.current;
+    const wasRunning = previous === "queued" || previous === "running";
+    const isTerminal = TERMINAL_RUN_STATUSES.has(runStatus);
+    if (isTerminal && runId) {
+      unlockPage("results");
+    }
+    if (wasRunning && isTerminal && runId) {
+      setActivePage("results");
+    }
+    previousRunStatusRef.current = runStatus;
+  }, [runId, runStatus, unlockPage]);
+
   // Derive completed test summary from summary-type log lines.
   const testSummaries: TestSummary[] = useMemo(() => {
     const summaries: TestSummary[] = [];
@@ -213,7 +302,33 @@ export default function App() {
     applyTheme(next);
   }
 
+  function navigateTo(page: PageId) {
+    if (!navigationAvailability.get(page)) {
+      showError("Complete the previous diagnostic step before opening this section.");
+      return;
+    }
+    if (thresholdDirty && activePage === "config" && page !== "config") {
+      requestConfirm({
+        title: "Unsaved Changes",
+        message:
+          "You have unsaved changes in Test Configuration. Leave anyway?",
+        confirmLabel: "Leave",
+        variant: "danger",
+        onConfirm: () => {
+          setThresholdDirty(false);
+          setActivePage(page);
+        }
+      });
+      return;
+    }
+    setActivePage(page);
+  }
+
   function requestStart() {
+    if (!canStartDiagnostic) {
+      showError("Complete the diagnostic setup flow before starting a run.");
+      return;
+    }
     if (!masterPath) {
       showError("Select a camera to test before starting a run.");
       return;
@@ -243,6 +358,7 @@ export default function App() {
           report_formats: reports,
           threshold_config_id: selectedThresholdId
         });
+        unlockPage("output");
         setActivePage("output");
       }
     });
@@ -263,6 +379,7 @@ export default function App() {
 
   function handleViewRun(runId: string) {
     setViewedRunId(runId);
+    unlockPage("results");
     setActivePage("results");
   }
 
@@ -270,26 +387,12 @@ export default function App() {
     <main className="app-shell">
       <Sidebar
         activePage={activePage}
-        onNavigate={(page) => {
-          if (thresholdDirty && activePage === "config" && page !== "config") {
-            requestConfirm({
-              title: "Unsaved Changes",
-              message:
-                "You have unsaved changes in Test Configuration. Leave anyway?",
-              confirmLabel: "Leave",
-              variant: "danger",
-              onConfirm: () => {
-                setThresholdDirty(false);
-                setActivePage(page);
-              }
-            });
-            return;
-          }
-          setActivePage(page);
-        }}
+        onNavigate={navigateTo}
+        navigationAvailability={navigationAvailability}
         isRunning={isRunning}
         runStatus={runStatus}
         actionInProgress={actionInProgress}
+        canStartDiagnostic={canStartDiagnostic}
         onRequestStart={requestStart}
         onRequestStop={requestStop}
         theme={theme}
@@ -297,7 +400,15 @@ export default function App() {
       />
 
       <section className="workspace">
-        {activePage === "dashboard" && <DashboardPage onViewRun={handleViewRun} />}
+        {activePage === "dashboard" && (
+          <DashboardPage
+            onViewRun={handleViewRun}
+            onStartNewDiagnostic={resetDiagnosticFlow}
+            isRunning={isRunning}
+            runStatus={runStatus}
+            setupComplete={setupComplete}
+          />
+        )}
 
         {activePage === "cameras" && (
           <CameraSelectionPage

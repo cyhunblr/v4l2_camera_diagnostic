@@ -337,14 +337,9 @@ export function ThresholdConfigPage({
       </header>
 
       <div className="panel config-toolbar-panel">
-        <div className="panel-title">
-          <SlidersHorizontal size={18} />
-          <h3>Preset Configuration Manager</h3>
-        </div>
-
         <div className="threshold-toolbar">
           <div className="toolbar-select-group">
-            <label htmlFor="preset-select">Active Preset:</label>
+            <label htmlFor="preset-select">Preset:</label>
             <select
               id="preset-select"
               value={selectedThresholdId}
@@ -397,6 +392,12 @@ export function ThresholdConfigPage({
           </div>
         )}
 
+        {isDefault && (
+          <p className="threshold-hint">
+            The default preset is read-only. Create a custom preset to modify parameters.
+          </p>
+        )}
+
         <div className="config-filter-bar">
           <div className="filter-group">
             <span className="toolbar-label">
@@ -423,12 +424,6 @@ export function ThresholdConfigPage({
 
         {editing && (
           <div className="threshold-editor">
-            {isDefault && (
-              <p className="threshold-hint">
-                The default preset is read-only. Create a custom preset to modify parameters.
-              </p>
-            )}
-
             {[...categoryMap.entries()].map(([category, catTestIds]) => (
               <details key={category} open className="test-category-group">
                 <summary className="category-summary">

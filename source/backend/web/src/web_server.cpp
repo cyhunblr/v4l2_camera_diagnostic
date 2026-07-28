@@ -975,7 +975,12 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
     ThresholdRegistry registry(default_threshold_directory());
     Json::Value out(Json::objectValue);
     out["configs"] = Json::Value(Json::arrayValue);
-    for (const auto &config : registry.list_configs()) {
+    for (const auto &stored : registry.list_configs()) {
+      // The built-in "default" preset is read-only in the UI, so it is served
+      // fully resolved: every configurable test appears, even one the stored file
+      // has no entry for. Custom presets keep their stored overrides only, so
+      // saving one cannot freeze today's defaults into it.
+      const ThresholdConfig config = stored.id == "default" ? registry.resolve(stored.id) : stored;
       Json::Value item(Json::objectValue);
       item["id"] = config.id;
       item["name"] = config.name;
@@ -1011,6 +1016,9 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
       Json::Value out(Json::objectValue);
       out["error"] = "threshold config not found";
       return json_to_string(out);
+    }
+    if (config.id == "default") {
+      config = registry.resolve(config.id);  // read-only preset: serve the complete set
     }
     Json::Value out(Json::objectValue);
     out["id"] = config.id;

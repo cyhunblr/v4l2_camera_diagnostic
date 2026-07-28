@@ -9,7 +9,9 @@
 #include <cstring>
 #include <dirent.h>
 #include <fstream>
+#include <iostream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <sys/stat.h>
@@ -49,6 +51,112 @@ bool ends_with(const std::string &value, const std::string &suffix) {
   return value.size() >= suffix.size() && value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
+// Strips the "tNN-" prefix from a test id. Test ids get renumbered whenever a
+// test is added, merged or removed, so the numeric prefix is not stable across
+// versions -- the descriptive suffix is.
+std::string test_id_suffix(const std::string &id) {
+  const std::size_t dash = id.find('-');
+  return dash == std::string::npos ? std::string() : id.substr(dash + 1);
+}
+
+// Maps a persisted test id onto a currently-known one.
+//
+// A config written before a renumbering carries shifted ids: what is now
+// "t17-format-comparison" was stored as "t16-format-comparison". Those are
+// migrated by matching the suffix, which preserves values the user configured.
+// An id with no unique match is dropped -- keeping it made the configuration
+// page render cards for tests that no longer exist while hiding every test that
+// does, and made the runner silently fall back to built-in defaults because the
+// per-test lookup never matched.
+std::string migrate_test_id(const std::string &id, const std::set<std::string> &known) {
+  if (known.count(id) != 0) {
+    return id;
+  }
+  const std::string suffix = test_id_suffix(id);
+  if (suffix.empty()) {
+    return std::string();
+  }
+  std::string match;
+  for (const auto &candidate : known) {
+    if (test_id_suffix(candidate) != suffix) {
+      continue;
+    }
+    if (!match.empty()) {
+      return std::string();  // ambiguous suffix -- refuse to guess
+    }
+    match = candidate;
+  }
+  return match;
+}
+
+// Every test id that can carry configuration: a test may define run parameters
+// without defining verdict thresholds, so neither map alone answers "does this
+// test still exist".
+const std::set<std::string> &configurable_test_ids() {
+  static const std::set<std::string> ids = [] {
+    std::set<std::string> result;
+    for (const auto &entry : default_threshold_config().values) {
+      result.insert(entry.first);
+    }
+    for (const auto &entry : default_test_params()) {
+      result.insert(entry.first);
+    }
+    return result;
+  }();
+  return ids;
+}
+
+// Reads one test-id-keyed JSON map (either `values` or `params`) into `out`,
+// migrating renumbered ids on the way. Ids that already match are applied first
+// so a current id is never overwritten by a migrated one. `known` decides whether
+// a test exists at all; `defaults` decides which keys are meaningful for this
+// particular map.
+void collect_test_map(const Json::Value &node, const std::map<std::string, TestThresholds> &defaults,
+                      const std::set<std::string> &known, bool known_only, std::map<std::string, TestThresholds> *out,
+                      std::vector<std::string> *migrated, std::vector<std::string> *dropped) {
+  if (!node.isObject()) {
+    return;
+  }
+  std::vector<std::pair<std::string, std::string>> mapping;
+  for (const auto &test_id : node.getMemberNames()) {
+    const std::string target = migrate_test_id(test_id, known);
+    if (target.empty() || defaults.count(target) == 0) {
+      // Either the test is gone, or it exists but defines nothing for this map
+      // (a params-only test cannot carry verdict thresholds).
+      dropped->push_back(test_id);
+      continue;
+    }
+    if (target != test_id) {
+      migrated->push_back(test_id + " -> " + target);
+    }
+    mapping.emplace_back(test_id, target);
+  }
+  std::stable_sort(mapping.begin(), mapping.end(),
+                   [](const std::pair<std::string, std::string> &lhs, const std::pair<std::string, std::string> &rhs) {
+                     return (lhs.first == lhs.second) && (rhs.first != rhs.second);
+                   });
+  for (const auto &entry : mapping) {
+    const Json::Value &keys = node[entry.first];
+    if (!keys.isObject()) {
+      continue;
+    }
+    const auto defaults_it = defaults.find(entry.second);
+    for (const auto &key : keys.getMemberNames()) {
+      if (known_only && (defaults_it == defaults.end() || defaults_it->second.count(key) == 0)) {
+        continue;
+      }
+      if (!keys[key].isNumeric()) {
+        continue;
+      }
+      TestThresholds &slot = (*out)[entry.second];
+      if (slot.count(key) != 0) {
+        continue;  // an exact-id entry already provided this key
+      }
+      slot[key] = keys[key].asDouble();
+    }
+  }
+}
+
 Json::Value config_to_json(const ThresholdConfig &config) {
   Json::Value root(Json::objectValue);
   root["schema_version"] = 2;
@@ -76,65 +184,31 @@ Json::Value config_to_json(const ThresholdConfig &config) {
   return root;
 }
 
-// Parses a config from JSON. When `known_only` is set, test ids and keys that
-// are not part of the built-in default are silently dropped (forward/backward
-// compatibility on import).
-bool config_from_json(const Json::Value &root, bool known_only, ThresholdConfig *config) {
+// Parses a config from JSON. Test ids are always reconciled against the built-in
+// default: renumbered ids are migrated by suffix and ids with no match are
+// dropped, so a stored config can never introduce a test that does not exist.
+// When `known_only` is set, individual keys outside the built-in default are
+// dropped as well (forward/backward compatibility on import).
+bool config_from_json(const Json::Value &root, bool known_only, ThresholdConfig *config,
+                      std::vector<std::string> *migrated, std::vector<std::string> *dropped) {
   if (!root.isObject()) {
     return false;
   }
+  std::vector<std::string> migrated_local;
+  std::vector<std::string> dropped_local;
+  std::vector<std::string> &migrated_out = migrated != nullptr ? *migrated : migrated_local;
+  std::vector<std::string> &dropped_out = dropped != nullptr ? *dropped : dropped_local;
+
   const ThresholdConfig defaults = default_threshold_config();
   ThresholdConfig parsed;
   parsed.id = root.get("id", "").asString();
   parsed.name = root.get("name", parsed.id).asString();
   parsed.description = root.get("description", "").asString();
 
-  const Json::Value &values = root["values"];
-  if (values.isObject()) {
-    for (const auto &test_id : values.getMemberNames()) {
-      const bool known_test = defaults.values.count(test_id) != 0;
-      if (known_only && !known_test) {
-        continue;
-      }
-      const Json::Value &keys = values[test_id];
-      if (!keys.isObject()) {
-        continue;
-      }
-      for (const auto &key : keys.getMemberNames()) {
-        if (known_only && (!known_test || defaults.values.at(test_id).count(key) == 0)) {
-          continue;
-        }
-        if (!keys[key].isNumeric()) {
-          continue;
-        }
-        parsed.values[test_id][key] = keys[key].asDouble();
-      }
-    }
-  }
-
-  const Json::Value &params = root["params"];
-  if (params.isObject()) {
-    const auto default_params = default_test_params();
-    for (const auto &test_id : params.getMemberNames()) {
-      const bool known_test = default_params.count(test_id) != 0;
-      if (known_only && !known_test) {
-        continue;
-      }
-      const Json::Value &keys = params[test_id];
-      if (!keys.isObject()) {
-        continue;
-      }
-      for (const auto &key : keys.getMemberNames()) {
-        if (known_only && (!known_test || default_params.at(test_id).count(key) == 0)) {
-          continue;
-        }
-        if (!keys[key].isNumeric()) {
-          continue;
-        }
-        parsed.params[test_id][key] = keys[key].asDouble();
-      }
-    }
-  }
+  const std::set<std::string> &known = configurable_test_ids();
+  collect_test_map(root["values"], defaults.values, known, known_only, &parsed.values, &migrated_out, &dropped_out);
+  collect_test_map(root["params"], default_test_params(), known, known_only, &parsed.params, &migrated_out,
+                   &dropped_out);
 
   if (!valid_id(parsed.id)) {
     return false;
@@ -154,7 +228,32 @@ bool parse_config_file(const std::string &path, ThresholdConfig *config) {
   if (!Json::parseFromStream(builder, in, &root, &errors)) {
     return false;
   }
-  return config_from_json(root, /*known_only=*/false, config);
+  std::vector<std::string> migrated;
+  std::vector<std::string> dropped;
+  if (!config_from_json(root, /*known_only=*/false, config, &migrated, &dropped)) {
+    return false;
+  }
+  // Surface the reconciliation: a config that silently loses entries is how a
+  // stale file went unnoticed while the UI showed almost no tests.
+  if (!migrated.empty() || !dropped.empty()) {
+    std::cerr << "v4l2diag: threshold config " << path << " no longer matches the current tests;";
+    if (!migrated.empty()) {
+      std::cerr << " migrated " << migrated.size() << " (";
+      for (std::size_t i = 0; i < migrated.size(); ++i) {
+        std::cerr << (i ? ", " : "") << migrated[i];
+      }
+      std::cerr << ")";
+    }
+    if (!dropped.empty()) {
+      std::cerr << " dropped " << dropped.size() << " (";
+      for (std::size_t i = 0; i < dropped.size(); ++i) {
+        std::cerr << (i ? ", " : "") << dropped[i];
+      }
+      std::cerr << ")";
+    }
+    std::cerr << "; save the preset to rewrite it." << std::endl;
+  }
+  return true;
 }
 
 }  // namespace
@@ -496,7 +595,7 @@ bool ThresholdRegistry::import_config(const std::string &json_text, std::string 
     return false;
   }
   ThresholdConfig config;
-  if (!config_from_json(root, /*known_only=*/true, &config)) {
+  if (!config_from_json(root, /*known_only=*/true, &config, nullptr, nullptr)) {
     if (error) {
       *error = "config must have a valid id";
     }

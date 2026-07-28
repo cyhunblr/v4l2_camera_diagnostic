@@ -1,5 +1,5 @@
 import React from "react";
-import { Camera, FileDown, Gauge, History, ListChecks, Play, SlidersHorizontal, Square, Terminal, Settings2 } from "lucide-react";
+import { Camera, FileDown, Gauge, History, ListChecks, Lock, Play, SlidersHorizontal, Square, Terminal, Settings2 } from "lucide-react";
 import { PageId } from "../types";
 import { ThemeMode } from "../theme";
 import { ThemeToggle } from "./ThemeToggle";
@@ -18,9 +18,11 @@ const CONFIGURE_ITEMS: NavItem[] = [
 type Props = {
   activePage: PageId;
   onNavigate: (page: PageId) => void;
+  navigationAvailability: Map<PageId, boolean>;
   isRunning: boolean;
   runStatus: string;
   actionInProgress: boolean;
+  canStartDiagnostic: boolean;
   onRequestStart: () => void;
   onRequestStop: () => void;
   theme: ThemeMode;
@@ -30,15 +32,19 @@ type Props = {
 export function Sidebar({
   activePage,
   onNavigate,
+  navigationAvailability,
   isRunning,
   runStatus,
   actionInProgress,
+  canStartDiagnostic,
   onRequestStart,
   onRequestStop,
   theme,
   onToggleTheme
 }: Props) {
-  const resultsDisabled = isRunning;
+  const canNavigate = (page: PageId) => navigationAvailability.get(page) ?? false;
+  const startDisabled = actionInProgress || (!isRunning && !canStartDiagnostic);
+  const startTitle = !isRunning && !canStartDiagnostic ? "Complete the setup flow before starting diagnostics." : undefined;
 
   return (
     <aside className="sidebar">
@@ -56,26 +62,42 @@ export function Sidebar({
 
         <div className="nav-divider" />
         <p className="nav-group-label">Configure</p>
-        {CONFIGURE_ITEMS.map((item) => (
-          <button type="button" key={item.id} className={activePage === item.id ? "active" : ""} onClick={() => onNavigate(item.id)}>
-            {item.icon} {item.label}
+        {CONFIGURE_ITEMS.map((item) => {
+          const disabled = !canNavigate(item.id);
+          return (
+          <button
+            type="button"
+            key={item.id}
+            className={`${activePage === item.id ? "active" : ""}${disabled ? " locked" : ""}`}
+            onClick={() => onNavigate(item.id)}
+            disabled={disabled}
+            title={disabled ? "Complete the previous step first." : undefined}
+          >
+            {item.icon} {item.label} {disabled && <Lock className="nav-lock" size={13} />}
           </button>
-        ))}
+          );
+        })}
 
         <div className="nav-divider" />
-        <button type="button" className={activePage === "output" ? "active" : ""} onClick={() => onNavigate("output")}>
-          <Terminal size={16} /> Live Output
+        <button
+          type="button"
+          className={`${activePage === "output" ? "active" : ""}${!canNavigate("output") ? " locked" : ""}`}
+          onClick={() => onNavigate("output")}
+          disabled={!canNavigate("output")}
+          title={!canNavigate("output") ? "Live Output opens when a diagnostic starts." : undefined}
+        >
+          <Terminal size={16} /> Live Output {!canNavigate("output") && <Lock className="nav-lock" size={13} />}
         </button>
 
         <div className="nav-divider" />
         <button
           type="button"
-          className={activePage === "results" ? "active" : ""}
+          className={`${activePage === "results" ? "active" : ""}${!canNavigate("results") ? " locked" : ""}`}
           onClick={() => onNavigate("results")}
-          disabled={resultsDisabled}
-          title={resultsDisabled ? "Results are available after the run finishes." : undefined}
+          disabled={!canNavigate("results")}
+          title={!canNavigate("results") ? "Results are available after the run finishes." : undefined}
         >
-          <History size={16} /> Results
+          <History size={16} /> Results {!canNavigate("results") && <Lock className="nav-lock" size={13} />}
         </button>
       </nav>
 
@@ -86,9 +108,9 @@ export function Sidebar({
         onChange={(event) => onNavigate(event.target.value as PageId)}
       >
         <option value="dashboard">Dashboard</option>
-        {CONFIGURE_ITEMS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-        <option value="output">Live Output</option>
-        <option value="results" disabled={resultsDisabled}>Results</option>
+        {CONFIGURE_ITEMS.map((item) => <option key={item.id} value={item.id} disabled={!canNavigate(item.id)}>{item.label}</option>)}
+        <option value="output" disabled={!canNavigate("output")}>Live Output</option>
+        <option value="results" disabled={!canNavigate("results")}>Results</option>
       </select>
 
       <div className="sidebar-run-controls">
@@ -99,7 +121,8 @@ export function Sidebar({
         <button
           className={`run-button ${isRunning ? "stop" : ""}`}
           onClick={isRunning ? onRequestStop : onRequestStart}
-          disabled={actionInProgress}
+          disabled={startDisabled}
+          title={startTitle}
         >
           {isRunning ? <><Square size={16} /> Stop Diagnostic</> : <><Play size={16} /> Start Diagnostic</>}
         </button>

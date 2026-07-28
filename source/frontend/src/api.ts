@@ -1,73 +1,12 @@
 import { Profile, RunSummary, StartRunPayload, TestDefinition, ThresholdConfig } from "./types";
 
-export const DEFAULT_TESTS: TestDefinition[] = [
-  {
-    id: "t01-open-close",
-    name: "Open / Close Cycle Test",
-    category: "Basic Driver Reliability",
-    description: "Tests basic v4l2 device open and close file handle operations.",
-    uses_trigger: false,
-    supported_trigger_modes: ["free-run", "software", "hardware"],
-    tags: ["stable"]
-  },
-  {
-    id: "t02-query-caps",
-    name: "V4L2 Capability Query",
-    category: "Basic Driver Reliability",
-    description: "Queries V4L2 device capabilities and streaming flags.",
-    uses_trigger: false,
-    supported_trigger_modes: ["free-run", "software", "hardware"],
-    tags: ["stable"]
-  },
-  {
-    id: "t07-poll-timeout-sweep",
-    name: "Poll Timeout Sweep",
-    category: "Streaming & Latency",
-    description: "Sweeps poll timeout durations to verify driver event notifications.",
-    uses_trigger: true,
-    supported_trigger_modes: ["free-run", "software", "hardware"],
-    tags: ["long-running"]
-  },
-  {
-    id: "t12-zero-copy-dmabuf",
-    name: "Zero-Copy DMABUF Transfer",
-    category: "Advanced Memory",
-    description: "Verifies zero-copy memory pointer sharing via DMABUF handles.",
-    uses_trigger: false,
-    supported_trigger_modes: ["free-run", "software"],
-    tags: ["device-specific", "stress"]
-  }
-];
+// The test list and the preset list come from the backend registries. There is no
+// hard-coded mirror here on purpose: the previous one drifted out of date and
+// served invented tests and an invented preset whose ids matched no real test, so
+// a failed request looked like real configuration instead of a failure.
+export const DEFAULT_TESTS: TestDefinition[] = [];
 
-export const DEFAULT_THRESHOLDS: ThresholdConfig[] = [
-  {
-    id: "default",
-    name: "Built-in Standard Thresholds",
-    description: "Default validation thresholds for Jetson diagnostic suite",
-    values: {
-      "t01-open-close": { "max_open_duration_ms": 150, "failure_rate_pct": 0 },
-
-      "t07-poll-timeout-sweep": { "max_poll_delay_ms": 500, "drop_count": 0 }
-    },
-    params: {
-      "t01-open-close": { "cycle_count": 10, "warmup_delay_ms": 20 },
-      "t07-poll-timeout-sweep": { "sweep_steps": 5, "timeout_ms": 1000 }
-    }
-  },
-  {
-    id: "jetson-high-perf",
-    name: "Jetson High Performance Profile",
-    description: "Strict thresholds tailored for low-latency Tegra multimedia pipelines",
-    values: {
-      "t01-open-close": { "max_open_duration_ms": 50, "failure_rate_pct": 0 },
-      "t07-poll-timeout-sweep": { "max_poll_delay_ms": 100, "drop_count": 0 }
-    },
-    params: {
-      "t01-open-close": { "cycle_count": 50, "warmup_delay_ms": 10 },
-      "t07-poll-timeout-sweep": { "sweep_steps": 10, "timeout_ms": 500 }
-    }
-  }
-];
+export const DEFAULT_THRESHOLDS: ThresholdConfig[] = [];
 
 function jsonResp(data: unknown): Response {
   return new Response(JSON.stringify(data), {
