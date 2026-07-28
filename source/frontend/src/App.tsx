@@ -44,9 +44,13 @@ export default function App() {
   const [singleProfileId, setSingleProfileId] = useState("");
   const [cameraAssignments, setCameraAssignments] = useState<CameraAssignment[]>([]);
   const [backends, setBackends] = useState(["mmap"]);
-  const [selectedTests, setSelectedTests] = useState(["implemented"]);
+  const [selectedTests, setSelectedTests] = useState<string[]>([]);
+  const [activeTags, setActiveTags] = useState<string[]>(["stable"]);
+  const [activeAction, setActiveAction] = useState<"select-all" | "clear-all" | "reset-stable">("reset-stable");
   const [reports, setReports] = useState(["json", "html"]);
   const [selectedThresholdId, setSelectedThresholdId] = useState("default");
+  const [thresholdDirty, setThresholdDirty] = useState(false);
+  const [thresholdOnlySelected, setThresholdOnlySelected] = useState(true);
   const [severityFilter, setSeverityFilter] = useState("all");
   const [autoScroll, setAutoScroll] = useState(true);
   const [activePage, setActivePage] = useState<PageId>("dashboard");
@@ -266,7 +270,23 @@ export default function App() {
     <main className="app-shell">
       <Sidebar
         activePage={activePage}
-        onNavigate={setActivePage}
+        onNavigate={(page) => {
+          if (thresholdDirty && activePage === "config" && page !== "config") {
+            requestConfirm({
+              title: "Unsaved Changes",
+              message:
+                "You have unsaved changes in Test Configuration. Leave anyway?",
+              confirmLabel: "Leave",
+              variant: "danger",
+              onConfirm: () => {
+                setThresholdDirty(false);
+                setActivePage(page);
+              }
+            });
+            return;
+          }
+          setActivePage(page);
+        }}
         isRunning={isRunning}
         runStatus={runStatus}
         actionInProgress={actionInProgress}
@@ -314,7 +334,6 @@ export default function App() {
         {activePage === "tests" && (
           <TestSelectionPage
             groupedTests={groupedTests}
-
             setSelectedTests={setSelectedTests}
             tests={tests}
             isTestSelected={isTestSelected}
@@ -322,6 +341,10 @@ export default function App() {
             triggerMode={triggerMode}
             backends={backends}
             onToggleBackend={(backend) => toggleListValue(backend, backends, setBackends)}
+            activeTags={activeTags}
+            setActiveTags={setActiveTags}
+            activeAction={activeAction}
+            setActiveAction={setActiveAction}
           />
         )}
 
@@ -330,6 +353,9 @@ export default function App() {
             selectedThresholdId={selectedThresholdId}
             onSelectedChange={setSelectedThresholdId}
             selectedTests={selectedTests}
+            onlySelected={thresholdOnlySelected}
+            onOnlySelectedChange={setThresholdOnlySelected}
+            onDirtyChange={setThresholdDirty}
             onError={showError}
           />
         )}

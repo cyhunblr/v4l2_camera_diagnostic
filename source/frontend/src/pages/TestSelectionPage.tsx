@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { HardDrive, CheckCircle2, Filter } from "lucide-react";
 import { TestDefinition, TriggerMode } from "../types";
 import { SelectableCard } from "../components/SelectableCard";
@@ -25,6 +24,10 @@ type Props = {
   triggerMode: TriggerMode;
   backends: string[];
   onToggleBackend: (backend: string) => void;
+  activeTags: string[];
+  setActiveTags: (tags: string[]) => void;
+  activeAction: ActionMode;
+  setActiveAction: (action: ActionMode) => void;
 };
 
 export function TestSelectionPage({
@@ -35,10 +38,12 @@ export function TestSelectionPage({
   onToggleTest,
   triggerMode,
   backends,
-  onToggleBackend
+  onToggleBackend,
+  activeTags,
+  setActiveTags,
+  activeAction,
+  setActiveAction
 }: Props) {
-  const [activeTags, setActiveTags] = useState<string[]>(["stable"]);
-  const [activeAction, setActiveAction] = useState<ActionMode>("reset-stable");
 
   const allTests = tests.length ? tests : groupedTests.flatMap(([, items]) => items);
   const selectedCount = allTests.filter((t) => isTestSelected(t)).length;

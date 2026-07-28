@@ -37,6 +37,9 @@ type Props = {
   selectedThresholdId: string;
   onSelectedChange: (id: string) => void;
   selectedTests?: string[];
+  onlySelected: boolean;
+  onOnlySelectedChange: (v: boolean) => void;
+  onDirtyChange: (dirty: boolean) => void;
   onError: (msg: string) => void;
 };
 
@@ -44,18 +47,28 @@ export function ThresholdConfigPage({
   selectedThresholdId,
   onSelectedChange,
   selectedTests = [],
+  onlySelected,
+  onOnlySelectedChange,
+  onDirtyChange,
   onError
 }: Props) {
   const [configs, setConfigs] = useState<ThresholdConfig[]>(api.DEFAULT_THRESHOLDS);
   const [editing, setEditing] = useState<ThresholdConfig | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirtyLocal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [newId, setNewId] = useState("");
   const [showNew, setShowNew] = useState(false);
-  const [onlySelected, setOnlySelected] = useState(true);
   const [inputErrors, setInputErrors] = useState<Record<string, string>>({});
   const [rawInputs, setRawInputs] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const setDirty = useCallback(
+    (value: boolean) => {
+      setDirtyLocal(value);
+      onDirtyChange(value);
+    },
+    [onDirtyChange]
+  );
 
   const defaultConfig = configs.find((c) => c.id === "default");
 
@@ -84,7 +97,7 @@ export function ThresholdConfigPage({
     } else if (configs.length > 0) {
       onSelectedChange(configs[0].id);
     }
-  }, [selectedThresholdId, configs, onSelectedChange]);
+  }, [selectedThresholdId, configs, onSelectedChange, setDirty]);
 
   /** Inline dynamic validator for input changes. */
   function validateAndUpdate(
@@ -393,14 +406,14 @@ export function ThresholdConfigPage({
               <button
                 type="button"
                 className={`choice-btn ${onlySelected ? "selected" : ""}`}
-                onClick={() => setOnlySelected(true)}
+                onClick={() => onOnlySelectedChange(true)}
               >
                 Selected Tests ({displayTestIds.length})
               </button>
               <button
                 type="button"
                 className={`choice-btn ${!onlySelected ? "selected" : ""}`}
-                onClick={() => setOnlySelected(false)}
+                onClick={() => onOnlySelectedChange(false)}
               >
                 All Tests ({allTestIds.length})
               </button>
