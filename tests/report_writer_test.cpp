@@ -224,8 +224,7 @@ int main() {
   cliff_test.summary = "Stable cliff at 45ms; 55ms safety margin.";
   cliff_test.duration_ms = 61000.0;
   cliff_test.metrics = {
-      {"cliff_ms", "ms", 45.0, "Stable poll timeout."},
-      {"cliff_total_ms", "ms", 50.0, "Cliff plus pulse width."},
+      {"cliff_ms", "ms", 45.0, "Stable poll timeout, measured from the trigger's rising edge."},
       {"first_miss_ms", "ms", 44.0, "Highest timeout with misses."},
       {"safety_margin_ms", "ms", 55.0, "Production timeout - cliff timeout."},
       {"stability_confirmed", "bool", 1.0, "Whether cliff was stable."},

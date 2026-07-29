@@ -1239,7 +1239,6 @@ void render_t13_distribution_chart(std::ostream &out, const std::vector<TimeoutP
 
 bool render_t13_threshold_chart(std::ostream &out, const std::vector<MetricValue> &metrics, std::vector<bool> &used) {
   const int cliff_index = metric_index_by_name(metrics, "cliff_ms");
-  const int total_index = metric_index_by_name(metrics, "cliff_total_ms");
   const int miss_index = metric_index_by_name(metrics, "first_miss_ms");
   const int safety_index = metric_index_by_name(metrics, "safety_margin_ms");
   if (cliff_index < 0 || !is_chartable_metric(metrics[cliff_index])) {
@@ -1258,10 +1257,6 @@ bool render_t13_threshold_chart(std::ostream &out, const std::vector<MetricValue
   }
   markers.push_back({"Cliff", metrics[cliff_index].name, metrics[cliff_index].value});
   used[cliff_index] = true;
-  if (total_index >= 0 && is_chartable_metric(metrics[total_index])) {
-    markers.push_back({"Total cliff", metrics[total_index].name, metrics[total_index].value});
-    used[total_index] = true;
-  }
   if (safety_index >= 0 && is_chartable_metric(metrics[safety_index])) {
     markers.push_back(
         {"Production", "production_timeout_ms", metrics[cliff_index].value + metrics[safety_index].value});

@@ -355,9 +355,14 @@ std::map<std::string, TestThresholds> default_test_params() {
         {"full_warmup", 3},
         {"full_captures", 5},
         {"full_timeout_ms", 150},
-        // A freshly opened session discards its first frame (see t26), so the
-        // rapid loop needs a warmup frame of its own before the measured capture.
-        {"rapid_warmup", 1},
+        // Warmup here is counted in trigger pulses, not in discarded frames.
+        // t03 measures trigger_pulses_to_first_frame — on the sensors this
+        // suite targets that is 2, because the pipeline needs one pulse to come
+        // up before another can produce a frame. A single warmup pulse leaves
+        // the measured capture's own pulse doing the priming, so it times out
+        // every cycle and the rapid loop reports 0/N on healthy hardware.
+        // Keep this >= t03's measured pulse count.
+        {"rapid_warmup", 2},
         {"rapid_timeout_ms", 200},
         // Where sensors share a deserializer and fsync source, STREAMON
         // re-initialises the whole camera group over I2C — that needs far more

@@ -5,6 +5,7 @@
 #include "v4l2diag/hw/v4l2_controls.hpp"
 #include "v4l2diag/hw/v4l2_capture.hpp"
 #include "v4l2diag/hw/device_discovery.hpp"
+#include "v4l2diag/core/pacing.hpp"
 #include "v4l2diag/core/stats.hpp"
 
 #include <algorithm>
@@ -61,6 +62,14 @@ double thv(const TestThresholds &th, const std::string &test_id, const std::stri
 uint64_t pulse_ns_from(const TestThresholds &tp) {
   const auto it = tp.find("__pulse_width_ns");
   return it != tp.end() ? static_cast<uint64_t>(it->second) : 13'000'000UL;
+}
+
+// Resolves the profile-configured trigger interval (milliseconds) injected into
+// every test's `tp` map by run_test(). Falls back to 100ms — the fixed pacing
+// these loops used before the profile rate was actually wired in.
+double interval_ms_from(const TestThresholds &tp) {
+  const auto it = tp.find("__trigger_interval_ms");
+  return (it != tp.end() && it->second > 0.0) ? it->second : 100.0;
 }
 
 // Resolves a run parameter: the configured value from `tp` if present,
@@ -896,7 +905,6 @@ void run_poll_timeout_cliff(const std::string &camera_path, MemoryBackend backen
   if (hi_ms < 0) {
     // No timeout in range caused misses
     r.metrics.push_back(metric("cliff_ms", "ms", -1.0, "No cliff found — pipeline reliable even at 1ms."));
-    r.metrics.push_back(metric("cliff_total_ms", "ms", -1.0, "N/A when no cliff."));
     r.metrics.push_back(metric("safety_margin_ms", "ms", PROD_MS - 1.0, "Margin vs production timeout."));
     r.metrics.push_back(metric("stability_confirmed", "bool", 1.0, "N/A when no cliff."));
     r.status = TestStatus::Pass;
@@ -961,35 +969,43 @@ void run_poll_timeout_cliff(const std::string &camera_path, MemoryBackend backen
   bool stable = (stable_rounds >= min_stable_rounds);
   double safety = PROD_MS - static_cast<double>(cliff_candidate);
   const double pulse_width_ms = static_cast<double>(pulse_ns) / 1'000'000.0;
-  const double cliff_total_ms = static_cast<double>(cliff_candidate) + pulse_width_ms;
 
   // Push metrics
   r.metrics.push_back(metric("cliff_ms", "ms", static_cast<double>(cliff_candidate),
-                             "Stable poll(2) timeout, measured AFTER the blocking trigger pulse has already "
-                             "elapsed — not the total trigger-to-frame latency."));
-  r.metrics.push_back(
-      metric("cliff_total_ms", "ms", cliff_total_ms,
-             "cliff_ms + pulse_width_ms: the true minimum trigger-to-frame timeout budget, since trigger.send() "
-             "blocks for the pulse width before poll() begins."));
+                             "Shortest poll(2) timeout that still catches every frame, measured from the trigger's "
+                             "rising edge — this is already the full trigger-to-frame budget."));
   r.metrics.push_back(metric("first_miss_ms", "ms", static_cast<double>(hi_ms), "Highest timeout with misses."));
   r.metrics.push_back(metric("safety_margin_ms", "ms", safety, "Production timeout - cliff timeout."));
+
   r.metrics.push_back(metric("stability_confirmed", "bool", stable ? 1.0 : 0.0,
                              "Whether cliff was stable over " + std::to_string(STABILITY_ROUNDS) + " rounds."));
   r.metrics.push_back(metric("stability_rounds_passed", "count", static_cast<double>(stable_rounds),
                              "Rounds that confirmed the cliff (out of " + std::to_string(STABILITY_ROUNDS) + ")."));
 
+  // The timing this measures is easy to read wrong, and reading it wrong leads
+  // straight to padding the production timeout by a pulse width it does not
+  // need. State the sequence plainly.
+  {
+    char width[32];
+    snprintf(width, sizeof(width), "%.1f", pulse_width_ms);
+    r.details.push_back(
+        "Timing: the " + std::string(width) +
+        "ms trigger pulse is fired asynchronously and poll() starts immediately on the rising edge — it does not "
+        "wait for the pulse to return LOW. cliff_ms is therefore measured from the rising edge and already covers "
+        "the whole trigger-to-frame path; do not add the pulse width to it.");
+  }
+
   // Emit summary box
   {
-    char r0[64], r1[64], r1b[64], r2[64], r3[64], r4[64];
+    char r0[64], r1[64], r2[64], r3[64], r4[64];
     snprintf(r0, sizeof(r0), "║  Production timeout : %5.1fms  ║", PROD_MS);
-    snprintf(r1, sizeof(r1), "║  Cliff (post-pulse) : %5dms  ║", cliff_candidate);
-    snprintf(r1b, sizeof(r1b), "║  Cliff (total)      : %5.1fms  ║", cliff_total_ms);
+    snprintf(r1, sizeof(r1), "║  Cliff (from edge)  : %5dms  ║", cliff_candidate);
     snprintf(r2, sizeof(r2), "║  Safety margin      : %5.1fms  ║", safety);
     snprintf(r3, sizeof(r3), "║  Stability          :   %d/%d    ║", stable_rounds, STABILITY_ROUNDS);
     snprintf(r4, sizeof(r4), "║  Confirmed          :   %s    ║", stable ? "YES" : "NO ");
     std::string box;
     box += "╔═══════ CLIFF SUMMARY ══════════╗\n";
-    box += std::string(r0) + "\n" + std::string(r1) + "\n" + std::string(r1b) + "\n" + std::string(r2) + "\n";
+    box += std::string(r0) + "\n" + std::string(r1) + "\n" + std::string(r2) + "\n";
     box += std::string(r3) + "\n" + std::string(r4) + "\n";
     box += "╚════════════════════════════════╝";
     emit_data(log, camera_path, "t13", box);
@@ -1388,6 +1404,7 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
     return true;
   };
 
+  Pacer full_pacer(interval_ms_from(tp));
   int full_consecutive_failures = 0;
   int full_attempted = 0;
   bool full_aborted = false;
@@ -1413,13 +1430,14 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
     s.warmup(trigger, FULL_WARMUP, 200, nullptr, pulse_ns);
     int ok = 0;
     for (int i = 0; i < FULL_CAPTURES; i++) {
+      full_pacer.begin();
       auto f = s.capture(trigger, FULL_TIMEOUT_MS, true, true, pulse_ns);
       if (f.success) {
         ok++;
         if (i == 0)
           first_lat.push_back(f.latency_ms);
       }
-      V4lSession::sleep_ms(100);
+      full_pacer.wait();
     }
     if (ok < FULL_CAPTURES)
       full_failures++;
@@ -1428,6 +1446,7 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
   const int RAPID_WARMUP = static_cast<int>(tpv(tp, "t06-stream-cycles", "rapid_warmup"));
   int rapid_ok = 0;
   int rapid_attempted = 0;
+  int rapid_capture_timeouts = 0;
   int rapid_start_failures = 0;
   int consecutive_start_failures = 0;
   bool rapid_aborted = false;
@@ -1470,12 +1489,29 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
       V4lSession::sleep_ms(RECOVERY_MS);
       continue;
     }
-    // A freshly opened session discards its first frame on sensors that need a
-    // warm-up frame after STREAMON (see t26-cold-start).
+    // Warmup pulses bring the pipeline up before the measured capture. This
+    // must cover t03's trigger_pulses_to_first_frame, or the measured capture's
+    // own pulse is still priming the pipeline and can never return a frame.
     s.warmup(trigger, RAPID_WARMUP, RAPID_PACING_MS, nullptr, pulse_ns);
     if (s.capture(trigger, RAPID_TIMEOUT_MS, true, true, pulse_ns).success)
       rapid_ok++;
+    else
+      rapid_capture_timeouts++;
     V4lSession::sleep_ms(RAPID_PACING_MS);
+  }
+
+  if (!full_pacer.overrun_note().empty())
+    r.details.push_back(full_pacer.overrun_note());
+
+  // A bare "0/50" says nothing about which half of the cycle broke. Streaming
+  // failures are already counted separately, so anything left is the capture
+  // timing out after a successful STREAMON — most often too few warmup pulses.
+  if (rapid_attempted > 0 && rapid_ok == 0 && rapid_capture_timeouts > 0) {
+    r.details.push_back("Rapid cycles: STREAMON succeeded every time but all " +
+                        std::to_string(rapid_capture_timeouts) + " captures timed out after " +
+                        std::to_string(RAPID_TIMEOUT_MS) + "ms with rapid_warmup=" + std::to_string(RAPID_WARMUP) +
+                        " pulses. Compare against t03's trigger_pulses_to_first_frame — if that is higher, raise "
+                        "rapid_warmup.");
   }
 
   r.metrics.push_back(
@@ -1771,11 +1807,13 @@ void run_pollerr_handling(const std::string &camera_path, MemoryBackend backend,
   }
   s.warmup(trigger, WARMUP, 200, nullptr, pulse_ns);
 
+  Pacer pacer(interval_ms_from(tp));
   int baseline_ok = 0;
   for (int i = 0; i < BASELINE_CAP; i++) {
+    pacer.begin();
     if (s.capture(trigger, POLL_TIMEOUT, true, true, pulse_ns).success)
       baseline_ok++;
-    V4lSession::sleep_ms(100);
+    pacer.wait();
   }
   s.streamoff();
 
@@ -1798,11 +1836,14 @@ void run_pollerr_handling(const std::string &camera_path, MemoryBackend backend,
   if (re_ok) {
     s.warmup(trigger, WARMUP, 200, nullptr, pulse_ns);
     for (int i = 0; i < RECOVERY_CAP; i++) {
+      pacer.begin();
       if (s.capture(trigger, POLL_TIMEOUT, true, true, pulse_ns).success)
         recovery_ok++;
-      V4lSession::sleep_ms(100);
+      pacer.wait();
     }
   }
+  if (!pacer.overrun_note().empty())
+    r.details.push_back(pacer.overrun_note());
 
   r.metrics.push_back(metric("baseline_ok", "count", static_cast<double>(baseline_ok), "Baseline frames."));
   r.metrics.push_back(metric("pollerr_raised", "bool", pollerr ? 1.0 : 0.0, "POLLERR after STREAMOFF."));
@@ -1851,18 +1892,22 @@ void run_dmabuf_cache_sync(const std::string &camera_path, TriggerSource &trigge
   }
   s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
+  Pacer pacer(interval_ms_from(tp));
   int tested = 0, match_nosync = 0, match_sync = 0;
   for (int i = 0; i < NUM; i++) {
+    pacer.begin();
     auto f = s.capture(trigger, CAPTURE_TIMEOUT_MS, true, false, pulse_ns);
     if (!f.success || f.index >= s.buffer_count() || f.bytesused < CMP) {
       if (f.success)
         s.requeue(f.index);
+      pacer.wait();
       continue;
     }
     const void *mp = s.buffers()[f.index].mmap_start, *dp = s.buffers()[f.index].dma_start;
     const int dfd = s.buffers()[f.index].dma_fd;
     if (!mp || !dp || dfd < 0) {
       s.requeue(f.index);
+      pacer.wait();
       continue;
     }
     tested++;
@@ -1880,8 +1925,10 @@ void run_dmabuf_cache_sync(const std::string &camera_path, TriggerSource &trigge
     if (memcmp(mmap_d.data(), sync_d.data(), CMP) == 0)
       match_sync++;
     s.requeue(f.index);
-    V4lSession::sleep_ms(100);
+    pacer.wait();
   }
+  if (!pacer.overrun_note().empty())
+    r.details.push_back(pacer.overrun_note());
 
   r.metrics.push_back(metric("frames_tested", "count", static_cast<double>(tested), "Frames compared."));
   r.metrics.push_back(
@@ -2057,8 +2104,17 @@ void run_gpio_pulse_width(const std::string &camera_path, MemoryBackend backend,
           *std::max_element(lat_h.begin(), lat_h.end()) - *std::min_element(lat_h.begin(), lat_h.end());
       const double spread_l =
           *std::max_element(lat_l.begin(), lat_l.end()) - *std::min_element(lat_l.begin(), lat_l.end());
-      r.metrics.push_back(metric("spread_h", "ms", spread_h, "Spread of lat_HIGH across swept widths."));
-      r.metrics.push_back(metric("spread_l", "ms", spread_l, "Spread of lat_LOW across swept widths."));
+      // These two are the edge discriminator, not independent measurements:
+      // latency from the true latching edge stays flat as the width is swept,
+      // while latency from the other edge tracks the width. A large spread on
+      // one side is the expected result, not a fault — say so, or it reads as
+      // one.
+      r.metrics.push_back(metric("spread_h", "ms", spread_h,
+                                 "Spread of lat_HIGH across swept widths. Near zero when the sensor latches on the "
+                                 "rising edge; grows with the sweep range when it latches on the falling edge."));
+      r.metrics.push_back(metric("spread_l", "ms", spread_l,
+                                 "Spread of lat_LOW across swept widths. Mirrors spread_h: the larger of the two "
+                                 "identifies the non-latching edge, so a value near the sweep range is expected."));
       const double EDGE_MARGIN_MS = tpv(tp, "t16-gpio-pulse-width", "edge_margin_ms");
       if (spread_h + EDGE_MARGIN_MS < spread_l)
         edge = "rising";
@@ -2196,19 +2252,22 @@ void run_stuck_frame(const std::string &camera_path, MemoryBackend backend, Trig
   s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
   std::vector<uint8_t> prev(CMP, 0);
+  Pacer pacer(interval_ms_from(tp));
   int identical = 0, max_run = 0, cur_run = 0, tested = 0;
 
   for (int i = 0; i < NUM; i++) {
+    pacer.begin();
     auto f = s.capture(trigger, CAPTURE_TIMEOUT_MS, true, false, pulse_ns);
     if (!f.success || f.index >= s.buffer_count() || f.bytesused < CMP) {
       if (f.success)
         s.requeue(f.index);
-      V4lSession::sleep_ms(100);
+      pacer.wait();
       continue;
     }
     const void *src = s.buffers()[f.index].data();
     if (!src) {
       s.requeue(f.index);
+      pacer.wait();
       continue;
     }
     tested++;
@@ -2223,8 +2282,10 @@ void run_stuck_frame(const std::string &camera_path, MemoryBackend backend, Trig
       cur_run = 0;
     }
     prev = cur;
-    V4lSession::sleep_ms(100);
+    pacer.wait();
   }
+  if (!pacer.overrun_note().empty())
+    r.details.push_back(pacer.overrun_note());
 
   r.metrics.push_back(metric("frames_tested", "count", static_cast<double>(tested), "Frames compared."));
   r.metrics.push_back(
@@ -2740,9 +2801,11 @@ void run_multi_camera(const std::vector<MultiCamParticipant> &participants, Memo
   std::vector<std::vector<double>> per_cam_latencies(participants.size());
   std::vector<double> cross_jitters;
   std::vector<double> fire_spreads_ms;
+  Pacer pacer(interval_ms_from(tp));
   int successful_rounds = 0;
 
   for (int sample = 0; sample < SAMPLES; sample++) {
+    pacer.begin();
     for (auto &s : sessions)
       s.drain();
     V4lSession::sleep_ms(10);
@@ -2762,37 +2825,87 @@ void run_multi_camera(const std::vector<MultiCamParticipant> &participants, Memo
       fire_spreads_ms.push_back(V4lSession::ts_diff_ms(latest, earliest));
     }
 
-    std::vector<struct pollfd> pfds(sessions.size());
-    for (size_t i = 0; i < sessions.size(); i++) {
-      pfds[i].fd = sessions[i].fd();
-      pfds[i].events = POLLIN;
-      pfds[i].revents = 0;
+    // poll() returns as soon as ANY fd is ready, so polling once harvests only
+    // whichever camera happened to wake first and counts every other one as a
+    // miss. With cameras sharing a trigger line and landing within microseconds
+    // of each other, that meant no round ever had all of them and the test
+    // could never pass regardless of the hardware. Keep polling the cameras
+    // that have not delivered yet until they all have or the deadline passes.
+    std::vector<double> latencies(sessions.size(), -1.0);
+    // A camera is settled once it has delivered a frame or its DQBUF failed.
+    // Tracking that separately from the latency matters: a camera whose DQBUF
+    // keeps failing while poll() keeps reporting POLLIN would otherwise be
+    // re-polled with no delay until the deadline, spinning the CPU.
+    std::vector<char> settled(sessions.size(), 0);
+    size_t pending = sessions.size();
+    const auto round_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(POLL_TIMEOUT);
+    while (pending > 0) {
+      const auto now = std::chrono::steady_clock::now();
+      if (now >= round_deadline) {
+        break;
+      }
+      const int remaining_ms =
+          static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(round_deadline - now).count());
+
+      std::vector<struct pollfd> pfds;
+      std::vector<size_t> pfd_owner;  // pfds[k] belongs to sessions[pfd_owner[k]]
+      pfds.reserve(pending);
+      pfd_owner.reserve(pending);
+      for (size_t i = 0; i < sessions.size(); i++) {
+        if (settled[i]) {
+          continue;
+        }
+        struct pollfd p;
+        p.fd = sessions[i].fd();
+        p.events = POLLIN;
+        p.revents = 0;
+        pfds.push_back(p);
+        pfd_owner.push_back(i);
+      }
+
+      const int poll_ret = poll(pfds.data(), pfds.size(), remaining_ms);
+      if (poll_ret < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
+        break;
+      }
+      if (poll_ret == 0) {
+        break;  // deadline reached with cameras still pending
+      }
+
+      for (size_t k = 0; k < pfds.size(); k++) {
+        if (!(pfds[k].revents & POLLIN)) {
+          continue;
+        }
+        const size_t i = pfd_owner[k];
+        settled[i] = 1;
+        pending--;
+        struct v4l2_buffer buf;
+        memset(&buf, 0, sizeof(buf));
+        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.memory = sessions[i].memory_type();
+        if (ioctl(sessions[i].fd(), VIDIOC_DQBUF, &buf) != 0) {
+          continue;  // stays a miss for this round
+        }
+        struct timespec t_recv;
+        clock_gettime(CLOCK_REALTIME, &t_recv);
+        // Measure against this camera's own line edge, not a shared one.
+        latencies[i] = V4lSession::ts_diff_ms(t_recv, fire_edges[participant_fire_index[i]]);
+        sessions[i].requeue(buf.index);
+      }
     }
-    poll(pfds.data(), pfds.size(), POLL_TIMEOUT);
 
     std::vector<double> round_latencies;
     bool all_ok = true;
     for (size_t i = 0; i < sessions.size(); i++) {
-      double latency_ms = -1.0;
-      if (pfds[i].revents & POLLIN) {
-        struct v4l2_buffer buf;
-        memset(&buf, 0, sizeof(buf));
-        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        buf.memory = V4L2_MEMORY_MMAP;
-        if (ioctl(sessions[i].fd(), VIDIOC_DQBUF, &buf) == 0) {
-          struct timespec t_recv;
-          clock_gettime(CLOCK_REALTIME, &t_recv);
-          // Measure against this camera's own line edge, not a shared one.
-          latency_ms = V4lSession::ts_diff_ms(t_recv, fire_edges[participant_fire_index[i]]);
-          sessions[i].requeue(buf.index);
-        }
-      }
-      if (latency_ms >= 0.0) {
-        per_cam_latencies[i].push_back(latency_ms);
-        round_latencies.push_back(latency_ms);
+      // Misses are recorded as -1.0 so each camera's history stays aligned with
+      // the round index; the reporting below counts only the valid entries.
+      per_cam_latencies[i].push_back(latencies[i]);
+      if (latencies[i] >= 0.0) {
+        round_latencies.push_back(latencies[i]);
       } else {
         all_ok = false;
-        per_cam_latencies[i].push_back(-1.0);
       }
     }
     if (all_ok && round_latencies.size() >= 2) {
@@ -2803,8 +2916,10 @@ void run_multi_camera(const std::vector<MultiCamParticipant> &participants, Memo
     }
     for (TriggerSource *t : fire_set)
       t->wait_pulse_done();
-    V4lSession::sleep_ms(100);
+    pacer.wait();
   }
+  if (!pacer.overrun_note().empty())
+    r.details.push_back(pacer.overrun_note());
 
   if (!fire_spreads_ms.empty()) {
     Stats fs = compute_stats(fire_spreads_ms);
@@ -2814,26 +2929,38 @@ void run_multi_camera(const std::vector<MultiCamParticipant> &participants, Memo
     r.metrics.push_back(metric("trigger_fire_spread_max", "ms", fs.max, "Worst-case multi-line firing spread."));
   }
 
-  // Report per-camera stats
+  // Report per-camera stats. The capture count is always reported, including
+  // for a camera that captured nothing — a silently absent cam*_ metric is the
+  // single most important signal this test can produce, and dropping it is how
+  // a camera that never delivered a frame went unnoticed.
   for (size_t i = 0; i < participants.size(); i++) {
     std::vector<double> valid;
     for (double v : per_cam_latencies[i])
       if (v > 0)
         valid.push_back(v);
+
+    const std::string prefix = "cam" + std::to_string(i);
+    // Name the device in the description: the metric prefix is a bare index,
+    // so without this there is no way to tell which camera cam2_* refers to.
+    const std::string &path = participants[i].camera_path;
+    r.metrics.push_back(metric(prefix + "_captures", "count", static_cast<double>(valid.size()),
+                               "Rounds " + path + " delivered a frame, out of " + std::to_string(SAMPLES) + "."));
     if (!valid.empty()) {
       Stats ls = compute_stats(valid);
-      std::string prefix = "cam" + std::to_string(i) + "_latency";
-      push_stats_metrics_brief(r.metrics, prefix, ls);
+      push_stats_metrics_brief(r.metrics, prefix + "_latency", ls);
     }
-    r.details.push_back(participants[i].camera_path + ": " + std::to_string(per_cam_latencies[i].size()) + " captures");
+    r.details.push_back(path + ": " + std::to_string(valid.size()) + "/" + std::to_string(SAMPLES) + " captures");
   }
+
+  // Reported whether or not any round succeeded — when none did, this is the
+  // number that says so.
+  r.metrics.push_back(metric("successful_rounds", "count", static_cast<double>(successful_rounds),
+                             "Rounds where every camera delivered a frame, out of " + std::to_string(SAMPLES) + "."));
 
   // Cross-camera jitter
   if (!cross_jitters.empty()) {
     Stats js = compute_stats(cross_jitters);
     push_stats_metrics(r.metrics, "cross_jitter", js);
-    r.metrics.push_back(
-        metric("successful_rounds", "count", static_cast<double>(successful_rounds), "Rounds all cameras captured."));
     r.details.push_back("Cross-camera jitter mean: " + std::to_string(js.mean) + " ms");
 
     if (js.p95 < 5.0) {
@@ -2849,7 +2976,21 @@ void run_multi_camera(const std::vector<MultiCamParticipant> &participants, Memo
     }
   } else {
     r.status = TestStatus::Fail;
-    r.summary = "No successful round with all cameras capturing simultaneously.";
+    // Name the cameras that delivered nothing. "No successful round" on its own
+    // sends the reader looking at every camera equally, when usually only one
+    // is at fault.
+    std::string starved;
+    for (size_t i = 0; i < participants.size(); i++) {
+      size_t got = 0;
+      for (double v : per_cam_latencies[i])
+        if (v > 0)
+          got++;
+      if (got == 0)
+        starved += (starved.empty() ? "" : ", ") + participants[i].camera_path;
+    }
+    r.summary = "No round had all " + std::to_string(participants.size()) + " cameras capturing simultaneously";
+    r.summary += starved.empty() ? " (every camera delivered some frames, but never in the same round)."
+                                 : "; no frames at all from: " + starved + ".";
   }
 }
 
@@ -2955,20 +3096,44 @@ CameraRunResult DiagnosticRunner::run_camera(const RunConfig::CameraConfig &came
     }
   }
 
-  for (MemoryBackend backend : config.memory_backends) {
-    for (const auto &test : tests) {
+  // Every test opens and closes the camera itself — V4lSession's destructor
+  // runs STREAMOFF, unmaps the buffers, issues REQBUFS(0) and closes the fd on
+  // every path — so the pipeline is already fully torn down by the time
+  // run_test() returns. What the hardware does not get on its own is time, and
+  // on a shared camera group each of those cycles re-initialises the group over
+  // I2C. kInterTestCooldownSec is that settling time.
+  //
+  // The gap lives here rather than inside run_test() so it can never land
+  // inside a test's own duration_ms: it belongs to the run, not to any one
+  // test. It is skipped after the final test, where there is nothing left to
+  // settle for.
+  bool cancelled = false;
+  for (size_t bi = 0; bi < config.memory_backends.size() && !cancelled; bi++) {
+    const MemoryBackend backend = config.memory_backends[bi];
+    for (size_t ti = 0; ti < tests.size(); ti++) {
       // Check for cancellation between tests.
       if (config.stop_token && config.stop_token->load(std::memory_order_relaxed)) {
+        cancelled = true;
         break;
       }
-      auto test_result = run_test(camera.path, backend, test, config, profile, trigger.get(), trigger, trigger_error);
+      auto test_result =
+          run_test(camera.path, backend, tests[ti], config, profile, trigger.get(), trigger, trigger_error);
       if (config.progress_callback) {
         config.progress_callback(camera.path, test_result);
       }
       camera_result.tests.push_back(std::move(test_result));
-    }
-    if (config.stop_token && config.stop_token->load(std::memory_order_relaxed)) {
-      break;
+
+      const bool last_overall = (bi + 1 == config.memory_backends.size()) && (ti + 1 == tests.size());
+      if (last_overall) {
+        continue;
+      }
+      char msg[128];
+      snprintf(msg, sizeof(msg), "Pipeline released — settling %.0fs before the next test.", kInterTestCooldownSec);
+      emit(config.log_callback, camera.path, tests[ti].id, msg);
+      if (!interruptible_sleep(kInterTestCooldownSec, config.stop_token)) {
+        cancelled = true;
+        break;
+      }
     }
   }
   return camera_result;
