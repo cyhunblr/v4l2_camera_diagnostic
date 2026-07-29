@@ -54,29 +54,35 @@ command output only when a command fails.
    | `~/.local/share/v4l2-camera-diagnostic/web` | built web UI assets |
    | `~/.local/share/v4l2-camera-diagnostic/docs` | a copy of this `docs/` tree |
 
-5. **Grants CAP_SYSLOG** (`sudo setcap cap_syslog+ep
-   ~/.local/bin/v4l2-camera-diagnostic-web`) so the web app's **Export
-   DMESG** button can read the kernel log even on systems with
-   `kernel.dmesg_restrict=1` (the common default). If this step fails,
-   installation still completes, but Export DMESG in the browser will show
-   "Failed to export dmesg" until you either grant the capability manually
-   or re-run `./installation.sh`:
+5. **Enables kernel log access** by adding you to the `adm` group
+   (`sudo usermod -aG adm $(id -un)`), if you are not already in `adm` or
+   `systemd-journal`. The web app's **Export DMESG** button reads the kernel
+   log with `journalctl -k -b`, and the journal directories carry an ACL that
+   grants those groups read access — so the app itself needs no elevated
+   privileges at run time.
+
+   This step is skipped when you already have access, and you are asked
+   before it happens. Group membership only takes effect on your **next
+   login**, so Export DMESG will not work in the current session until you
+   log out and back in. To do it yourself later:
 
    ```bash
-   sudo setcap cap_syslog+ep ~/.local/bin/v4l2-camera-diagnostic-web
+   sudo usermod -aG adm "$(id -un)"   # then log out and back in
    ```
-
-   (No capability is needed if `kernel.dmesg_restrict` is already `0` on
-   your system, or if your user is in a group with kernel-log read access.)
-
-   **The sudo password itself is asked once, up front, before any step
-   runs** — the installer checks at startup whether it will need `apt-get`
-   (for missing dependencies) or `setcap` (for this step) anywhere in the
-   run, and if so prompts immediately via `sudo -v` rather than waiting
-   until one of those commands is reached partway through the build.
 
 6. **Checks `PATH`** and prints a one-line notice if `~/.local/bin` is not
    already on it.
+
+### About the sudo password
+
+The installer asks the questions first (install missing dependencies? join
+`adm`?), then requests the sudo password **once**, and only if at least one
+answer actually requires it. On a machine whose dependencies are already
+present and whose user is already in `adm`, the installer never asks for a
+password at all.
+
+The credential is dropped with `sudo -k` when the script exits — including
+on failure — so it does not stay valid in your terminal afterwards.
 
 ## Launch
 

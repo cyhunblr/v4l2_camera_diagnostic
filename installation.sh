@@ -16,6 +16,25 @@ USE_COLOR=0
 SPINNER_PID=""
 STEP_LABEL=""
 
+# Decisions collected from the user before any step runs; they determine
+# whether sudo is needed at all.
+DO_INSTALL_DEPS=0
+DO_JOIN_ADM=0
+SUDO_PRIMED=0
+# Why Export DMESG may not work, when that is already known up front. Printed
+# in the closing summary so the reason is visible without re-running.
+KERNEL_LOG_NOTE=""
+
+APT_PACKAGES=(
+  build-essential
+  cmake
+  pkg-config
+  libgpiod-dev
+  libmicrohttpd-dev
+  libjsoncpp-dev
+  xdg-utils
+)
+
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
   USE_COLOR=1
 fi
@@ -156,55 +175,105 @@ deps_missing() {
   return 1
 }
 
-# Requests the sudo password up front, once, before any step runs — rather
-# than letting it appear unpredictably wherever the first sudo-requiring
-# command happens to live (apt-get for missing deps, or setcap at the end).
+ask_yes_no() {
+  local prompt="$1"
+  local default="$2"
+  local answer
+
+  # Non-interactive (piped, CI): take the default rather than blocking on a
+  # read that will never be answered.
+  if [[ ! -t 0 ]]; then
+    [[ "${default}" == "yes" ]]
+    return
+  fi
+
+  while true; do
+    if [[ "${default}" == "yes" ]]; then
+      read -r -p "${prompt} [Y/n] " answer
+      answer="${answer:-y}"
+    else
+      read -r -p "${prompt} [y/N] " answer
+      answer="${answer:-n}"
+    fi
+
+    case "${answer}" in
+      y | Y | yes | YES) return 0 ;;
+      n | N | no | NO) return 1 ;;
+      *) echo "Please answer yes or no." ;;
+    esac
+  done
+}
+
+# True when this user can already read the kernel log through journalctl.
+# Group membership is what grants that access — the journal directories carry
+# an ACL for "adm" on Debian/Ubuntu — so no privilege is needed to check it.
+has_kernel_log_access() {
+  id -nG 2>/dev/null | tr ' ' '\n' | grep -qx -e adm -e systemd-journal
+}
+
+# Asks every question that needs an answer before any work starts, so the run
+# is "answer, then walk away" rather than a prompt appearing between steps.
+# Only after the answers are known can we tell whether sudo is needed at all.
+collect_choices() {
+  if deps_missing; then
+    if ! need_command apt-get; then
+      echo "Some dependencies are missing but apt-get was not found."
+      echo "Install them manually: ${APT_PACKAGES[*]}"
+      echo
+    elif ask_yes_no "System dependencies are missing. Install them with apt-get?" "yes"; then
+      DO_INSTALL_DEPS=1
+    fi
+  fi
+
+  if has_kernel_log_access; then
+    KERNEL_LOG_NOTE="already in a group that can read the kernel log"
+  elif ! need_command usermod; then
+    KERNEL_LOG_NOTE="usermod not found; add $(id -un) to the 'adm' group manually"
+  else
+    echo
+    echo "Export DMESG reads the kernel log via 'journalctl -k -b', which needs"
+    echo "membership in the 'adm' group. You are not in it."
+    if ask_yes_no "Add $(id -un) to the 'adm' group?" "yes"; then
+      DO_JOIN_ADM=1
+    else
+      KERNEL_LOG_NOTE="declined; Export DMESG will not work until $(id -un) joins 'adm'"
+    fi
+  fi
+}
+
+# Requests the sudo password once, up front, and only when an answer above
+# actually calls for it. Every privileged step then reuses that credential
+# instead of prompting again mid-run. drop_sudo() invalidates it at the end.
 prime_sudo() {
   if [[ "${DRY_RUN}" -eq 1 ]]; then
     return
   fi
-  local need_sudo=0
-  if deps_missing && need_command apt-get; then
-    need_sudo=1
-  fi
-  if need_command setcap; then
-    need_sudo=1
-  fi
-  if [[ "${need_sudo}" -eq 1 ]]; then
-    echo "This installer needs sudo to install missing system packages and/or"
-    echo "grant the web app permission to read the kernel log (for Export DMESG)."
-    sudo -v
-    if [[ -t 1 ]]; then
-      # Remove the previous terminal line (sudo password prompt row).
-      # Works on common ANSI terminals.
-      printf '\033[1A\033[2K\r'
-    fi
-    echo
-  fi
-}
-
-install_deps_apt() {
-  local packages=(
-    build-essential
-    cmake
-    pkg-config
-    libgpiod-dev
-    libmicrohttpd-dev
-    libjsoncpp-dev
-    xdg-utils
-  )
-  if ! need_command apt-get; then
-    echo "apt-get was not found. Install dependencies manually: ${packages[*]}" >&2
+  if [[ "${DO_INSTALL_DEPS}" -eq 0 && "${DO_JOIN_ADM}" -eq 0 ]]; then
     return
   fi
-  run sudo apt-get update
-  run sudo apt-get install -y "${packages[@]}"
+  echo
+  echo "Administrator access is required for the steps you selected."
+  sudo -v
+  SUDO_PRIMED=1
+  echo
+}
+
+# Drops the cached sudo credential so it does not outlive this script. Without
+# this the timestamp stays valid for the terminal's grace period, leaving a
+# later command able to sudo without asking.
+drop_sudo() {
+  if [[ "${SUDO_PRIMED}" -eq 1 ]]; then
+    sudo -k 2>/dev/null || true
+    SUDO_PRIMED=0
+  fi
 }
 
 ensure_dependencies() {
-  if deps_missing; then
-    install_deps_apt
+  if [[ "${DO_INSTALL_DEPS}" -eq 0 ]]; then
+    return 2
   fi
+  run sudo apt-get update
+  run sudo apt-get install -y "${APT_PACKAGES[@]}"
 }
 
 ensure_nvm() {
@@ -303,23 +372,15 @@ DESKTOP
   fi
 }
 
-# Grants CAP_SYSLOG so the web binary can read dmesg even when
-# kernel.dmesg_restrict=1 (common on hardened systems). Returns 2 (skipped)
-# if setcap isn't available, 1 (failed, non-fatal) if granting it fails.
-grant_dmesg_capability() {
-  if ! need_command setcap; then
+# Adds the user to "adm", the group whose ACL on the journal directories lets
+# 'journalctl -k -b' read the kernel log. This is what Export DMESG needs; the
+# binary itself stays unprivileged. Returns 2 (skipped) when the user already
+# has access or declined.
+join_adm_group() {
+  if [[ "${DO_JOIN_ADM}" -eq 0 ]]; then
     return 2
   fi
-  if [[ "${DEBUG}" -eq 1 ]]; then
-    echo "+ sudo setcap cap_syslog+ep ${INSTALL_PREFIX}/bin/v4l2-camera-diagnostic-web"
-  fi
-  if [[ "${DRY_RUN}" -eq 1 ]]; then
-    return
-  fi
-  if ! sudo setcap cap_syslog+ep "${INSTALL_PREFIX}/bin/v4l2-camera-diagnostic-web" 2>/dev/null; then
-    echo "Warning: could not set CAP_SYSLOG. Export DMESG may fail if kernel.dmesg_restrict=1." >&2
-    return 1
-  fi
+  run sudo usermod -aG adm "$(id -un)"
 }
 
 path_notice() {
@@ -361,27 +422,36 @@ else
 fi
 echo
 
+# The sudo credential must not outlive the script, on any exit path — a failed
+# build would otherwise leave the terminal able to sudo without a password.
+trap 'stop_spinner; drop_sudo' EXIT
+
+collect_choices
 prime_sudo
 
-run_step "Checking/installing system dependencies" ensure_dependencies
+run_step "Installing system dependencies" ensure_dependencies
 run_step "Building web UI" build_frontend
 run_step "Building C++ project" build_cpp
 run_step "Installing files" install_files
+run_step "Enabling kernel log access (adm group)" join_adm_group
 
-if ! run_step "Granting CAP_SYSLOG for Export DMESG" grant_dmesg_capability; then
-  echo
-  echo "CAP_SYSLOG could not be granted, so Export DMESG may not work." >&2
-  echo "Rolling back this install with ./uninstallation.sh --yes ..." >&2
-  "${ROOT_DIR}/uninstallation.sh" --yes
-  exit 1
-fi
-
+drop_sudo
 path_notice
 
 echo
 if [[ "${DRY_RUN}" -eq 1 ]]; then
   echo "Dry run complete. No files were changed."
-else
-  echo "Installation complete."
-  echo "Launch with: ${INSTALL_PREFIX}/bin/v4l2-camera-diagnostic-web"
+  exit 0
+fi
+
+echo "Installation complete."
+echo "Launch with: ${INSTALL_PREFIX}/bin/v4l2-camera-diagnostic-web"
+
+if [[ "${DO_JOIN_ADM}" -eq 1 ]]; then
+  echo
+  echo "Added $(id -un) to the 'adm' group. Log out and back in for this to"
+  echo "take effect — Export DMESG will not work in this session until you do."
+elif [[ -n "${KERNEL_LOG_NOTE}" && "$(has_kernel_log_access && echo yes || echo no)" == "no" ]]; then
+  echo
+  echo "Note: Export DMESG — ${KERNEL_LOG_NOTE}."
 fi

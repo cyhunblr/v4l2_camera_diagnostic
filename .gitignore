@@ -13,8 +13,6 @@
 # Node / frontend
 source/frontend/dist/
 source/frontend/node_modules/
-source/frontend/playwright-report/
-source/frontend/test-results/
 
 # Editor
 .vscode/

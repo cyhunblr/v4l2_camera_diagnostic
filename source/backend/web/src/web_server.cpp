@@ -790,15 +790,15 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
 
   if (method == "GET" && path == "/api/dmesg") {
     *content_type = "text/plain; charset=utf-8";
-    // Try dmesg first, fall back to journalctl -k -b if permission denied.
-    // -b limits to the current boot — without it journalctl -k spans every
-    // retained boot, unlike dmesg.
-    const char *commands[] = {"dmesg 2>&1", "journalctl -k -b --no-pager 2>&1"};
-    for (const char *cmd : commands) {
-      FILE *pipe = popen(cmd, "r");
-      if (!pipe)
-        continue;
-      std::string output;
+    // journalctl rather than dmesg: reading it needs only membership in "adm"
+    // (or systemd-journal), which the journal directories grant by ACL, so the
+    // server stays unprivileged. dmesg would additionally need CAP_SYSLOG or
+    // root wherever kernel.dmesg_restrict=1. -b limits output to the current
+    // boot — without it journalctl -k spans every retained boot.
+    const char *command = "journalctl -k -b --no-pager 2>&1";
+    std::string output;
+    FILE *pipe = popen(command, "r");
+    if (pipe != nullptr) {
       char buf[4096];
       while (fgets(buf, sizeof(buf), pipe) != nullptr) {
         output += buf;
@@ -807,8 +807,18 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
         return output;
       }
     }
+    // Hand back what journalctl actually said. A generic "permission denied?"
+    // leaves the reader guessing between a missing group, a disabled journal
+    // and journalctl not being installed at all.
     *status_code = MHD_HTTP_INTERNAL_SERVER_ERROR;
-    return "Cannot read kernel log. Both dmesg and journalctl -k -b failed (permission denied?).\n";
+    std::string message = "Cannot read the kernel log via 'journalctl -k -b'.\n";
+    if (!output.empty()) {
+      message += "\n" + output + "\n";
+    }
+    message += "This needs membership in the 'adm' group. Add it with:\n";
+    message += "  sudo usermod -aG adm $(id -un)\n";
+    message += "then log out and back in.\n";
+    return message;
   }
 
   if (method == "GET" && path == "/api/devices") {
