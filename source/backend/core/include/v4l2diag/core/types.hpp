@@ -55,7 +55,15 @@ struct TestResult {
   TestStatus status = TestStatus::Skipped;
   std::string summary;
   std::vector<MetricValue> metrics;
+  // Short data lines — "coarse: 150ms -> 10/10", "mmap_4k: 28722 MB/s". Rendered
+  // as a monospace list, and machine-parsed in places, so keep them terse and
+  // regular.
   std::vector<std::string> details;
+  // Prose that explains what a result means or what to do about it. Rendered as
+  // a callout in its own right, because an explanatory paragraph buried in the
+  // monospace detail list reads as jargon to anyone who does not already know
+  // the project.
+  std::vector<std::string> notes;
   std::vector<std::string> warnings;
   double duration_ms = 0.0;
 };

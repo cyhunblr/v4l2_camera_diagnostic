@@ -1425,6 +1425,15 @@ void render_chart_omissions(std::ostream &out, const TestResult &test, const std
     }
   }
 
+  // With nothing charted there is no measured set to contrast against, and the
+  // heuristic below would mark every "<label>: <value>" detail line as an
+  // omission — including the line describing the one category that WAS
+  // measured. A single-format sweep charts nothing (one bar is not a
+  // comparison), which is exactly when that misfires.
+  if (charted.empty()) {
+    return;
+  }
+
   // Later detail lines supersede earlier ones for the same category: a format
   // that logged "sizeimage=..." and then failed to stream should report the
   // failure, not the geometry.
@@ -1559,6 +1568,24 @@ void write_json(const RunResult &result, const std::string &path) {
         }
         out << "\"" << json_escape(test.details[di]) << "\"";
       }
+      out << "],\n";
+      out << "          \"notes\": [";
+      for (std::size_t ni = 0; ni < test.notes.size(); ++ni) {
+        if (ni) {
+          out << ", ";
+        }
+        out << "\"" << json_escape(test.notes[ni]) << "\"";
+      }
+      out << "],\n";
+      // Warnings were previously dropped from the JSON entirely, so a machine
+      // reading this report could not see them at all.
+      out << "          \"warnings\": [";
+      for (std::size_t wi = 0; wi < test.warnings.size(); ++wi) {
+        if (wi) {
+          out << ", ";
+        }
+        out << "\"" << json_escape(test.warnings[wi]) << "\"";
+      }
       out << "]\n";
       out << "        }" << (ti + 1 == camera.tests.size() ? "" : ",") << "\n";
     }
@@ -1607,7 +1634,7 @@ void write_markdown(const RunResult &result, const std::string &path) {
     }
     out << "\n";
     for (const auto &test : camera.tests) {
-      if (test.metrics.empty() && test.details.empty()) {
+      if (test.metrics.empty() && test.details.empty() && test.notes.empty() && test.warnings.empty()) {
         continue;
       }
       out << "### " << test.id << "\n\n";
@@ -1620,10 +1647,19 @@ void write_markdown(const RunResult &result, const std::string &path) {
         }
         out << "\n";
       }
+      // Prose first, as a blockquote, so it reads as commentary on the data
+      // rather than as another data point in the bullet list.
+      for (const auto &note : test.notes) {
+        out << "> " << note << "\n\n";
+      }
       for (const auto &detail : test.details) {
         out << "- " << detail << "\n";
       }
       out << "\n";
+      // Warnings were previously omitted from the markdown report entirely.
+      for (const auto &warning : test.warnings) {
+        out << "**Warning:** " << warning << "\n\n";
+      }
     }
   }
 }
@@ -1731,6 +1767,9 @@ table.overview .summary-text { color: #475569; }
 .chart-omissions { margin: 0 0 12px; padding: 8px 11px; border-left: 3px solid #cbd5e1; background: #f8fafc; border-radius: 0 4px 4px 0; color: #475569; font-size: 12px; }
 .chart-omissions strong { color: #1e293b; }
 .chart-omissions code { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #b42318; }
+.test-note { margin: 0 0 12px; padding: 10px 13px; border-left: 3px solid #94a3b8; background: #f8fafc; border-radius: 0 4px 4px 0; color: #334155; font-size: 13px; line-height: 1.65; }
+.test-note + .test-note { margin-top: -4px; }
+.test-note code { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: #b42318; }
 .hit-zone { opacity: 0.48; }
 .hit-zone-high { fill: #dcfce7; }
 .hit-zone-mid { fill: #fef3c7; }
@@ -1913,6 +1952,13 @@ table.overview .summary-text { color: #475569; }
 
       if (!test.metrics.empty()) {
         render_test_metrics(out, test);
+      }
+
+      // Notes: prose that explains the result, before the raw data it explains.
+      // Each note is its own box — two unrelated explanations run together read
+      // as one confused paragraph.
+      for (const auto &n : test.notes) {
+        out << "<div class=\"test-note\">" << html_escape(n) << "</div>";
       }
 
       // Details

@@ -76,7 +76,59 @@ int main() {
                   "worst overrun should be at least 50-20=30ms, got " + std::to_string(pacer.worst_overrun_ms()));
     const std::string note = pacer.overrun_note();
     ok &= require(!note.empty(), "an overrunning loop must emit a note");
-    ok &= require(note.find("2/2") != std::string::npos, "the note should say how many iterations overran: " + note);
+    ok &= require(note.find("2 of 2") != std::string::npos,
+                  "the note should say how many frames overran: " + note);
+    // The note exists so a reader learns the rate that actually ran, not just
+    // that something was missed. 50ms per frame is ~20Hz.
+    ok &= require(note.find("20.0") != std::string::npos || note.find("19.9") != std::string::npos,
+                  "the note should report the achieved rate (~20Hz): " + note);
+    ok &= require(note.find("trigger rate") != std::string::npos,
+                  "a triggered loop's note should name the trigger rate: " + note);
+    ok &= require(note.find("trigger_rate_hz") != std::string::npos,
+                  "the note should name the setting to change: " + note);
+    // actual_hz() is what feeds that sentence; 50ms per frame is ~20Hz.
+    ok &= require(pacer.actual_hz() > 17.0 && pacer.actual_hz() < 23.0,
+                  "actual_hz should reflect the real period, got " + std::to_string(pacer.actual_hz()));
+  }
+
+  // Free-run fires no trigger, so a shortfall there is the camera's own rate,
+  // not a missed trigger. The note must not blame a trigger that never ran.
+  {
+    v4l2diag::Pacer pacer(20.0, /*externally_triggered=*/false);
+    for (int i = 0; i < 2; i++) {
+      pacer.begin();
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      pacer.wait();
+    }
+    const std::string note = pacer.overrun_note();
+    ok &= require(!note.empty(), "free-run overruns are still worth reporting");
+    ok &= require(note.find("free-run") != std::string::npos, "the free-run note should say so: " + note);
+    ok &= require(note.find("trigger rate") == std::string::npos,
+                  "free-run has no trigger rate to miss, so the note must not claim one: " + note);
+    // Nothing configures the camera's rate in free-run — there is no S_PARM call
+    // in the codebase — so the note must not frame this as a rate that was
+    // requested and missed.
+    ok &= require(note.find("Asked for") == std::string::npos,
+                  "free-run sets no frame rate, so the note must not say a rate was asked for: " + note);
+    ok &= require(note.find("lower trigger_rate_hz") == std::string::npos &&
+                      note.find("To measure at the configured rate") == std::string::npos,
+                  "free-run cannot fix this by changing trigger_rate_hz, so must not advise it: " + note);
+    ok &= require(note.find("not a fault") != std::string::npos,
+                  "free-run should say the slower rate is the camera's own, not a fault: " + note);
+  }
+
+  // A loop that held its rate reports the configured rate back through
+  // actual_hz(), so callers can compare the two without special-casing.
+  {
+    v4l2diag::Pacer pacer(50.0);
+    for (int i = 0; i < 3; i++) {
+      pacer.begin();
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      pacer.wait();
+    }
+    ok &= require(pacer.actual_hz() > 18.0 && pacer.actual_hz() < 22.0,
+                  "a paced 50ms loop should report ~20Hz, got " + std::to_string(pacer.actual_hz()));
+    ok &= require(pacer.overrun_note().empty(), "a loop that held its rate emits no note");
   }
 
   // wait() without begin() has no iteration to pace and must be a no-op rather

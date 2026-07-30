@@ -113,6 +113,11 @@ target_link_libraries(v4l2diag_threshold_registry_test PRIVATE v4l2diag_core)
 v4l2diag_apply_warnings(v4l2diag_threshold_registry_test)
 add_test(NAME threshold_registry COMMAND v4l2diag_threshold_registry_test)
 
+add_executable(v4l2diag_frame_rate_test tests/frame_rate_test.cpp)
+target_link_libraries(v4l2diag_frame_rate_test PRIVATE v4l2diag_core)
+v4l2diag_apply_warnings(v4l2diag_frame_rate_test)
+add_test(NAME frame_rate COMMAND v4l2diag_frame_rate_test)
+
 add_executable(v4l2diag_pacing_test tests/pacing_test.cpp)
 target_link_libraries(v4l2diag_pacing_test PRIVATE v4l2diag_core)
 v4l2diag_apply_warnings(v4l2diag_pacing_test)

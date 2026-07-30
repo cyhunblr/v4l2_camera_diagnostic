@@ -126,6 +126,29 @@ int main() {
   };
   camera.tests.push_back(format_test);
 
+  // A device offering a single format charts nothing — one bar is not a
+  // comparison — so there is no measured set to contrast an omission against.
+  // The omission heuristic reads "<label>: <value>" detail lines, and with an
+  // empty chart it used to flag this test's own measured format as "Not
+  // measured". Notes carry the explanation instead.
+  v4l2diag::TestResult single_format_test;
+  single_format_test.id = "t17-format-comparison";
+  single_format_test.name = "Format Comparison";
+  single_format_test.category = "format";
+  single_format_test.memory_backend = "userptr";
+  single_format_test.status = v4l2diag::TestStatus::Warn;
+  single_format_test.summary = "Measured 1 format, but a comparison needs at least two.";
+  single_format_test.duration_ms = 1100.0;
+  single_format_test.metrics = {
+      {"yuyv_latency_mean", "ms", 83.4, "YUYV mean latency."},
+      {"yuyv_throughput_mbps", "MB/s", 10216.0, "YUYV throughput."},
+      {"format_count", "count", 1.0, "Unique formats enumerated."},
+      {"formats_tested", "count", 1.0, "Unique formats tested."},
+  };
+  single_format_test.details = {"YUYV: sizeimage=4915200"};
+  single_format_test.notes = {"This device offers only one pixel format, so there was nothing to compare it with."};
+  camera.tests.push_back(single_format_test);
+
   v4l2diag::TestResult resolution_test;
   resolution_test.id = "t19-resolution-sweep";
   resolution_test.name = "Resolution Sweep";
@@ -398,6 +421,26 @@ int main() {
   html_ok &= require(html.find("fetch(\"/api/dmesg\")") == std::string::npos, "dmesg export still uses fetch");
   html_ok &= require(html.find("href=\"/api/dmesg?download=1\" download=\"dmesg.txt\"") != std::string::npos,
                      "dmesg export is not a direct download link");
+
+  // Notes render as their own callout, not as another monospace detail line.
+  html_ok &= require(html.find("<div class=\"test-note\">") != std::string::npos, "notes are not rendered as a callout");
+  html_ok &= require(html.find("only one pixel format") != std::string::npos, "note text is missing from the HTML");
+  // The callout explains the data, so it has to come before the data it explains.
+  const auto note_pos = html.find("<div class=\"test-note\">This device offers only one");
+  const auto detail_pos = html.find("YUYV: sizeimage=4915200");
+  html_ok &= require(note_pos != std::string::npos && detail_pos != std::string::npos && note_pos < detail_pos,
+                     "the note callout should precede the detail list it explains");
+  // Genuine omissions still report: t17's YUYV and t19's 3840x2160 both failed
+  // S_FMT while other categories charted successfully.
+  html_ok &= require(occurrence_count(html, "Not measured") == 2,
+                     "expected two Not measured callouts (t17's YUYV and t19's 3840x2160), found " +
+                         std::to_string(occurrence_count(html, "Not measured")));
+  html_ok &= require(html.find("S_FMT failed") != std::string::npos, "a genuine omission reason went missing");
+  // Regression: the single-format sweep charts nothing, so the heuristic has no
+  // measured set to contrast against and must stay silent rather than flag the
+  // one format it did measure.
+  html_ok &= require(html.find("sizeimage=4915200</code>") == std::string::npos,
+                     "a measured format is still being reported as Not measured");
   if (!html_ok)
     return 1;
 
@@ -407,6 +450,17 @@ int main() {
       !require(markdown.find("| latency_mean |") != std::string::npos, "Markdown metrics changed unexpectedly")) {
     return 1;
   }
+
+  bool text_ok = true;
+  // Notes and warnings must survive into the machine-readable and text reports;
+  // warnings used to be dropped from both entirely.
+  text_ok &= require(json.find("\"notes\": [") != std::string::npos, "JSON is missing the notes array");
+  text_ok &= require(json.find("only one pixel format") != std::string::npos, "JSON is missing the note text");
+  text_ok &= require(json.find("\"warnings\": [") != std::string::npos, "JSON is missing the warnings array");
+  text_ok &= require(markdown.find("> This device offers only one") != std::string::npos,
+                     "Markdown should render notes as a blockquote");
+  if (!text_ok)
+    return 1;
 
   std::cout << dir << "\n";
   return 0;

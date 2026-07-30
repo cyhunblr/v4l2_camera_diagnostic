@@ -72,6 +72,20 @@ double interval_ms_from(const TestThresholds &tp) {
   return (it != tp.end() && it->second > 0.0) ? it->second : 100.0;
 }
 
+// False in free-run mode, where nothing fires a trigger and the camera streams
+// at its own rate. Explanatory notes use this to avoid describing pulses and
+// trigger rates that do not exist for the run in hand.
+bool externally_triggered_from(const TestThresholds &tp) {
+  const auto it = tp.find("__externally_triggered");
+  return it == tp.end() || it->second != 0.0;
+}
+
+// Builds a Pacer already told whether a trigger is driving the loop, so its
+// overrun note is worded for the mode that ran.
+Pacer make_pacer(const TestThresholds &tp) {
+  return Pacer(interval_ms_from(tp), externally_triggered_from(tp));
+}
+
 // Resolves a run parameter: the configured value from `tp` if present,
 // otherwise the built-in default from default_test_params().
 double tpv(const TestThresholds &tp, const std::string &test_id, const std::string &key) {
@@ -266,9 +280,12 @@ void run_pipeline_ready(const std::string &camera_path, MemoryBackend backend, T
     // extra information and does carry risk (see t06's hardware guard).
     if (on_ms > SLOW_START_MS) {
       stopped_slow = true;
-      r.details.push_back("Remaining cycles skipped: STREAMON took " + std::to_string(static_cast<int>(on_ms)) +
-                          "ms (limit " + std::to_string(static_cast<int>(SLOW_START_MS)) +
-                          "ms). Every STREAMON re-initialises a shared camera group on this device.");
+      r.notes.push_back("Remaining cycles were skipped on purpose. Starting the stream took " +
+                        std::to_string(static_cast<int>(on_ms)) + " ms, past the " +
+                        std::to_string(static_cast<int>(SLOW_START_MS)) +
+                        " ms limit this test allows. On this board several sensors sit behind one deserializer, so "
+                        "every stream start re-initialises the whole camera group over I2C. Repeating that in a loop "
+                        "stresses the hardware without measuring anything new, so one measurement is enough.");
       break;
     }
     if (c + 1 < CYCLES)
@@ -826,6 +843,15 @@ void run_format_comparison(const std::string &camera_path, MemoryBackend backend
   if (tested == 0) {
     r.status = TestStatus::Warn;
     r.summary = "Could not test any format (all sessions failed).";
+  } else if (tested == 1) {
+    // The measurement is real and worth keeping, but this test exists to compare
+    // formats and no comparison happened. Passing would claim otherwise.
+    r.status = TestStatus::Warn;
+    r.summary = "Measured 1 format, but a comparison needs at least two — nothing to compare against.";
+    r.notes.push_back(
+        "This device offers only one pixel format, so there was nothing to compare it with. The latency "
+        "and throughput figures below are still valid measurements of that format — the warning is "
+        "about the comparison being impossible, not about the camera misbehaving.");
   } else {
     r.status = TestStatus::Pass;
     r.summary = "Format comparison complete. Tested " + std::to_string(tested) + "/" + std::to_string(formats.size()) +
@@ -984,15 +1010,22 @@ void run_poll_timeout_cliff(const std::string &camera_path, MemoryBackend backen
 
   // The timing this measures is easy to read wrong, and reading it wrong leads
   // straight to padding the production timeout by a pulse width it does not
-  // need. State the sequence plainly.
-  {
+  // need. State the sequence plainly — and only mention the pulse when one was
+  // actually fired, since free-run has no trigger at all.
+  if (externally_triggered_from(tp)) {
     char width[32];
     snprintf(width, sizeof(width), "%.1f", pulse_width_ms);
-    r.details.push_back(
-        "Timing: the " + std::string(width) +
-        "ms trigger pulse is fired asynchronously and poll() starts immediately on the rising edge — it does not "
-        "wait for the pulse to return LOW. cliff_ms is therefore measured from the rising edge and already covers "
-        "the whole trigger-to-frame path; do not add the pulse width to it.");
+    r.notes.push_back(
+        "How this number is measured: the " + std::string(width) +
+        " ms trigger pulse is fired without waiting for it to finish, and poll() starts immediately on the rising "
+        "edge. So cliff_ms is timed from the rising edge and already covers the whole path from trigger to frame. "
+        "Use it directly as the minimum poll timeout — do not add the pulse width on top, which would double-count "
+        "time the poll already overlapped.");
+  } else {
+    r.notes.push_back(
+        "How this number is measured: in free-run no trigger is fired — the camera streams on its own and poll() is "
+        "timed from the moment the test starts waiting. cliff_ms is therefore the shortest poll timeout that still "
+        "caught every frame at the camera's own frame rate, and can be used directly as the minimum poll timeout.");
   }
 
   // Emit summary box
@@ -1087,7 +1120,33 @@ void run_sequence_continuity(const std::string &camera_path, MemoryBackend backe
   r.metrics.push_back(metric("duplicates", "count", static_cast<double>(duplicates), "Duplicate sequences."));
   r.metrics.push_back(
       metric("ts_non_monotonic", "count", static_cast<double>(ts_non_mono), "Non-monotonic timestamps."));
-  r.details.push_back("Sequence range: " + std::to_string(seqs.front()) + " → " + std::to_string(seqs.back()));
+
+  // The camera's own frame rate, which no other test reports.
+  //
+  // It has to come from the sequence span, not from the interval between the
+  // frames this loop dequeued: capture() drains the queue before every grab, so
+  // consecutive captured frames are not consecutive sensor frames and the gap
+  // between them measures this loop's pacing instead of the sensor's. Sequence
+  // numbers increment for every frame the driver produced, including the ones
+  // drained away, so span / elapsed recovers the true rate.
+  // int64_t, not int: sequence is uint32_t and wraps. Narrowing the difference to
+  // int turns a wrap into a large positive span (4000000000 -> 5 reads as
+  // +294967301) and would report a fabricated rate instead of skipping the
+  // metric.
+  const int64_t seq_span = static_cast<int64_t>(seqs.back()) - static_cast<int64_t>(seqs.front());
+  const double elapsed_ms = (ts_us.back() - ts_us.front()) / 1000.0;
+  if (seq_span > 0 && elapsed_ms > 0.0) {
+    const double frame_rate_hz = static_cast<double>(seq_span) * 1000.0 / elapsed_ms;
+    r.metrics.push_back(metric("frame_rate_hz", "Hz", frame_rate_hz,
+                               "Camera's own frame rate, from sequence numbers advanced per elapsed time — "
+                               "independent of how often this test read a frame."));
+    r.metrics.push_back(metric("frame_interval_ms", "ms", elapsed_ms / static_cast<double>(seq_span),
+                               "Mean interval between frames the camera produced."));
+  }
+
+  r.details.push_back("Sequence range: " + std::to_string(seqs.front()) + " → " + std::to_string(seqs.back()) + " (" +
+                      std::to_string(seq_span) + " frames produced in " + std::to_string(static_cast<int>(elapsed_ms)) +
+                      "ms)");
 
   if (total_gaps == 0 && duplicates == 0 && ts_non_mono == 0) {
     r.status = TestStatus::Pass;
@@ -1404,7 +1463,16 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
     return true;
   };
 
-  Pacer full_pacer(interval_ms_from(tp));
+  // "Full" and "rapid" mean nothing to a reader seeing them for the first time,
+  // and the summary reports both as bare ratios.
+  r.notes.push_back(
+      "This test starts and stops the camera stream over and over, in two phases. A \"full\" cycle "
+      "opens the device, captures several frames, then closes it — the normal pattern an application "
+      "uses. A \"rapid\" cycle opens and closes as fast as possible with a single frame in between, to "
+      "see whether back-to-back restarts break the pipeline. Both ratios are cycles that delivered "
+      "frames out of cycles attempted.");
+
+  Pacer full_pacer = make_pacer(tp);
   int full_consecutive_failures = 0;
   int full_attempted = 0;
   bool full_aborted = false;
@@ -1460,11 +1528,14 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
   const double slowest_full_start = start_ms.empty() ? 0.0 : *std::max_element(start_ms.begin(), start_ms.end());
   if (!full_aborted && slowest_full_start > SLOW_START_MS) {
     rapid_skipped = true;
-    r.details.push_back("Rapid cycles skipped: STREAMON took up to " +
-                        std::to_string(static_cast<int>(slowest_full_start)) + "ms during the full cycles (limit " +
-                        std::to_string(static_cast<int>(SLOW_START_MS)) +
-                        "ms). This device re-initialises a shared camera group on every STREAMON, so rapid "
-                        "open/close cycling is unsafe.");
+    r.notes.push_back(
+        "The rapid phase was skipped on purpose. During the full cycles, starting the stream took up "
+        "to " +
+        std::to_string(static_cast<int>(slowest_full_start)) + " ms — past the " +
+        std::to_string(static_cast<int>(SLOW_START_MS)) +
+        " ms limit this test allows. That much time means the driver is re-initialising a whole group "
+        "of sensors over I2C on every stream start, and cycling that as fast as possible can wedge the "
+        "capture pipeline. The full cycles above still cover the same code path, just less harshly.");
   }
 
   for (int c = 0; !full_aborted && !rapid_skipped && c < RAPID; c++) {
@@ -1501,17 +1572,20 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
   }
 
   if (!full_pacer.overrun_note().empty())
-    r.details.push_back(full_pacer.overrun_note());
+    r.notes.push_back(full_pacer.overrun_note());
 
   // A bare "0/50" says nothing about which half of the cycle broke. Streaming
   // failures are already counted separately, so anything left is the capture
   // timing out after a successful STREAMON — most often too few warmup pulses.
   if (rapid_attempted > 0 && rapid_ok == 0 && rapid_capture_timeouts > 0) {
-    r.details.push_back("Rapid cycles: STREAMON succeeded every time but all " +
-                        std::to_string(rapid_capture_timeouts) + " captures timed out after " +
-                        std::to_string(RAPID_TIMEOUT_MS) + "ms with rapid_warmup=" + std::to_string(RAPID_WARMUP) +
-                        " pulses. Compare against t03's trigger_pulses_to_first_frame — if that is higher, raise "
-                        "rapid_warmup.");
+    r.notes.push_back("Every rapid cycle started the stream successfully, yet all " +
+                      std::to_string(rapid_capture_timeouts) + " frame grabs timed out after " +
+                      std::to_string(RAPID_TIMEOUT_MS) +
+                      " ms. So streaming is not the problem — the frames simply never arrived in time. The usual "
+                      "cause is too few warm-up frames: this run discarded " +
+                      std::to_string(RAPID_WARMUP) +
+                      " before measuring. Check trigger_pulses_to_first_frame in t03-pipeline-ready; if it is higher "
+                      "than that, raise the rapid_warmup parameter to at least match it.");
   }
 
   r.metrics.push_back(
@@ -1703,6 +1777,17 @@ void run_timestamp_monotonicity(const std::string &camera_path, MemoryBackend ba
   push_stats_metrics(r.metrics, "wall_buf_offset", compute_stats(offsets_ms));
   r.metrics.push_back(metric("non_monotonic", "count", static_cast<double>(non_mono), "Non-monotonic count."));
 
+  // delta_* is the gap between the frames this loop dequeued, and capture()
+  // drains the queue before each grab — so it tracks this test's own pacing, not
+  // the camera's frame rate. Reading it as frame rate is the obvious mistake to
+  // make, and 1000/delta_mean can be off by a factor of two.
+  r.notes.push_back(
+      "The delta values above are the gaps between the frames this test read, not the camera's frame "
+      "rate. Frames that arrive while the test is between samples are discarded, so these gaps reflect "
+      "how often the test sampled. For the camera's actual frame rate see frame_rate_hz in "
+      "t20-sequence-continuity, which derives it from sequence numbers and so counts every frame the "
+      "camera produced.");
+
   const int max_nm = static_cast<int>(thv(th, "t21-timestamp-monotonicity", "max_non_monotonic"));
   if (non_mono <= max_nm) {
     r.status = TestStatus::Pass;
@@ -1807,7 +1892,7 @@ void run_pollerr_handling(const std::string &camera_path, MemoryBackend backend,
   }
   s.warmup(trigger, WARMUP, 200, nullptr, pulse_ns);
 
-  Pacer pacer(interval_ms_from(tp));
+  Pacer pacer = make_pacer(tp);
   int baseline_ok = 0;
   for (int i = 0; i < BASELINE_CAP; i++) {
     pacer.begin();
@@ -1843,7 +1928,7 @@ void run_pollerr_handling(const std::string &camera_path, MemoryBackend backend,
     }
   }
   if (!pacer.overrun_note().empty())
-    r.details.push_back(pacer.overrun_note());
+    r.notes.push_back(pacer.overrun_note());
 
   r.metrics.push_back(metric("baseline_ok", "count", static_cast<double>(baseline_ok), "Baseline frames."));
   r.metrics.push_back(metric("pollerr_raised", "bool", pollerr ? 1.0 : 0.0, "POLLERR after STREAMOFF."));
@@ -1852,6 +1937,13 @@ void run_pollerr_handling(const std::string &camera_path, MemoryBackend backend,
       metric("dqbuf_failed", "bool", dq_ret < 0 ? 1.0 : 0.0, "DQBUF correctly failed after STREAMOFF."));
   r.metrics.push_back(metric("restreamon_ok", "bool", re_ok ? 1.0 : 0.0, "Re-STREAMON succeeded."));
   r.metrics.push_back(metric("recovery_ok", "count", static_cast<double>(recovery_ok), "Recovery frames."));
+  // The two lines below are the raw evidence, and they read backwards to anyone
+  // who does not know the test: a "failed" ioctl is the passing outcome here.
+  // Say what is being checked before showing them.
+  r.notes.push_back(
+      "What this checks: after streaming is stopped, asking the driver for a frame must fail rather than hand back a "
+      "stale one. So in the evidence below a failed dequeue is the correct, expected result — not an error. The test "
+      "then restarts streaming and confirms frames flow again, which is what the recovery count reports.");
   r.details.push_back("poll ret=" + std::to_string(poll_ret) + (pollerr ? " POLLERR" : "") +
                       (pollhup ? " POLLHUP" : ""));
   r.details.push_back("DQBUF after STREAMOFF: " + std::string(dq_ret < 0 ? "failed" : "succeeded") +
@@ -1892,7 +1984,7 @@ void run_dmabuf_cache_sync(const std::string &camera_path, TriggerSource &trigge
   }
   s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
-  Pacer pacer(interval_ms_from(tp));
+  Pacer pacer = make_pacer(tp);
   int tested = 0, match_nosync = 0, match_sync = 0;
   for (int i = 0; i < NUM; i++) {
     pacer.begin();
@@ -1928,7 +2020,7 @@ void run_dmabuf_cache_sync(const std::string &camera_path, TriggerSource &trigge
     pacer.wait();
   }
   if (!pacer.overrun_note().empty())
-    r.details.push_back(pacer.overrun_note());
+    r.notes.push_back(pacer.overrun_note());
 
   r.metrics.push_back(metric("frames_tested", "count", static_cast<double>(tested), "Frames compared."));
   r.metrics.push_back(
@@ -2063,8 +2155,9 @@ void run_gpio_pulse_width(const std::string &camera_path, MemoryBackend backend,
   if (min_reliable_width > 0) {
     r.metrics.push_back(metric("min_reliable_width_ms", "ms", static_cast<double>(min_reliable_width),
                                "Smallest pulse width with 100% capture success."));
-    r.details.push_back("Minimum reliable pulse width: " + std::to_string(min_reliable_width) +
-                        "ms — configure >= this in Profile pulse_width_ms");
+    r.notes.push_back("The shortest pulse this sensor latched reliably was " + std::to_string(min_reliable_width) +
+                      " ms. Set pulse_width_ms in the device profile to that or higher; shorter pulses risk frames "
+                      "the sensor never sees.");
   }
 
   std::string edge = "inconclusive";
@@ -2252,7 +2345,7 @@ void run_stuck_frame(const std::string &camera_path, MemoryBackend backend, Trig
   s.warmup(trigger, WARMUP_COUNT, 200, nullptr, pulse_ns);
 
   std::vector<uint8_t> prev(CMP, 0);
-  Pacer pacer(interval_ms_from(tp));
+  Pacer pacer = make_pacer(tp);
   int identical = 0, max_run = 0, cur_run = 0, tested = 0;
 
   for (int i = 0; i < NUM; i++) {
@@ -2285,7 +2378,7 @@ void run_stuck_frame(const std::string &camera_path, MemoryBackend backend, Trig
     pacer.wait();
   }
   if (!pacer.overrun_note().empty())
-    r.details.push_back(pacer.overrun_note());
+    r.notes.push_back(pacer.overrun_note());
 
   r.metrics.push_back(metric("frames_tested", "count", static_cast<double>(tested), "Frames compared."));
   r.metrics.push_back(
@@ -2618,6 +2711,16 @@ void run_resolution_sweep(const std::string &camera_path, MemoryBackend backend,
   if (tested == 0) {
     r.status = TestStatus::Warn;
     r.summary = "Could not test any resolution (all S_FMT or session starts failed).";
+  } else if (tested == 1) {
+    // Same reasoning as the format sweep: the measurement stands, the sweep did
+    // not happen, and reporting a pass would conflate the two.
+    r.status = TestStatus::Warn;
+    r.summary = "Measured 1 resolution, but a sweep needs at least two — nothing to compare against.";
+    r.notes.push_back(
+        "This device enumerates only one frame size for the tested format, so there was nothing to "
+        "sweep across. The latency and throughput figures below are still valid measurements of that "
+        "resolution — the warning is about the sweep being impossible, not about the camera "
+        "misbehaving.");
   } else {
     r.status = TestStatus::Pass;
     r.summary = "Tested " + std::to_string(tested) + "/" + std::to_string(resolutions.size()) + " resolutions.";
@@ -2801,7 +2904,7 @@ void run_multi_camera(const std::vector<MultiCamParticipant> &participants, Memo
   std::vector<std::vector<double>> per_cam_latencies(participants.size());
   std::vector<double> cross_jitters;
   std::vector<double> fire_spreads_ms;
-  Pacer pacer(interval_ms_from(tp));
+  Pacer pacer = make_pacer(tp);
   int successful_rounds = 0;
 
   for (int sample = 0; sample < SAMPLES; sample++) {
@@ -2919,7 +3022,7 @@ void run_multi_camera(const std::vector<MultiCamParticipant> &participants, Memo
     pacer.wait();
   }
   if (!pacer.overrun_note().empty())
-    r.details.push_back(pacer.overrun_note());
+    r.notes.push_back(pacer.overrun_note());
 
   if (!fire_spreads_ms.empty()) {
     Stats fs = compute_stats(fire_spreads_ms);
@@ -3180,6 +3283,10 @@ TestResult DiagnosticRunner::run_test(const std::string &camera_path, MemoryBack
   TestThresholds tp = params_for(definition.id);
   tp["__pulse_width_ns"] = static_cast<double>(pulse_ns);
   tp["__trigger_interval_ms"] = 1000.0 / profile.defaults.trigger_rate_hz;
+  // Free-run fires no trigger at all, so explanatory text that talks about
+  // pulses or trigger rates is wrong there. Tests read this to word their notes
+  // for the mode they actually ran in.
+  tp["__externally_triggered"] = config.trigger_mode == TriggerMode::FreeRun ? 0.0 : 1.0;
   emit_section(log, camera_path, definition.id,
                "\xe2\x96\xb6 " + definition.id + " \xe2\x80\x94 " + definition.name + " [" + to_string(backend) + "]");
 
