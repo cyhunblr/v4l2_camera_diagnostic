@@ -11,10 +11,6 @@ function formatLogTimestamp(utcString: string | undefined): string {
   return utcString;
 }
 
-function shouldShowLogLine(line: LogLine): boolean {
-  return !(line.log_type === "data" && line.test === "t14" && line.message.startsWith("GPIO→DQBUF latency"));
-}
-
 type Props = {
   logs: LogLine[];
   visibleLogs: LogLine[];
@@ -44,16 +40,19 @@ export function LiveOutputPage({
   secSinceLastLog,
   outputRef
 }: Props) {
-  const displayedLogs = visibleLogs.filter(shouldShowLogLine);
+  const displayedLogs = visibleLogs;
 
   return (
     <div className="output-view">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Live Output</p>
-          <h2>
-            {runStatus === "idle" ? "No run started." : (
-              <span className="status-line">
+          <p className="eyebrow">Output</p>
+          <h2>Live Output</h2>
+          <span className="status-line">
+            {runStatus === "idle" ? (
+              "No run started."
+            ) : (
+              <>
                 Run status: <strong>{runStatus}</strong>
                 {isRunning && (
                   <span className="elapsed">
@@ -61,9 +60,9 @@ export function LiveOutputPage({
                   </span>
                 )}
                 {!isRunning && logs.length > 0 && <span className="elapsed">{logs.length} log lines</span>}
-              </span>
+              </>
             )}
-          </h2>
+          </span>
         </div>
         <div className="output-header-actions">
           <label className="output-filter-control">
@@ -91,7 +90,7 @@ export function LiveOutputPage({
       <div className="terminal-container full-height">
         <div className="terminal-header">
           <span className="col-time">TIME</span>
-          <span className="col-level">LEVEL</span>
+          <span className="col-level">STATUS</span>
           <span className="col-msg">MESSAGE</span>
         </div>
         <div className="terminal-output" ref={outputRef}>
@@ -107,11 +106,13 @@ export function LiveOutputPage({
               {line.log_type === "section_start" ? (
                 <>
                   <span className="section-ts" title={line.timestamp_utc}>{formatLogTimestamp(line.timestamp_utc)}</span>
+                  <span className="section-spacer" />
                   <p className="section-title">{line.message}</p>
-                  <code className="section-camera">{line.camera || "system"}</code>
                 </>
               ) : line.log_type === "data" ? (
                 <>
+                  <span className="data-ts" title={line.timestamp_utc}>{formatLogTimestamp(line.timestamp_utc)}</span>
+                  <span className="data-spacer" />
                   <pre className="data-block">{line.message}</pre>
                 </>
               ) : (

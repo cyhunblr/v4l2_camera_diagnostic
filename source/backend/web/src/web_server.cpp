@@ -1454,13 +1454,28 @@ void WebServer::execute_run(std::shared_ptr<RunState> run) {
   ProfileRegistry profiles(options_.config_directory);
   DiagnosticRunner runner(&profiles);
 
-  // Stream each test result as it completes rather than waiting for the full run.
+  // Stream each test result as it completes rather than waiting for the full run. This is
+  // the single per-test completion line: the duration rides along here instead of on a
+  // separate "completed" line, which used to be emitted before the verdict was known and
+  // so stamped a green check on tests that had just failed.
   run->config.progress_callback = [this, run](const std::string &camera_path, const TestResult &test) {
     const std::string severity = test.status == TestStatus::Fail                                         ? "error"
                                  : test.status == TestStatus::Warn || test.status == TestStatus::Skipped ? "warn"
                                                                                                          : "info";
-    append_log(run, severity, test.id + " [" + std::string(to_string(test.status)) + "] " + test.summary, camera_path,
-               test.id, "summary");
+    char elapsed[32];
+    if (test.duration_ms >= 1000.0) {
+      std::snprintf(elapsed, sizeof(elapsed), "%.1fs", test.duration_ms / 1000.0);
+    } else {
+      std::snprintf(elapsed, sizeof(elapsed), "%dms", static_cast<int>(test.duration_ms));
+    }
+    // The trailing "(duration)" also guarantees there is always text after the status tag,
+    // so a test that reports no summary can no longer defeat the client-side parser.
+    std::string message = test.id + " [" + std::string(to_string(test.status)) + "] ";
+    if (!test.summary.empty()) {
+      message += test.summary + " ";
+    }
+    message += std::string("(") + elapsed + ")";
+    append_log(run, severity, message, camera_path, test.id, "summary");
   };
 
   // Fine-grained log callback for real-time progress within each test.

@@ -3232,7 +3232,10 @@ CameraRunResult DiagnosticRunner::run_camera(const RunConfig::CameraConfig &came
       }
       char msg[128];
       snprintf(msg, sizeof(msg), "Pipeline released — settling %.0fs before the next test.", kInterTestCooldownSec);
-      emit(config.log_callback, camera.path, tests[ti].id, msg);
+      // Emitted with no test id on purpose: the settling gap belongs to the run, not to
+      // the test that just finished. Attributing it to tests[ti] made the line read as a
+      // continuation of a test whose verdict had already been reported.
+      emit(config.log_callback, camera.path, std::string(), msg);
       if (!interruptible_sleep(kInterTestCooldownSec, config.stop_token)) {
         cancelled = true;
         break;
@@ -3429,8 +3432,9 @@ TestResult DiagnosticRunner::run_test(const std::string &camera_path, MemoryBack
   }
 
   result.duration_ms = elapsed_ms(start, std::chrono::steady_clock::now());
-  emit(log, camera_path, definition.id,
-       "\xe2\x9c\x93 Completed in " + std::to_string(static_cast<int>(result.duration_ms)) + "ms", "info", "summary");
+  // No separate "completed" line: it landed before the verdict was known, so a failing
+  // test announced itself with a green check first. The duration now rides along on the
+  // single verdict line the progress callback emits.
   return result;
 }
 

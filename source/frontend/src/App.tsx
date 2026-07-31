@@ -52,7 +52,6 @@ export default function App() {
   const [reports, setReports] = useState(["json", "html"]);
   const [selectedThresholdId, setSelectedThresholdId] = useState("default");
   const [thresholdDirty, setThresholdDirty] = useState(false);
-  const [thresholdOnlySelected, setThresholdOnlySelected] = useState(true);
   const [severityFilter, setSeverityFilter] = useState("all");
   const [autoScroll, setAutoScroll] = useState(true);
   const [activePage, setActivePage] = useState<PageId>("dashboard");
@@ -405,8 +404,6 @@ export default function App() {
             onViewRun={handleViewRun}
             onStartNewDiagnostic={resetDiagnosticFlow}
             isRunning={isRunning}
-            runStatus={runStatus}
-            setupComplete={setupComplete}
           />
         )}
 
@@ -464,8 +461,6 @@ export default function App() {
             selectedThresholdId={selectedThresholdId}
             onSelectedChange={setSelectedThresholdId}
             selectedTests={selectedTests}
-            onlySelected={thresholdOnlySelected}
-            onOnlySelectedChange={setThresholdOnlySelected}
             onDirtyChange={setThresholdDirty}
             onError={showError}
           />

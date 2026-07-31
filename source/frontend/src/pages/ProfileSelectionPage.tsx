@@ -541,7 +541,11 @@ export function ProfileSelectionPage({
           <button className={assignmentMode === "per-camera" ? "selected" : ""} onClick={() => onAssignmentModeChange("per-camera")}>Per camera</button>
         </div>
         {triggerMode !== "free-run" && (
-          <select value={singleProfileId} onChange={(event) => handleSelectedProfileChange(event.target.value)}>
+          <select
+            className={singleProfileId ? "" : "placeholder-value"}
+            value={singleProfileId}
+            onChange={(event) => handleSelectedProfileChange(event.target.value)}
+          >
             <option value="">Select profile</option>
             {visibleProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
           </select>
@@ -568,13 +572,13 @@ export function ProfileSelectionPage({
             </button>
           </div>
         )}
-        <button className="icon-text-button" onClick={() => setShowCreate(true)} disabled={triggerMode === "free-run"}>
-          <Plus size={16} /> New profile
-        </button>
-        <button className="icon-button" title="Export selected profile" onClick={() => handleExportProfile().catch((e: Error) => onError(e.message))} disabled={!singleProfileId}>
-          <Download size={16} />
+        <button className="icon-button" title="New profile" onClick={() => setShowCreate(true)} disabled={triggerMode === "free-run"}>
+          <Plus size={16} />
         </button>
         <button className="icon-button" title="Import profile" onClick={() => importFileRef.current?.click()}>
+          <Download size={16} />
+        </button>
+        <button className="icon-button" title="Export selected profile" onClick={() => handleExportProfile().catch((e: Error) => onError(e.message))} disabled={!singleProfileId}>
           <Upload size={16} />
         </button>
         <input ref={importFileRef} type="file" accept=".json" style={{ display: "none" }} onChange={(e) => handleImportProfile(e).catch((err: Error) => onError(err.message))} />

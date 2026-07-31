@@ -5,14 +5,29 @@ import { ThemeMode } from "../theme";
 import { ThemeToggle } from "./ThemeToggle";
 import logoMark from "../assets/logo-mark.png";
 
-type NavItem = { id: PageId; label: string; icon: React.ReactNode };
+type NavItem = { id: PageId; label: string; icon: React.ReactNode; lockedTitle: string };
 
 const CONFIGURE_ITEMS: NavItem[] = [
-  { id: "cameras", label: "Cameras", icon: <Camera size={16} /> },
-  { id: "profiles", label: "Profiles", icon: <SlidersHorizontal size={16} /> },
-  { id: "tests", label: "Test Selection", icon: <ListChecks size={16} /> },
-  { id: "config", label: "Test Configuration", icon: <Settings2 size={16} /> },
-  { id: "reports", label: "Report Formats", icon: <FileDown size={16} /> }
+  { id: "cameras", label: "Cameras", icon: <Camera size={16} />, lockedTitle: "Complete the previous step first." },
+  { id: "profiles", label: "Profiles", icon: <SlidersHorizontal size={16} />, lockedTitle: "Complete the previous step first." },
+  { id: "tests", label: "Test Selection", icon: <ListChecks size={16} />, lockedTitle: "Complete the previous step first." },
+  { id: "config", label: "Test Configuration", icon: <Settings2 size={16} />, lockedTitle: "Complete the previous step first." },
+  { id: "reports", label: "Report Formats", icon: <FileDown size={16} />, lockedTitle: "Complete the previous step first." }
+];
+
+const OUTPUT_ITEMS: NavItem[] = [
+  {
+    id: "output",
+    label: "Live Output",
+    icon: <Terminal size={16} />,
+    lockedTitle: "Live Output opens when a diagnostic starts."
+  },
+  {
+    id: "results",
+    label: "Result Output",
+    icon: <History size={16} />,
+    lockedTitle: "Results are available after the run finishes."
+  }
 ];
 
 type Props = {
@@ -46,6 +61,22 @@ export function Sidebar({
   const startDisabled = actionInProgress || (!isRunning && !canStartDiagnostic);
   const startTitle = !isRunning && !canStartDiagnostic ? "Complete the setup flow before starting diagnostics." : undefined;
 
+  const renderNavItem = (item: NavItem) => {
+    const disabled = !canNavigate(item.id);
+    return (
+      <button
+        type="button"
+        key={item.id}
+        className={`${activePage === item.id ? "active" : ""}${disabled ? " locked" : ""}`}
+        onClick={() => onNavigate(item.id)}
+        disabled={disabled}
+        title={disabled ? item.lockedTitle : undefined}
+      >
+        {item.icon} {item.label} {disabled && <Lock className="nav-lock" size={13} />}
+      </button>
+    );
+  };
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -62,43 +93,11 @@ export function Sidebar({
 
         <div className="nav-divider" />
         <p className="nav-group-label">Configure</p>
-        {CONFIGURE_ITEMS.map((item) => {
-          const disabled = !canNavigate(item.id);
-          return (
-          <button
-            type="button"
-            key={item.id}
-            className={`${activePage === item.id ? "active" : ""}${disabled ? " locked" : ""}`}
-            onClick={() => onNavigate(item.id)}
-            disabled={disabled}
-            title={disabled ? "Complete the previous step first." : undefined}
-          >
-            {item.icon} {item.label} {disabled && <Lock className="nav-lock" size={13} />}
-          </button>
-          );
-        })}
+        {CONFIGURE_ITEMS.map(renderNavItem)}
 
         <div className="nav-divider" />
-        <button
-          type="button"
-          className={`${activePage === "output" ? "active" : ""}${!canNavigate("output") ? " locked" : ""}`}
-          onClick={() => onNavigate("output")}
-          disabled={!canNavigate("output")}
-          title={!canNavigate("output") ? "Live Output opens when a diagnostic starts." : undefined}
-        >
-          <Terminal size={16} /> Live Output {!canNavigate("output") && <Lock className="nav-lock" size={13} />}
-        </button>
-
-        <div className="nav-divider" />
-        <button
-          type="button"
-          className={`${activePage === "results" ? "active" : ""}${!canNavigate("results") ? " locked" : ""}`}
-          onClick={() => onNavigate("results")}
-          disabled={!canNavigate("results")}
-          title={!canNavigate("results") ? "Results are available after the run finishes." : undefined}
-        >
-          <History size={16} /> Results {!canNavigate("results") && <Lock className="nav-lock" size={13} />}
-        </button>
+        <p className="nav-group-label">Output</p>
+        {OUTPUT_ITEMS.map(renderNavItem)}
       </nav>
 
       <select
@@ -108,9 +107,9 @@ export function Sidebar({
         onChange={(event) => onNavigate(event.target.value as PageId)}
       >
         <option value="dashboard">Dashboard</option>
-        {CONFIGURE_ITEMS.map((item) => <option key={item.id} value={item.id} disabled={!canNavigate(item.id)}>{item.label}</option>)}
-        <option value="output" disabled={!canNavigate("output")}>Live Output</option>
-        <option value="results" disabled={!canNavigate("results")}>Results</option>
+        {[...CONFIGURE_ITEMS, ...OUTPUT_ITEMS].map((item) => (
+          <option key={item.id} value={item.id} disabled={!canNavigate(item.id)}>{item.label}</option>
+        ))}
       </select>
 
       <div className="sidebar-run-controls">

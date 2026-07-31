@@ -78,8 +78,9 @@ export function ResultsPage({ viewedRunId, liveSummaries, liveReportLinks }: Pro
     <div className="page results-page">
       <header className="topbar">
         <div>
-          <p className="eyebrow">{viewedRunId ? `Run ${viewedRunId}` : "Current Run"}</p>
-          <h2>Results</h2>
+          <p className="eyebrow">Output</p>
+          <h2>Result Output</h2>
+          <span className="status-line">{viewedRunId ? `Run ${viewedRunId}` : "Current run"}</span>
         </div>
       </header>
       {reportLinks.length > 0 && (

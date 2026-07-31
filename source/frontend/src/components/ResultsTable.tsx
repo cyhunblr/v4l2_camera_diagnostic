@@ -5,10 +5,6 @@ type Props = {
   emptyMessage?: string;
 };
 
-function isCompletionSummary(message: string): boolean {
-  return /^(?:\u2713\s*)?Completed in \d+ms$/i.test(message.trim());
-}
-
 function displayStatus(status: string): string {
   switch (status.toLowerCase()) {
     case "pass": return "Pass";
@@ -32,9 +28,6 @@ function statusColor(status: string): string {
 }
 
 function displaySummary(summary: TestSummary): string {
-  if (summary.status.toLowerCase() === "pass" || isCompletionSummary(summary.message)) {
-    return "Completed";
-  }
   return summary.message.replace(/^\u2713\s*/, "");
 }
 
@@ -42,20 +35,10 @@ export function ResultsTable({
   summaries,
   emptyMessage = "No test results yet. Results appear as tests complete."
 }: Props) {
-  const completionKeys = new Set(
-    summaries
-      .filter((summary) => isCompletionSummary(summary.message))
-      .map((summary) => `${summary.camera}:${summary.test}`)
-  );
-  const finalKeys = new Set(
-    summaries
-      .filter((summary) => !isCompletionSummary(summary.message))
-      .map((summary) => `${summary.camera}:${summary.test}`)
-  );
-  const rows = summaries.filter((summary) => {
-    const key = `${summary.camera}:${summary.test}`;
-    return !completionKeys.has(key) || !finalKeys.has(key) || !isCompletionSummary(summary.message);
-  });
+  // The backend now emits exactly one summary line per test — the verdict, with the
+  // duration folded in — so there is no longer a second "Completed in Nms" line to
+  // de-duplicate by string-matching an English message.
+  const rows = summaries;
 
   if (rows.length === 0) {
     return <div className="results-empty">{emptyMessage}</div>;

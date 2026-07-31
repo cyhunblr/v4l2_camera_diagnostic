@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SlidersHorizontal, Download, Upload, Plus, Trash2, Save, RotateCcw, AlertTriangle, Layers } from "lucide-react";
+import { SlidersHorizontal, Download, Upload, Plus, Trash2, Save, RotateCcw, AlertTriangle, Info } from "lucide-react";
 import { ThresholdConfig, getTestLayerName } from "../types";
 import * as api from "../api";
 
@@ -37,8 +37,6 @@ type Props = {
   selectedThresholdId: string;
   onSelectedChange: (id: string) => void;
   selectedTests?: string[];
-  onlySelected: boolean;
-  onOnlySelectedChange: (v: boolean) => void;
   onDirtyChange: (dirty: boolean) => void;
   onError: (msg: string) => void;
 };
@@ -47,8 +45,6 @@ export function ThresholdConfigPage({
   selectedThresholdId,
   onSelectedChange,
   selectedTests = [],
-  onlySelected,
-  onOnlySelectedChange,
   onDirtyChange,
   onError
 }: Props) {
@@ -285,12 +281,10 @@ export function ThresholdConfigPage({
     ? [...new Set([...Object.keys(editing.values), ...Object.keys(editing.params ?? {})])].sort()
     : [];
 
-  // Filter test IDs if onlySelected is active
-  const displayTestIds = allTestIds.filter((id) => {
-    if (!onlySelected) return true;
-    if (selectedTests.length === 0 || selectedTests.includes("all") || selectedTests.includes("stable")) return true;
-    return selectedTests.includes(id);
-  });
+  // Only the tests chosen on the Test Selection page are configurable here. With no
+  // selection yet there is nothing to narrow to, so everything stays visible.
+  const displayTestIds =
+    selectedTests.length === 0 ? allTestIds : allTestIds.filter((id) => selectedTests.includes(id));
 
   // Group display test IDs by Layer
   const categoryMap = new Map<string, string[]>();
@@ -342,30 +336,31 @@ export function ThresholdConfigPage({
             <label htmlFor="preset-select">Preset:</label>
             <select
               id="preset-select"
+              className={isDefault ? "placeholder-value" : ""}
               value={selectedThresholdId}
               onChange={(e) => onSelectedChange(e.target.value)}
             >
               {configs.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} {c.id === "default" ? "(Built-in Default)" : ""}
+                <option key={c.id} value={c.id} className={c.id === "default" ? "placeholder-option" : ""}>
+                  {c.id === "default" ? "Default" : c.name}
                 </option>
               ))}
             </select>
           </div>
 
           <div className="toolbar-actions">
-            <button className="icon-text-button" onClick={() => setShowNew(true)} title="New config">
-              <Plus size={15} /> New Preset
+            <button className="icon-button" onClick={() => setShowNew(true)} title="New preset">
+              <Plus size={16} />
             </button>
-            <button className="icon-text-button" onClick={handleExport} title="Export" disabled={!editing}>
-              <Download size={15} /> Export
+            <button className="icon-button" onClick={handleImportClick} title="Import preset">
+              <Download size={16} />
             </button>
-            <button className="icon-text-button" onClick={handleImportClick} title="Import">
-              <Upload size={15} /> Import
+            <button className="icon-button" onClick={handleExport} title="Export selected preset" disabled={!editing}>
+              <Upload size={16} />
             </button>
             {!isDefault && (
-              <button className="icon-text-button danger" onClick={handleDelete} title="Delete">
-                <Trash2 size={15} /> Delete
+              <button className="icon-button danger" onClick={handleDelete} title="Delete selected preset">
+                <Trash2 size={16} />
               </button>
             )}
           </div>
@@ -394,33 +389,10 @@ export function ThresholdConfigPage({
 
         {isDefault && (
           <p className="threshold-hint">
+            <Info size={15} />
             The default preset is read-only. Create a custom preset to modify parameters.
           </p>
         )}
-
-        <div className="config-filter-bar">
-          <div className="filter-group">
-            <span className="toolbar-label">
-              <Layers size={15} /> Scope:
-            </span>
-            <div className="choice-row compact">
-              <button
-                type="button"
-                className={`choice-btn ${onlySelected ? "selected" : ""}`}
-                onClick={() => onOnlySelectedChange(true)}
-              >
-                Selected Tests ({displayTestIds.length})
-              </button>
-              <button
-                type="button"
-                className={`choice-btn ${!onlySelected ? "selected" : ""}`}
-                onClick={() => onOnlySelectedChange(false)}
-              >
-                All Tests ({allTestIds.length})
-              </button>
-            </div>
-          </div>
-        </div>
 
         {editing && (
           <div className="threshold-editor">

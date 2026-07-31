@@ -8,8 +8,6 @@ type Props = {
   onViewRun: (runId: string) => void;
   onStartNewDiagnostic: () => void;
   isRunning: boolean;
-  runStatus: string;
-  setupComplete: boolean;
 };
 
 function formatDuration(ms: number): string {
@@ -19,7 +17,15 @@ function formatDuration(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-export function DashboardPage({ onViewRun, onStartNewDiagnostic, isRunning, runStatus, setupComplete }: Props) {
+// The backend already emits UTC as "%Y-%m-%dT%H:%M:%SZ", so this is a pure string
+// transform to the same readable form the HTML report uses ("... UTC"). Deliberately
+// not via Date(), which would re-render the instant in the viewer's local timezone.
+function formatUtc(timestamp: string): string {
+  const match = timestamp.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})Z$/);
+  return match ? `${match[1]} ${match[2]} UTC` : timestamp;
+}
+
+export function DashboardPage({ onViewRun, onStartNewDiagnostic, isRunning }: Props) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -71,14 +77,6 @@ export function DashboardPage({ onViewRun, onStartNewDiagnostic, isRunning, runS
           <p className="eyebrow">Diagnostic Control Center</p>
           <h2>Dashboard</h2>
         </div>
-        <button
-          className="icon-text-button primary-action"
-          onClick={onStartNewDiagnostic}
-          disabled={isRunning}
-          title={isRunning ? "Stop the current diagnostic before starting a new one." : undefined}
-        >
-          <Play size={16} /> Start a New Diagnostic
-        </button>
       </header>
 
       <section className="dashboard-command-panel">
@@ -91,9 +89,15 @@ export function DashboardPage({ onViewRun, onStartNewDiagnostic, isRunning, runS
             Start a guided run, then move through Cameras, Profiles, Test Selection, Test Configuration, and Report Formats in order.
           </p>
         </div>
-        <div className="dashboard-flow-state">
-          <span>Current run: {runStatus}</span>
-          <span>{setupComplete ? "Setup ready" : "Setup not started"}</span>
+        <div className="dashboard-flow-action">
+          <button
+            className="icon-text-button primary-action"
+            onClick={onStartNewDiagnostic}
+            disabled={isRunning}
+            title={isRunning ? "Stop the current diagnostic before starting a new one." : undefined}
+          >
+            <Play size={16} /> Start a New Diagnostic
+          </button>
         </div>
       </section>
 
@@ -119,12 +123,12 @@ export function DashboardPage({ onViewRun, onStartNewDiagnostic, isRunning, runS
             <table className="results-table runs-table">
               <thead>
                 <tr>
-                  <th className="col-status">Status</th>
                   <th>Started</th>
                   <th>Cameras</th>
                   <th>Profile</th>
                   <th>Duration</th>
                   <th>Pass/Fail/Warn/Skip</th>
+                  <th className="col-status">Status</th>
                   <th>Reports</th>
                 </tr>
               </thead>
@@ -135,16 +139,16 @@ export function DashboardPage({ onViewRun, onStartNewDiagnostic, isRunning, runS
                     className={`status-${run.status.toLowerCase()} clickable-row`}
                     onClick={() => onViewRun(run.id)}
                   >
+                    <td>{formatUtc(run.started_at_utc)}</td>
+                    <td>{run.camera_paths.join(", ") || "—"}</td>
+                    <td>{run.profile_id}</td>
+                    <td>{formatDuration(run.duration_ms)}</td>
+                    <td>{run.pass_count}/{run.fail_count}/{run.warn_count}/{run.skip_count}</td>
                     <td className="col-status">
                       <span className="status-badge">
                         {run.status === "completed" ? "✓" : run.status === "error" ? "✗" : run.status === "stopped" ? "⏹" : "…"}
                       </span>
                     </td>
-                    <td>{run.started_at_utc}</td>
-                    <td>{run.camera_paths.join(", ") || "—"}</td>
-                    <td>{run.profile_id}</td>
-                    <td>{formatDuration(run.duration_ms)}</td>
-                    <td>{run.pass_count}/{run.fail_count}/{run.warn_count}/{run.skip_count}</td>
                     <td onClick={(e) => e.stopPropagation()}>
                       {run.reports.map((r) => (
                         <a key={r.url} href={r.url} target="_blank" rel="noreferrer" className="report-link-pill">
