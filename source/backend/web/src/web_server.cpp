@@ -1361,14 +1361,14 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
 }
 
 std::string WebServer::handle_static(const std::string &path, int *status_code, std::string *content_type) const {
-  std::string relative = path == "/" ? "/index.html" : path;
+  std::string relative = path == "/" ? "index.html" : path.substr(1);
   if (!safe_relative_path(relative)) {
     *status_code = MHD_HTTP_BAD_REQUEST;
     *content_type = "text/plain; charset=utf-8";
     return "invalid path";
   }
 
-  std::string file_path = options_.web_root + relative;
+  std::string file_path = options_.web_root + "/" + relative;
   if (!file_exists(file_path)) {
     file_path = options_.web_root + "/index.html";
   }

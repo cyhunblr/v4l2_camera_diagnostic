@@ -324,8 +324,13 @@ build_frontend() {
   # The web UI toolchain (Vitest + @testing-library/jest-dom 7) requires
   # Node 22; CI pins the same major.
   if [[ "${node_major}" -lt 22 ]]; then
-    nvm install 22 >/dev/null
-    nvm use 22 >/dev/null
+    if [[ "${DEBUG}" -eq 1 ]]; then
+      nvm install 22
+      nvm use 22
+    else
+      nvm install 22 >/dev/null 2>&1
+      nvm use 22 >/dev/null 2>&1
+    fi
   fi
 
   pushd "${ROOT_DIR}/source/frontend" >/dev/null

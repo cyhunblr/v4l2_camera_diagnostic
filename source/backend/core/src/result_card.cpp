@@ -112,7 +112,7 @@ std::string test_display_name(const std::string &test_id, const std::string &nam
   if (std::sscanf(test_id.c_str(), "t%d", &number) != 1 || number <= 0) {
     return name;
   }
-  char prefix[8];
+  char prefix[16];
   std::snprintf(prefix, sizeof(prefix), "T%02d", number);
   // A name that already carries the number keeps it once. Runners and fixtures differ on
   // whether they store "Device Compliance" or "T01 - Device Compliance", and prefixing
