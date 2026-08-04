@@ -1,4 +1,4 @@
-# t07 — Multi-Buffer Configurations
+# t07 — Multi-buffer Configurations
 
 **Layer:** 3 — Buffer & memory  
 **Category:** buffering  

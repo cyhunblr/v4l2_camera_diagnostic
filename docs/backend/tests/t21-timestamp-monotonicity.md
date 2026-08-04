@@ -1,4 +1,4 @@
-# t21 — Timestamp Monotonicity
+# t21 — Buffer Timestamp Monotonicity
 
 **Layer:** 6 — Integrity  
 **Category:** metadata  

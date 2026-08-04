@@ -82,5 +82,47 @@ int main() {
                 "duplicate selectors produced duplicate entries");
   }
 
+  // An empty selector list means "the stable set", not "nothing". The web
+  // server used to substitute the selector "implemented" here -- a tag that
+  // has never existed -- so select_tests() matched nothing and a run started
+  // with zero tests.
+  {
+    const auto empty = v4l2diag::select_tests({});
+    ok &= check(!empty.empty(), "an empty selector list selected no tests");
+    ok &= check(contains(empty, "t04-no-streamon"), "the empty-selector default lost a stable test");
+    ok &= check(!contains(empty, "t05-pollerr-handling"), "the empty-selector default admitted a stress test");
+
+    // "implemented" is not a tag, category or id: it must match nothing, which
+    // is exactly why it was the wrong thing to fall back to.
+    ok &= check(v4l2diag::select_tests({"implemented"}).empty(), "'implemented' unexpectedly matched tests");
+  }
+
+  // Unmatched selectors must be reportable so the caller can warn instead of
+  // silently running a different set than the user asked for.
+  {
+    std::vector<std::string> unmatched;
+    const auto sel = v4l2diag::select_tests({"t04-no-streamon", "implemented", "t99-nope"}, &unmatched);
+    ok &= check(contains(sel, "t04-no-streamon"), "a valid selector was dropped alongside invalid ones");
+    ok &= check(unmatched.size() == 2, "unmatched selectors were not all reported");
+    ok &= check(std::find(unmatched.begin(), unmatched.end(), "implemented") != unmatched.end(),
+                "'implemented' was not reported as unmatched");
+    ok &= check(std::find(unmatched.begin(), unmatched.end(), "t99-nope") != unmatched.end(),
+                "'t99-nope' was not reported as unmatched");
+
+    std::vector<std::string> none;
+    v4l2diag::select_tests({"stable"}, &none);
+    ok &= check(none.empty(), "a matching selector was reported as unmatched");
+
+    std::vector<std::string> empty_in;
+    v4l2diag::select_tests({}, &empty_in);
+    ok &= check(empty_in.empty(), "the empty selector list reported an unmatched entry");
+
+    // A repeated unknown selector must warn once, not once per occurrence.
+    std::vector<std::string> repeated;
+    v4l2diag::select_tests({"t99-nope", "t99-nope", "t99-nope"}, &repeated);
+    ok &= check(repeated.size() == 1, "a repeated unknown selector was reported more than once");
+    ok &= check(repeated.front() == "t99-nope", "the repeated unknown selector was reported wrongly");
+  }
+
   return ok ? 0 : 1;
 }

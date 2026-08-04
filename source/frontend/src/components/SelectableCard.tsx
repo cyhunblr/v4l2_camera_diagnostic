@@ -7,7 +7,9 @@ export type SelectableCardProps = {
   subtitle?: React.ReactNode;
   meta?: React.ReactNode;
   badges?: React.ReactNode;
-  /** e.g. an InfoPopover trigger — must stopPropagation so it doesn't also toggle selection. */
+  /** e.g. an InfoPopover trigger. Rendered as a sibling of the selection button,
+   *  never inside it — a control nested in a control is invalid, and it made
+   *  Enter/Space on the trigger toggle the card as well. */
   cornerAction?: React.ReactNode;
   layout?: "vertical" | "horizontal";
   disabled?: boolean;
@@ -24,38 +26,30 @@ export function SelectableCard({
   layout = "vertical",
   disabled = false
 }: SelectableCardProps) {
-  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    if (disabled) return;
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      onToggle();
-    }
-  }
-
   return (
-    <div
-      role="button"
-      tabIndex={disabled ? -1 : 0}
-      aria-pressed={selected}
-      aria-disabled={disabled}
-      className={`selectable-card layout-${layout}${selected ? " selected" : ""}${disabled ? " disabled" : ""}`}
-      onClick={() => !disabled && onToggle()}
-      onKeyDown={handleKeyDown}
-    >
-      <div className="card-body">
-        <div className="card-header-row">
-          <div className="card-title">{title}</div>
-          {cornerAction && (
-            <div className="card-corner-action" onClick={(event) => event.stopPropagation()}>
-              {cornerAction}
-            </div>
-          )}
-        </div>
-        {subtitle && <div className="card-subtitle">{subtitle}</div>}
-        {meta && <div className="card-meta">{meta}</div>}
-        {badges && <div className="card-badges">{badges}</div>}
-      </div>
+    <div className="selectable-card-wrap">
+      {/* A native button gives Enter/Space activation for free. It is marked
+          aria-disabled rather than disabled so a keyboard user can still reach
+          the card and hear the subtitle explaining why it cannot be selected. */}
+      <button
+        type="button"
+        aria-pressed={selected}
+        aria-disabled={disabled}
+        className={`selectable-card layout-${layout}${selected ? " selected" : ""}${disabled ? " disabled" : ""}`}
+        onClick={() => {
+          if (!disabled) onToggle();
+        }}
+      >
+        <span className="card-body">
+          <span className="card-header-row">
+            <span className="card-title">{title}</span>
+          </span>
+          {subtitle && <span className="card-subtitle">{subtitle}</span>}
+          {meta && <span className="card-meta">{meta}</span>}
+          {badges && <span className="card-badges">{badges}</span>}
+        </span>
+      </button>
+      {cornerAction && <div className="card-corner-action">{cornerAction}</div>}
     </div>
   );
 }
-

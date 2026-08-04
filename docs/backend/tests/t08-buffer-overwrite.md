@@ -1,4 +1,4 @@
-# t08 — Buffer Overwrite Behavior
+# t08 — Buffer Saturation Behavior
 
 **Layer:** 3 — Buffer & memory  
 **Category:** buffering  

@@ -18,7 +18,9 @@ import {
   ConfirmDialogState,
   ControlDevice,
   Device,
+  MASTER_ROLE,
   Profile,
+  RoleBinding,
   TriggerChannel,
   TriggerMode
 } from "../types";
@@ -66,14 +68,19 @@ const nodeTypes = { camera: CameraNode, channel: ChannelNode };
 type Props = {
   devices: Device[];
   profiles: Profile[];
+  /**
+   * Schema version reported by GET /api/profiles, or null while it is unknown.
+   * New profiles are stamped with this rather than a frontend constant.
+   */
+  profileSchemaVersion: number | null;
   triggerMode: TriggerMode;
   onTriggerModeChange: (mode: TriggerMode) => void;
   assignmentMode: "single" | "per-camera";
   onAssignmentModeChange: (mode: "single" | "per-camera") => void;
   singleProfileId: string;
   onSingleProfileChange: (id: string) => void;
+  /** Cameras selected for the run, each with the role the topology gave it. */
   assignments: CameraAssignment[];
-  onAssignmentsChange: (assignments: CameraAssignment[]) => void;
   onProfilesChanged: () => Promise<void>;
   onError: (message: string | null) => void;
   onSuccess: (message: string) => void;
@@ -102,12 +109,6 @@ function channelMetadata(channel: TriggerChannel) {
     : selector?.sysfs_name || selector?.card || selector?.driver || "V4L2 control device";
 }
 
-function matcherMatches(device: Device, matcher: { driver: string; card: string; bus_info: string }) {
-  return (!matcher.driver || matcher.driver === device.driver) &&
-    (!matcher.card || matcher.card === device.card) &&
-    (!matcher.bus_info || matcher.bus_info === device.bus_info);
-}
-
 function compatibleChannels(profile: Profile, mode: TriggerMode) {
   return mode === "free-run" ? [] : profile.trigger_channels.filter((channel) => channel.type === mode);
 }
@@ -119,6 +120,7 @@ function sanitizeProfileId(value: string) {
 export function ProfileSelectionPage({
   devices,
   profiles,
+  profileSchemaVersion,
   triggerMode,
   onTriggerModeChange,
   assignmentMode,
@@ -126,7 +128,6 @@ export function ProfileSelectionPage({
   singleProfileId,
   onSingleProfileChange,
   assignments,
-  onAssignmentsChange,
   onProfilesChanged,
   onError,
   onSuccess,
@@ -140,6 +141,14 @@ export function ProfileSelectionPage({
   const [controlDevices, setControlDevices] = useState<ControlDevice[]>([]);
 
   const selectedProfile = profiles.find((p) => p.id === singleProfileId);
+  // Routing is role -> channel, held locally until "Save routing" writes it to the
+  // selected profile's role_bindings. It used to be camera -> channel with a
+  // per-camera profile_id, which is what v4 removed: the same routing was stated
+  // per camera and reconciled at run time.
+  const [draftBindings, setDraftBindings] = useState<RoleBinding[]>([]);
+  useEffect(() => {
+    setDraftBindings(selectedProfile?.role_bindings ?? []);
+  }, [selectedProfile?.id, selectedProfile?.role_bindings]);
   const [triggerRateDraft, setTriggerRateDraft] = useState(String(selectedProfile?.defaults.trigger_rate_hz ?? 30));
   const [pulseWidthDraft, setPulseWidthDraft] = useState(String(selectedProfile?.defaults.pulse_width_ms ?? 13));
   const timingDirty = Boolean(selectedProfile) &&
@@ -163,6 +172,9 @@ export function ProfileSelectionPage({
   const [setupValue, setSetupValue] = useState(0);
   const [teardownControlId, setTeardownControlId] = useState(0);
   const [teardownValue, setTeardownValue] = useState(0);
+  // Deliberately starts empty: v4 never infers a routing, so the user picks the
+  // canonical role rather than having master assumed for them (plan 2.5.2).
+  const [channelRole, setChannelRole] = useState("");
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 980px)");
@@ -226,8 +238,9 @@ export function ProfileSelectionPage({
   }, [compactRouting, devices, visibleChannels]);
 
   const edges = useMemo<Edge[]>(() => assignments.flatMap((assignment) => {
-    const target = visibleChannels.find(({ profile, channel }) =>
-      profile.id === assignment.profile_id && channel.id === assignment.trigger_channel_id
+    const binding = draftBindings.find((item) => item.role === assignment.role);
+    const target = binding && visibleChannels.find(({ profile, channel }) =>
+      profile.id === selectedProfile?.id && channel.id === binding.trigger_channel_id
     );
     if (!target || !devices.some((device) => device.path === assignment.path)) return [];
     return [{
@@ -241,86 +254,65 @@ export function ProfileSelectionPage({
       interactionWidth: 18,
       style: { stroke: triggerMode === "software" ? "#f59e0b" : "#3b82f6", strokeWidth: 2.5 }
     }];
-  }), [assignments, devices, triggerMode, visibleChannels]);
+  }), [assignments, devices, draftBindings, selectedProfile, triggerMode, visibleChannels]);
 
-  function applySingleProfile(id: string) {
-    onSingleProfileChange(id);
-    const profile = profiles.find((item) => item.id === id);
-    if (!profile) {
-      onAssignmentsChange(devices.map((device) => ({ path: device.path, profile_id: "", trigger_channel_id: "" })));
-      return;
-    }
-    const channels = compatibleChannels(profile, triggerMode);
-    onAssignmentsChange(devices.map((device) => {
-      const binding = profile.camera_bindings.find((item) => matcherMatches(device, item.camera));
-      const selectedChannel = binding && channels.some((channel) => channel.id === binding.trigger_channel_id)
-        ? binding.trigger_channel_id
-        : channels.length === 1 ? channels[0].id : "";
-      return { path: device.path, profile_id: profile.id, trigger_channel_id: selectedChannel };
-    }));
-  }
-
+  // Choosing a profile does not touch the assignments: a camera's role comes from
+  // the run topology (App owns that), and the channel comes from the profile's own
+  // role_bindings. Nothing here infers a channel for the user.
   function handleSelectedProfileChange(id: string) {
-    if (assignmentMode === "single") {
-      applySingleProfile(id);
-      return;
-    }
     onSingleProfileChange(id);
   }
 
+  // Drawing an edge binds the camera's ROLE to a channel on the selected profile.
+  // Held locally until "Save routing" writes it, so the graph can be edited without
+  // a round trip per edge.
   function connect(connection: Connection) {
     if (!connection.source?.startsWith("camera:") || !connection.target?.startsWith("channel:")) return;
     const cameraPath = connection.source.slice("camera:".length);
+    const role = assignments.find((assignment) => assignment.path === cameraPath)?.role;
     const channelTarget = visibleChannels.find(({ profile, channel }) =>
       `channel:${profile.id}:${channel.id}` === connection.target
     );
-    if (!channelTarget) return;
-    const next = assignments.filter((assignment) => assignment.path !== cameraPath);
-    next.push({
-      path: cameraPath,
-      profile_id: channelTarget.profile.id,
-      trigger_channel_id: channelTarget.channel.id
-    });
-    onAssignmentsChange(next);
+    if (!role || !channelTarget || channelTarget.profile.id !== singleProfileId) return;
+    setDraftBindings((current) => [
+      ...current.filter((binding) => binding.role !== role),
+      { role, trigger_channel_id: channelTarget.channel.id }
+    ]);
   }
 
   function deleteEdges(deleted: Edge[]) {
     const removedPaths = new Set(deleted.map((edge) => edge.source.slice("camera:".length)));
-    onAssignmentsChange(assignments.map((assignment) =>
-      removedPaths.has(assignment.path) ? { ...assignment, profile_id: "", trigger_channel_id: "" } : assignment
-    ));
+    const removedRoles = new Set(
+      assignments.filter((assignment) => removedPaths.has(assignment.path)).map((assignment) => assignment.role)
+    );
+    setDraftBindings((current) => current.filter((binding) => !removedRoles.has(binding.role)));
   }
 
   function resetRouting() {
-    onAssignmentsChange(devices.map((device) => ({ path: device.path, profile_id: "", trigger_channel_id: "" })));
+    setDraftBindings([]);
     onSuccess("Routing cleared.");
   }
 
+  // One run, one Trigger Profile: the routing is saved to that profile's
+  // role_bindings. The backend validates it (duplicate/unknown/non-canonical
+  // roles), so this does not re-implement the rules.
   async function saveRouting() {
-    const updates = profiles.filter((profile) => assignments.some((assignment) => assignment.profile_id === profile.id));
-    if (updates.length === 0) {
-      onError("Assign at least one camera before saving routing.");
+    if (!selectedProfile) {
+      onError("Select a Trigger Profile before saving routing.");
       return;
     }
-    for (const profile of updates) {
-      const newBindings = assignments
-        .filter((assignment) => assignment.profile_id === profile.id)
-        .map((assignment) => {
-          const device = devices.find((item) => item.path === assignment.path)!;
-          return {
-            camera: { driver: device.driver, card: device.card, bus_info: device.bus_info },
-            trigger_channel_id: assignment.trigger_channel_id
-          };
-        });
-      const response = await api.updateProfile({ ...profile, camera_bindings: newBindings });
-      if (!response.ok) {
-        const json = await response.json();
-        throw new Error(json.error ?? "Failed to save routing.");
-      }
+    if (draftBindings.length === 0) {
+      onError("Bind at least the master role before saving routing.");
+      return;
+    }
+    const response = await api.updateProfile({ ...selectedProfile, role_bindings: draftBindings });
+    if (!response.ok) {
+      const json = await response.json();
+      throw new Error(json.error ?? "Failed to save routing.");
     }
     await onProfilesChanged();
     onError(null);
-    onSuccess(updates.length === 1 ? `Routing saved to ${updates[0].name}.` : `Routing saved to ${updates.length} profiles.`);
+    onSuccess(`Routing saved to ${selectedProfile.name}.`);
   }
 
   async function applyTriggerTiming() {
@@ -352,6 +344,34 @@ export function ProfileSelectionPage({
   }
 
   async function createProfile() {
+    // Software channels are driven by a V4L2 control write, so a channel with no
+    // fire control cannot fire anything: validate_device_profile() refuses it.
+    // Checked here and named per field, rather than POSTing something the backend
+    // is guaranteed to reject with one opaque message.
+    if (triggerMode === "software") {
+      if (!controlDevicePath) {
+        onError("Select the control device this software trigger writes to.");
+        return;
+      }
+      if (!selectedControl()) {
+        onError("Select the fire control that drives this software trigger.");
+        return;
+      }
+    }
+    if (triggerMode !== "free-run" && channelRole !== MASTER_ROLE) {
+      // Not defaulted, and not satisfiable by a slave role: a profile that binds no
+      // master cannot start any run, so the backend would refuse it anyway. Better
+      // to say so here than to POST something guaranteed to fail.
+      onError("Bind this channel to the master role; other roles are added on the routing graph.");
+      return;
+    }
+    if (profileSchemaVersion === null) {
+      // Better to say so than to stamp a guess: the backend rejects a body whose
+      // schema_version it does not recognise, and guessing wrong here is exactly
+      // the failure a second frontend constant used to cause.
+      onError("Cannot create a profile: the server has not reported its config schema version.");
+      return;
+    }
     const controlDevice = controlDevices.find((device) => device.path === controlDevicePath);
     const control = selectedControl();
     const setupControl = selectedControl(setupControlId);
@@ -391,22 +411,21 @@ export function ProfileSelectionPage({
           teardown: teardownControl ? [{ id: teardownControl.id, name: teardownControl.name, type: teardownControl.type, value: teardownValue }] : []
         };
     const profile: Profile = {
-      schema_version: 2,
+      schema_version: profileSchemaVersion,
       id: profileId,
       name: profileName,
       description,
-      enabled: true,
-      camera_match: { driver: "", card: "", bus_info: "" },
       defaults: {
         trigger_mode: triggerMode,
         memory_backends: [],
-        test_selectors: ["implemented"],
-        report_formats: ["json", "html"],
+        // "implemented" is not an id, category or tag: it selects zero tests.
+        test_selectors: ["stable"],
         trigger_rate_hz: 30,
         pulse_width_ms: 13
       },
       trigger_channels: [channel],
-      camera_bindings: []
+      // The role the user picked, never a default. v4 infers no routing at all.
+      role_bindings: triggerMode === "free-run" ? [] : [{ role: channelRole, trigger_channel_id: channel.id }]
     };
     const response = await api.createProfile(profile);
     if (!response.ok) {
@@ -433,13 +452,15 @@ export function ProfileSelectionPage({
     onSuccess("Profile deleted.");
   }
 
+  // Fires the channel the master role is bound to, on the master camera.
   async function testSelectedRouting() {
-    const assignment = assignments.find((item) => item.profile_id && item.trigger_channel_id);
-    if (!assignment) return;
+    const master = assignments.find((item) => item.role === MASTER_ROLE);
+    const binding = draftBindings.find((item) => item.role === MASTER_ROLE);
+    if (!master || !binding || !selectedProfile) return;
     const response = await api.testSoftwareTrigger({
-      camera_path: assignment.path,
-      profile_id: assignment.profile_id,
-      trigger_channel_id: assignment.trigger_channel_id
+      camera_path: master.path,
+      profile_id: selectedProfile.id,
+      trigger_channel_id: binding.trigger_channel_id
     });
     const json = await response.json();
     if (!response.ok) throw new Error(json.error ?? "Software trigger test failed.");
@@ -518,7 +539,10 @@ export function ProfileSelectionPage({
 
   const writableControls = controlDevices.find((device) => device.path === controlDevicePath)?.controls
     .filter((control) => control.supported_for_trigger) ?? [];
-  const routedCount = triggerMode === "free-run" ? devices.length : assignments.filter((item) => item.trigger_channel_id).length;
+  // A camera counts as routed when its role has a binding.
+  const routedCount = triggerMode === "free-run"
+    ? devices.length
+    : assignments.filter((item) => draftBindings.some((binding) => binding.role === item.role)).length;
 
   return (
     <div className="page">
@@ -647,6 +671,24 @@ export function ProfileSelectionPage({
             <label>Name<input value={profileName} onChange={(event) => setProfileName(event.target.value)} /></label>
             <label className="wide-field">Description<input value={description} onChange={(event) => setDescription(event.target.value)} /></label>
             <label>Channel ID<input value={channelId} onChange={(event) => setChannelId(event.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "-"))} /></label>
+            {triggerMode !== "free-run" && (
+              <label>
+                Bind to role
+                {/*
+                  This form creates a profile's FIRST channel, and the backend
+                  refuses a profile that binds no master -- so master is the only
+                  saveable choice here. Still an explicit choice rather than a
+                  silent default: routing a trigger to the wrong camera is worse
+                  than one more click. Extra roles are bound afterwards, by drawing
+                  edges on the routing graph.
+                */}
+                <select value={channelRole} onChange={(event) => setChannelRole(event.target.value)}>
+                  <option value="">Select a role</option>
+                  <option value={MASTER_ROLE}>{MASTER_ROLE}</option>
+                </select>
+                <small>Bind further roles on the routing graph once the profile exists.</small>
+              </label>
+            )}
             <label>Channel label<input value={channelName} onChange={(event) => setChannelName(event.target.value)} /></label>
             {triggerMode === "hardware" ? (
               <>
@@ -701,8 +743,8 @@ export function ProfileSelectionPage({
           <span>{routedCount} cameras routed · {Math.max(0, devices.length - routedCount)} unassigned</span>
           <div>
             <button onClick={() => requestConfirm({ title: "Reset Routing", message: "Clear all camera routing assignments?", confirmLabel: "Reset", variant: "danger", onConfirm: resetRouting })}>Reset</button>
-            {triggerMode === "software" && <button onClick={() => testSelectedRouting().catch((error: Error) => onError(error.message))} disabled={!assignments.some((item) => item.trigger_channel_id)}>Test trigger</button>}
-            <button onClick={() => requestConfirm({ title: "Save Routing", message: "Save current routing configuration to the selected profile(s)?", confirmLabel: "Save", variant: "primary", onConfirm: () => saveRouting().catch((error: Error) => onError(error.message)) })} disabled={triggerMode === "free-run" || !assignments.some((item) => item.trigger_channel_id)}><Save size={16} /> Save routing</button>
+            {triggerMode === "software" && <button onClick={() => testSelectedRouting().catch((error: Error) => onError(error.message))} disabled={!draftBindings.some((item) => item.role === MASTER_ROLE)}>Test trigger</button>}
+            <button onClick={() => requestConfirm({ title: "Save Routing", message: "Save current routing configuration to the selected profile(s)?", confirmLabel: "Save", variant: "primary", onConfirm: () => saveRouting().catch((error: Error) => onError(error.message)) })} disabled={triggerMode === "free-run" || draftBindings.length === 0}><Save size={16} /> Save routing</button>
           </div>
         </footer>
       </section>

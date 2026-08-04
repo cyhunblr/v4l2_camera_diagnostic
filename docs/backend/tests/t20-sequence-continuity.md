@@ -1,4 +1,4 @@
-# t20 — Sequence Continuity
+# t20 — Frame Sequence Continuity
 
 **Layer:** 6 — Integrity  
 **Category:** sequence  

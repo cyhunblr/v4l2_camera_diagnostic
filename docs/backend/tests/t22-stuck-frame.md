@@ -1,4 +1,4 @@
-# t22 — Stuck Frame
+# t22 — Consecutive Frame Content Stability
 
 **Layer:** 6 — Integrity  
 **Category:** quality  

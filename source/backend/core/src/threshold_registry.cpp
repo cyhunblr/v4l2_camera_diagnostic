@@ -557,6 +557,16 @@ bool ThresholdRegistry::get_config(const std::string &id, ThresholdConfig *confi
 }
 
 bool ThresholdRegistry::add_or_update_config(const ThresholdConfig &config, std::string *error) {
+  // "default" is the built-in read-only preset: get_config() synthesises it and
+  // remove_config() refuses to delete it, so it must not be writable either.
+  // Without this the PUT /api/thresholds/{id} handler would overwrite it and
+  // the read-only badge in the UI would be client-side decoration only.
+  if (config.id == "default") {
+    if (error) {
+      *error = "the default threshold config is read-only";
+    }
+    return false;
+  }
   if (!validate_threshold_config(config, error) || !write_config_file(config, error)) {
     return false;
   }
@@ -674,6 +684,8 @@ void ThresholdRegistry::load() {
     if (!parse_config_file(directory_ + "/" + name, &config)) {
       continue;
     }
+    // Which file this actually came from. The id inside may say something else.
+    config.source_file = name;
     auto it = std::find_if(configs_.begin(), configs_.end(),
                            [&](const ThresholdConfig &existing) { return existing.id == config.id; });
     if (it == configs_.end()) {

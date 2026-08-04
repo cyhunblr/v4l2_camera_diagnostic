@@ -57,15 +57,15 @@ that doc if you skip it and need to grant it later.
 
 ## Reports
 
-Every run produces structured report artifacts — the browser view is not
-the canonical result. The web UI can generate:
+The browser view is not the canonical result. Every run generates all three
+artifacts, and the formats are not selectable:
 
 - JSON for automation
 - Markdown for review and issue attachments
 - HTML for local human-readable reports
 
-HTML reports include browser PDF export. The CLI also accepts `--report pdf`
-for environments that want a PDF artifact generated during the run.
+HTML reports include browser PDF export (`Export PDF` triggers the print dialog);
+the application never generates a PDF artifact.
 
 See [`docs/guides/reports.md`](docs/guides/reports.md).
 
@@ -85,7 +85,7 @@ every flag and exactly what each one removes.
 **Using the application:**
 
 - [`docs/frontend/web-ui.md`](docs/frontend/web-ui.md) — the web UI, its runtime model, and LAN access
-- [`docs/guides/reports.md`](docs/guides/reports.md) — report formats and contents
+- [`docs/guides/reports.md`](docs/guides/reports.md) — report artifacts and contents
 - [`docs/guides/configuration.md`](docs/guides/configuration.md) — camera, backend, and profile concepts
 - [`docs/guides/installation.md`](docs/guides/installation.md) — what the installer does
 - [`docs/guides/uninstallation.md`](docs/guides/uninstallation.md) — what the uninstaller removes and preserves

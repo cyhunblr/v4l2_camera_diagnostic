@@ -1,4 +1,4 @@
-# t16 — GPIO Pulse Width Characterization
+# t16 — Trigger Pulse Width and Edge Detection
 
 **Layer:** 5 — Latency  
 **Category:** trigger  

@@ -1,4 +1,4 @@
-# t13 — Poll Timeout Cliff Finder
+# t13 — Poll Timeout Reliability Boundary
 
 **Layer:** 4 — Polling / timeout  
 **Category:** polling  

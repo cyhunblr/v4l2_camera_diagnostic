@@ -1,4 +1,4 @@
-# t15 — NON_BLOCK vs BLOCK Comparison
+# t15 — Non-blocking Spin vs Blocking DQBUF
 
 **Layer:** 5 — Latency  
 **Category:** io-mode  

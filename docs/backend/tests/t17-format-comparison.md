@@ -1,4 +1,4 @@
-# t17 — Format Comparison
+# t17 — Pixel Format Performance Comparison
 
 **Layer:** 5 — Latency  
 **Category:** format  

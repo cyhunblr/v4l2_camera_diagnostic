@@ -1,4 +1,4 @@
-# t24 — Latency Under Load
+# t24 — CPU Load Impact on Capture Latency
 
 **Layer:** 7 — Stability  
 **Category:** stability  

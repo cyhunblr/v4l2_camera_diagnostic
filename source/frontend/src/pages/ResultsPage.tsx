@@ -1,29 +1,9 @@
 import { useEffect, useState } from "react";
 import { FileDown } from "lucide-react";
-import { getRunLogs, getRunReports } from "../api";
+import { getRun, getRunReports } from "../api";
 import { ResultsTable } from "../components/ResultsTable";
-import { LogLine, ReportLink, TestSummary } from "../types";
-
-type HistoricalResult = { summaries: TestSummary[]; reportLinks: ReportLink[] };
-
-/** Cache historical run results so revisiting the Results page for the same
- *  run doesn't refetch (per the plan's "small Map" cache). */
-const historicalCache = new Map<string, HistoricalResult>();
-
-function deriveSummaries(logs: LogLine[]): TestSummary[] {
-  const summaries: TestSummary[] = [];
-  for (const line of logs) {
-    if (line.log_type === "summary") {
-      const match = line.message.match(/^(.+?) \[(.+?)\] (.+)$/);
-      if (match) {
-        summaries.push({ test: match[1], status: match[2], message: match[3], camera: line.camera });
-      } else {
-        summaries.push({ test: line.test, status: "done", message: line.message, camera: line.camera });
-      }
-    }
-  }
-  return summaries;
-}
+import { ReportLink, TestSummary, summariesFromResult } from "../types";
+import { HistoricalResult, cacheHistoricalResult, getCachedHistoricalResult } from "./historicalResultsCache";
 
 type Props = {
   viewedRunId: string | null;
@@ -40,28 +20,70 @@ export function ResultsPage({ viewedRunId, liveSummaries, liveReportLinks }: Pro
       setHistorical(null);
       return;
     }
-    const cached = historicalCache.get(viewedRunId);
+    const cached = getCachedHistoricalResult(viewedRunId);
     if (cached) {
       setHistorical(cached);
       return;
     }
     let cancelled = false;
     setLoading(true);
-    Promise.all([getRunLogs(viewedRunId, 0), getRunReports(viewedRunId)])
-      .then(async ([logsRes, reportsRes]) => {
-        const logsJson = logsRes.ok ? await logsRes.json() : { lines: [] };
-        const reportsJson = reportsRes.ok ? await reportsRes.json() : { reports: [] };
+    // One structured source. The backend answers from memory while the run is live and
+    // from the canonical JSON artifact after a restart -- indistinguishable from here,
+    // and deliberately so: no disk fallback and no second parser on this side
+    // (plan 2.6.1). Logs are no longer read for statuses; they are not persisted.
+    //
+    // allSettled, not all: the two requests are independent. With Promise.all a failing
+    // /reports rejected the pair and threw away a perfectly good structured result --
+    // and, the other way round, hid the backend's `reason` for an unavailable one.
+    Promise.allSettled([getRun(viewedRunId), getRunReports(viewedRunId)])
+      .then(async ([runOutcome, reportsOutcome]) => {
+        // Artifact links, best effort. They come from their own endpoint, so a
+        // downloadable HTML report stays usable even when the structured result does
+        // not -- and a broken link fetch never costs us the results.
+        let reportLinks: ReportLink[] = [];
+        if (reportsOutcome.status === "fulfilled" && reportsOutcome.value.ok) {
+          const reportsJson = await reportsOutcome.value.json().catch(() => ({}));
+          reportLinks = reportsJson.reports ?? [];
+        }
+
+        if (runOutcome.status === "rejected") {
+          if (!cancelled) {
+            setHistorical({
+              state: "unavailable",
+              summaries: [],
+              reportLinks,
+              reason: "Could not reach the diagnostic server."
+            });
+          }
+          return;
+        }
+        const runRes = runOutcome.value;
+        if (!runRes.ok) {
+          // The backend says what is wrong -- `structured_result_unavailable` plus a
+          // reason. Surface it instead of rendering an empty table.
+          const errorJson = await runRes.json().catch(() => ({}));
+          const result: HistoricalResult = {
+            state: "unavailable",
+            summaries: [],
+            reportLinks,
+            reason: errorJson.reason || errorJson.error || `The server returned ${runRes.status}.`
+          };
+          if (!cancelled) setHistorical(result);  // deliberately NOT cached
+          return;
+        }
+        const runJson = await runRes.json().catch(() => ({}));
+        // A run that genuinely produced no tests IS an available result, so an empty
+        // summaries list is cached like any other.
         const result: HistoricalResult = {
-          summaries: deriveSummaries(Array.isArray(logsJson.lines) ? logsJson.lines : []),
-          reportLinks: reportsJson.reports ?? []
+          state: "available",
+          summaries: summariesFromResult(runJson.result),
+          reportLinks,
+          reason: ""
         };
         if (!cancelled) {
-          historicalCache.set(viewedRunId, result);
+          cacheHistoricalResult(viewedRunId, result);
           setHistorical(result);
         }
-      })
-      .catch(() => {
-        if (!cancelled) setHistorical({ summaries: [], reportLinks: [] });
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -73,6 +95,7 @@ export function ResultsPage({ viewedRunId, liveSummaries, liveReportLinks }: Pro
 
   const summaries = viewedRunId ? historical?.summaries ?? [] : liveSummaries;
   const reportLinks = viewedRunId ? historical?.reportLinks ?? [] : liveReportLinks;
+  const unavailable = Boolean(viewedRunId) && historical?.state === "unavailable";
 
   return (
     <div className="page results-page">
@@ -95,6 +118,11 @@ export function ResultsPage({ viewedRunId, liveSummaries, liveReportLinks }: Pro
       <div className="panel results-panel full-height">
         {viewedRunId && loading ? (
           <div className="results-empty">Loading run results...</div>
+        ) : unavailable ? (
+          <div className="results-empty" role="status">
+            <p>Structured results are unavailable for this run.</p>
+            <p className="results-empty-reason">{historical?.reason}</p>
+          </div>
         ) : (
           <ResultsTable summaries={summaries} />
         )}

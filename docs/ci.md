@@ -29,11 +29,17 @@ Gates every other job. Fails fast on:
 See [`docs/testing.md`](testing.md#static-analysis) for the exact local
 commands and for why a few `cpplint` categories are deliberately disabled.
 
-### `build-frontend`
+### `build-frontend` — "Test & Build Frontend"
 
-`npm ci && npm run build` in `source/frontend` (`tsc --noEmit && vite build`).
-There is no frontend test suite yet — type-checking is the only automated
-check beyond lint.
+In `source/frontend`, on **Node 22**:
+
+1. `npm ci`
+2. `npm test` — the Vitest suite (jsdom + React Testing Library)
+3. `npm run build` — `tsc --noEmit && vite build`
+
+Tests run before the build so a behaviour regression fails ahead of a bundle
+that would still compile. Both this job and `quality-checks` pin Node 22, the
+same major `installation.sh` provisions.
 
 ### `build-backend-amd64` / `build-backend-arm64`
 

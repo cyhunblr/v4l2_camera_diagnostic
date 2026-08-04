@@ -1,5 +1,5 @@
 import React from "react";
-import { Camera, FileDown, Gauge, History, ListChecks, Lock, Play, SlidersHorizontal, Square, Terminal, Settings2 } from "lucide-react";
+import { Camera, Gauge, History, ListChecks, Lock, Play, SlidersHorizontal, Square, Terminal, Settings2 } from "lucide-react";
 import { PageId } from "../types";
 import { ThemeMode } from "../theme";
 import { ThemeToggle } from "./ThemeToggle";
@@ -11,8 +11,9 @@ const CONFIGURE_ITEMS: NavItem[] = [
   { id: "cameras", label: "Cameras", icon: <Camera size={16} />, lockedTitle: "Complete the previous step first." },
   { id: "profiles", label: "Profiles", icon: <SlidersHorizontal size={16} />, lockedTitle: "Complete the previous step first." },
   { id: "tests", label: "Test Selection", icon: <ListChecks size={16} />, lockedTitle: "Complete the previous step first." },
-  { id: "config", label: "Test Configuration", icon: <Settings2 size={16} />, lockedTitle: "Complete the previous step first." },
-  { id: "reports", label: "Report Formats", icon: <FileDown size={16} />, lockedTitle: "Complete the previous step first." }
+  // No Report Formats step: v5 removed the format choice, every run writes HTML,
+  // JSON and Markdown (plan 2.10).
+  { id: "config", label: "Test Configuration", icon: <Settings2 size={16} />, lockedTitle: "Complete the previous step first." }
 ];
 
 const OUTPUT_ITEMS: NavItem[] = [

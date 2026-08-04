@@ -1,4 +1,4 @@
-# t23 — Sustained Capture
+# t23 — Sustained Capture Stability
 
 **Layer:** 7 — Stability  
 **Category:** stability  

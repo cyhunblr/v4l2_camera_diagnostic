@@ -1,4 +1,4 @@
-# t25 — Multi-Camera
+# t25 — Multi-camera Capture and Synchronization
 
 **Layer:** 7 — Stability  
 **Category:** stability  

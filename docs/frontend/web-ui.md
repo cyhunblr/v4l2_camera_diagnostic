@@ -53,7 +53,6 @@ Use `--report-root DIR` to override this location. `uninstallation.sh` never del
 - visual camera-to-channel routing
 - local profile creation, update, and removal
 - test selection (includes memory backend selection)
-- report format selection
 - run progress
 - Live Output panel — the main screen to watch during a run
 - Results panel with report download links

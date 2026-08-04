@@ -1,4 +1,4 @@
-# t26 — Cold Start
+# t26 — Post-STREAMON Latency Stabilization
 
 **Layer:** 7 — Stability  
 **Category:** stability  

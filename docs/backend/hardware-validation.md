@@ -29,7 +29,7 @@ hardware.
 
 ## Suggested Run
 
-Start with stable implemented tests and the memory backend you expect to use in
+Start with the `stable` tag and the memory backend you expect to use in
 production:
 
 ```bash
@@ -37,15 +37,18 @@ production:
   --camera /dev/video0 \
   --trigger-mode hardware \
   --profile <local-profile-id> \
-  --trigger-channel <local-channel-id> \
   --backend mmap \
   --tests stable \
-  --report json,md,html
 ```
 
-Record the camera model, kernel, driver version, profile id, trigger channel,
-backend list, selected tests, and generated report artifacts with any issue or
-release validation note.
+The profile must bind every role the run expects (`master` here, plus `slave-N`
+for each extra camera); the channel is resolved from the role rather than passed
+on the command line. See
+[`docs/development/cli.md`](../development/cli.md) for `--bind-role`.
+
+Record the camera model, kernel, driver version, trigger profile id, the resolved
+role routing, backend list, selected tests, and generated report artifacts with any
+issue or release validation note.
 
 ## Safety
 

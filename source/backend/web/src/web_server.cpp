@@ -1,5 +1,14 @@
 #include "v4l2diag/web/web_server.hpp"
 
+#include "v4l2diag/core/duration_format.hpp"
+#include "v4l2diag/core/report_naming.hpp"
+#include "v4l2diag/core/config_migration.hpp"
+#include "v4l2diag/core/run_config_json.hpp"
+#include "v4l2diag/core/test_json.hpp"
+#include "v4l2diag/core/run_result_json.hpp"
+#include "v4l2diag/core/run_routing.hpp"
+#include "v4l2diag/core/run_status.hpp"
+
 #include "v4l2diag/hw/device_discovery.hpp"
 #include "v4l2diag/hw/gpio_trigger.hpp"
 #include "v4l2diag/hw/v4l2_capture.hpp"
@@ -19,6 +28,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <memory>
 #include <arpa/inet.h>
 #include <map>
@@ -161,6 +171,9 @@ std::string content_type_for(const std::string &path) {
     return "application/json; charset=utf-8";
   if (ext == "svg")
     return "image/svg+xml";
+  // Kept deliberately. The product no longer writes PDFs, but report
+  // directories archived by older builds still contain .pdf files and must
+  // keep downloading with the right content type.
   if (ext == "pdf")
     return "application/pdf";
   if (ext == "md")
@@ -174,13 +187,23 @@ bool parse_ipv4_bind_address(const std::string &address, in_addr *out) {
 }
 
 bool safe_relative_path(const std::string &path) {
-  return path.find("..") == std::string::npos && path.find('\\') == std::string::npos;
+  // Absolute paths are rejected too: "/etc/passwd" contains no ".." but must not be
+  // treated as a path relative to the report root.
+  return path.find("..") == std::string::npos && path.find('\\') == std::string::npos &&
+         (path.empty() || path.front() != '/');
 }
 
-Json::Value backend_to_json(MemoryBackend backend) {
-  Json::Value value;
-  value = to_string(backend);
-  return value;
+// realpath() with an empty string for "does not exist / cannot be resolved". Used to
+// compare a candidate against the report root AFTER symlinks are followed, so a link
+// pointing outside cannot smuggle a file out.
+std::string real_path_or_empty(const std::string &path) {
+  char *resolved = realpath(path.c_str(), nullptr);
+  if (resolved == nullptr) {
+    return std::string();
+  }
+  std::string out(resolved);
+  std::free(resolved);
+  return out;
 }
 
 Json::Value device_to_json(const DeviceInfo &device) {
@@ -210,24 +233,16 @@ Json::Value profile_to_json(const DeviceProfile &profile) {
   out["id"] = profile.id;
   out["name"] = profile.name;
   out["description"] = profile.description;
-  out["enabled"] = profile.enabled;
-  out["camera_match"]["driver"] = profile.camera_match.driver;
-  out["camera_match"]["card"] = profile.camera_match.card;
-  out["camera_match"]["bus_info"] = profile.camera_match.bus_info;
   out["defaults"]["trigger_mode"] = to_string(profile.defaults.trigger_mode);
   out["defaults"]["memory_backends"] = Json::Value(Json::arrayValue);
   out["defaults"]["test_selectors"] = Json::Value(Json::arrayValue);
-  out["defaults"]["report_formats"] = Json::Value(Json::arrayValue);
   out["trigger_channels"] = Json::Value(Json::arrayValue);
-  out["camera_bindings"] = Json::Value(Json::arrayValue);
+  out["role_bindings"] = Json::Value(Json::arrayValue);
   for (MemoryBackend backend : profile.defaults.memory_backends) {
     out["defaults"]["memory_backends"].append(to_string(backend));
   }
   for (const auto &selector : profile.defaults.test_selectors) {
     out["defaults"]["test_selectors"].append(selector);
-  }
-  for (ReportFormat format : profile.defaults.report_formats) {
-    out["defaults"]["report_formats"].append(to_string(format));
   }
   out["defaults"]["trigger_rate_hz"] = profile.defaults.trigger_rate_hz;
   out["defaults"]["pulse_width_ms"] = profile.defaults.pulse_width_ms;
@@ -268,94 +283,35 @@ Json::Value profile_to_json(const DeviceProfile &profile) {
     }
     out["trigger_channels"].append(item);
   }
-  for (const auto &binding : profile.camera_bindings) {
+  for (const auto &binding : profile.role_bindings) {
     Json::Value item(Json::objectValue);
-    item["camera"]["driver"] = binding.camera.driver;
-    item["camera"]["card"] = binding.camera.card;
-    item["camera"]["bus_info"] = binding.camera.bus_info;
+    item["role"] = binding.role;
     item["trigger_channel_id"] = binding.trigger_channel_id;
-    out["camera_bindings"].append(item);
+    out["role_bindings"].append(item);
   }
   return out;
 }
 
-CameraMatcher matcher_from_json(const Json::Value &root) {
-  CameraMatcher matcher;
-  matcher.driver = root.get("driver", "").asString();
-  matcher.card = root.get("card", "").asString();
-  matcher.bus_info = root.get("bus_info", "").asString();
-  return matcher;
+// One structured answer for every path that refuses a config, so the caller sees
+// which fields are at fault instead of a generic profile-id error.
+std::string migration_error_response(const MigrationReport &report, int *status_code) {
+  *status_code = MHD_HTTP_BAD_REQUEST;
+  Json::Value out(Json::objectValue);
+  out["error"] = report.error.empty() ? "config cannot be used as submitted" : report.error;
+  out["migration"] = migration_report_to_json(report);
+  return json_to_string(out);
 }
 
-V4l2ControlWrite control_write_from_json(const Json::Value &root) {
-  V4l2ControlWrite write;
-  write.id = root.get("id", 0).asUInt();
-  write.name = root.get("name", "").asString();
-  write.type = root.get("type", 0).asUInt();
-  write.value = root.get("value", 0).asInt64();
-  return write;
-}
-
-DeviceProfile profile_from_json(const Json::Value &root) {
-  DeviceProfile profile;
-  profile.schema_version = 2;
-  profile.id = root.get("id", "").asString();
-  profile.name = root.get("name", "").asString();
-  profile.description = root.get("description", "").asString();
-  profile.enabled = root.get("enabled", true).asBool();
-  profile.camera_match = matcher_from_json(root["camera_match"]);
-  parse_trigger_mode(root["defaults"].get("trigger_mode", "free-run").asString(), &profile.defaults.trigger_mode);
-  for (const auto &value : root["defaults"]["memory_backends"]) {
-    MemoryBackend backend;
-    if (parse_memory_backend(value.asString(), &backend)) {
-      profile.defaults.memory_backends.push_back(backend);
-    }
-  }
-  for (const auto &value : root["defaults"]["test_selectors"]) {
-    profile.defaults.test_selectors.push_back(value.asString());
-  }
-  for (const auto &value : root["defaults"]["report_formats"]) {
-    ReportFormat format;
-    if (parse_report_format(value.asString(), &format)) {
-      profile.defaults.report_formats.push_back(format);
-    }
-  }
-  profile.defaults.trigger_rate_hz = root["defaults"].get("trigger_rate_hz", 30.0).asDouble();
-  profile.defaults.pulse_width_ms = root["defaults"].get("pulse_width_ms", 13.0).asDouble();
-  for (const auto &value : root["trigger_channels"]) {
-    TriggerChannel channel;
-    channel.id = value.get("id", "").asString();
-    channel.name = value.get("name", "").asString();
-    channel.description = value.get("description", "").asString();
-    channel.type = value.get("type", "hardware").asString() == "software" ? TriggerChannel::Type::Software
-                                                                          : TriggerChannel::Type::Hardware;
-    if (channel.type == TriggerChannel::Type::Hardware) {
-      channel.gpio.chip_id = value["gpio"].get("chip_id", 0).asInt();
-      channel.gpio.line_number = value["gpio"].get("line_number", 0).asInt();
-      channel.gpio.description = value["gpio"].get("description", "").asString();
-    } else {
-      const std::string kind = value["control_device"].get("kind", "capture").asString();
-      channel.control_device.kind = kind == "subdevice" ? ControlDeviceSelector::Kind::SubDevice
-                                    : kind == "video"   ? ControlDeviceSelector::Kind::VideoDevice
-                                                        : ControlDeviceSelector::Kind::CaptureDevice;
-      channel.control_device.driver = value["control_device"].get("driver", "").asString();
-      channel.control_device.card = value["control_device"].get("card", "").asString();
-      channel.control_device.bus_info = value["control_device"].get("bus_info", "").asString();
-      channel.control_device.sysfs_name = value["control_device"].get("sysfs_name", "").asString();
-      for (const auto &write : value["setup"])
-        channel.setup_controls.push_back(control_write_from_json(write));
-      for (const auto &write : value["fire"])
-        channel.fire_controls.push_back(control_write_from_json(write));
-      for (const auto &write : value["teardown"])
-        channel.teardown_controls.push_back(control_write_from_json(write));
-    }
-    profile.trigger_channels.push_back(std::move(channel));
-  }
-  for (const auto &value : root["camera_bindings"]) {
-    profile.camera_bindings.push_back(
-        {matcher_from_json(value["camera"]), value.get("trigger_channel_id", "").asString()});
-  }
-  return profile;
+// Delegates to the one migration entry point, so a profile arriving over the API
+// is interpreted exactly as one read from disk. This used to be a second
+// hand-written parser and the two drifted.
+//
+// Strict on purpose: a body with no schema_version is Malformed, not silently
+// stamped as current. The web UI sends the version, and stamping it would punch
+// a hole through the versioning rule on exactly the path that accepts files from
+// elsewhere.
+bool profile_from_json(const Json::Value &root, DeviceProfile *profile, MigrationReport *report) {
+  return migrate_profile_json(root, profile, report);
 }
 
 Json::Value control_device_to_json(const ControlDeviceInfo &device) {
@@ -394,90 +350,6 @@ Json::Value control_device_to_json(const ControlDeviceInfo &device) {
   return out;
 }
 
-Json::Value test_to_json(const TestDefinition &test) {
-  Json::Value out(Json::objectValue);
-  out["id"] = test.id;
-  out["name"] = test.name;
-  out["category"] = test.category;
-  out["description"] = test.description;
-  out["uses_trigger"] = test.uses_trigger;
-  for (TriggerMode mode : {TriggerMode::Hardware, TriggerMode::Software, TriggerMode::FreeRun}) {
-    if (supports_trigger_mode(test, mode)) {
-      out["supported_trigger_modes"].append(to_string(mode));
-    }
-  }
-  out["requires_dmabuf"] = test.requires_dmabuf;
-  out["tags"] = Json::Value(Json::arrayValue);
-  for (const auto &tag : test.tags) {
-    out["tags"].append(tag);
-  }
-  return out;
-}
-
-Json::Value metric_to_json(const MetricValue &metric) {
-  Json::Value out(Json::objectValue);
-  out["name"] = metric.name;
-  out["unit"] = metric.unit;
-  out["value"] = metric.value;
-  out["description"] = metric.description;
-  return out;
-}
-
-Json::Value result_to_json(const TestResult &test) {
-  Json::Value out(Json::objectValue);
-  out["id"] = test.id;
-  out["name"] = test.name;
-  out["category"] = test.category;
-  out["memory_backend"] = test.memory_backend;
-  out["status"] = to_string(test.status);
-  out["summary"] = test.summary;
-  out["duration_ms"] = test.duration_ms;
-  for (const auto &metric : test.metrics) {
-    out["metrics"].append(metric_to_json(metric));
-  }
-  for (const auto &detail : test.details) {
-    out["details"].append(detail);
-  }
-  for (const auto &warning : test.warnings) {
-    out["warnings"].append(warning);
-  }
-  return out;
-}
-
-Json::Value camera_result_to_json(const CameraRunResult &camera) {
-  Json::Value out(Json::objectValue);
-  out["camera_path"] = camera.camera_path;
-  out["profile_id"] = camera.profile_id;
-  out["trigger_channel_id"] = camera.trigger_channel_id;
-  out["trigger_description"] = camera.trigger_description;
-  out["trigger_mode"] = to_string(camera.trigger_mode);
-  out["trigger_rate_hz"] = camera.trigger_rate_hz;
-  out["pulse_width_ms"] = camera.pulse_width_ms;
-  for (auto backend : camera.memory_backends) {
-    out["memory_backends"].append(backend_to_json(backend));
-  }
-  for (const auto &test : camera.tests) {
-    out["tests"].append(result_to_json(test));
-  }
-  return out;
-}
-
-Json::Value run_result_to_json(const RunResult &result) {
-  Json::Value out(Json::objectValue);
-  out["project_name"] = result.project_name;
-  out["started_at_utc"] = result.started_at_utc;
-  out["finished_at_utc"] = result.finished_at_utc;
-  out["host_name"] = result.host_name;
-  out["kernel_release"] = result.kernel_release;
-  out["kernel_version"] = result.kernel_version;
-  out["output_directory"] = result.output_directory;
-  out["run_mode"] = to_string(result.run_mode);
-  for (const auto &camera : result.cameras) {
-    out["cameras"].append(camera_result_to_json(camera));
-  }
-  return out;
-}
-
 // Builds a compact historical-run summary (id, status, counts, report links) for the
 // persistent runs index — deliberately excludes the full nested per-test detail that
 // run_result_to_json includes, since the index is meant to stay small across many runs.
@@ -489,27 +361,43 @@ Json::Value run_summary_to_json(const std::string &id, const std::string &status
   out["status"] = status;
   out["trigger_mode"] = to_string(config.trigger_mode);
 
-  // Dashboard display: master's profile is the run's headline profile_id;
-  // slaves are reported separately since they don't run the test suite.
-  out["profile_id"] = config.master.profile_id;
+  // One run-level Trigger Profile, plus the routing it resolved to. Roles come
+  // from the topology, so the camera entries only need their path.
+  out["trigger_profile_id"] = config.trigger_profile_id;
+  out["role_bindings"] = Json::Value(Json::arrayValue);
+  for (const auto &binding : result.role_bindings) {
+    Json::Value item(Json::objectValue);
+    item["role"] = binding.role;
+    item["trigger_channel_id"] = binding.trigger_channel_id;
+    out["role_bindings"].append(item);
+  }
+  // Declared before use: an empty collection must still be an array, or the UI does
+  // `undefined.map(...)` on it (plan 2.7). `reports` is the one that actually bit --
+  // a run that failed before writing artifacts blanked the Dashboard.
+  out["camera_paths"] = Json::Value(Json::arrayValue);
+  out["slaves"] = Json::Value(Json::arrayValue);
+  out["reports"] = Json::Value(Json::arrayValue);
   out["camera_paths"].append(config.master.path);
   {
     Json::Value assignment(Json::objectValue);
     assignment["path"] = config.master.path;
-    assignment["profile_id"] = config.master.profile_id;
-    assignment["trigger_channel_id"] = config.master.trigger_channel_id;
+    assignment["role"] = kMasterRole();
     out["master"] = assignment;
   }
-  for (const auto &slave : config.slaves) {
+  for (std::size_t i = 0; i < config.slaves.size(); i++) {
     Json::Value assignment(Json::objectValue);
-    assignment["path"] = slave.path;
-    assignment["profile_id"] = slave.profile_id;
-    assignment["trigger_channel_id"] = slave.trigger_channel_id;
+    assignment["path"] = config.slaves[i].path;
+    assignment["role"] = slave_role(i);
     out["slaves"].append(assignment);
   }
   out["started_at_utc"] = result.started_at_utc;
   out["finished_at_utc"] = result.finished_at_utc;
   out["duration_ms"] = static_cast<Json::Int64>(duration_ms);
+  // The naming inputs, recorded so the DMESG name can be regenerated after a restart
+  // from the index alone (plan 3.4). Not interchangeable with the ids: a config file's
+  // name and the id inside it are independent.
+  out["trigger_profile_file"] = result.trigger_profile_file;
+  out["threshold_config_file"] = result.threshold_config_file;
 
   int pass_count = 0, fail_count = 0, warn_count = 0, skip_count = 0;
   for (const auto &camera : result.cameras) {
@@ -540,75 +428,13 @@ Json::Value run_summary_to_json(const std::string &id, const std::string &status
     item["format"] = to_string(artifact.format);
     const std::string filename = artifact.path.substr(artifact.path.find_last_of('/') + 1);
     item["url"] = "/reports/" + id + "/" + filename;
+    // The filename as the server itself wrote it. Recorded so a later lookup resolves
+    // the artifact from THIS entry rather than rebuilding a path out of a run id --
+    // pasting a client-supplied id into a path is how a traversal gets in.
+    item["filename"] = filename;
     out["reports"].append(item);
   }
   return out;
-}
-
-RunConfig run_config_from_json(const Json::Value &root, const WebServerOptions &options, const std::string &run_id) {
-  RunConfig config;
-  config.output_directory = options.report_root + "/web-run-" + run_id;
-  config.config_directory = options.config_directory;
-
-  if (root.isMember("trigger_mode")) {
-    parse_trigger_mode(root["trigger_mode"].asString(), &config.trigger_mode);
-  }
-  if (root.isMember("run_mode")) {
-    RunMode mode;
-    if (parse_run_mode(root["run_mode"].asString(), &mode)) {
-      config.run_mode = mode;
-    }
-  }
-  // test_selectors is fully populated by frontend
-  for (const auto &value : root["test_selectors"]) {
-    config.test_selectors.push_back(value.asString());
-  }
-  config.threshold_config_id = root.get("threshold_config_id", "default").asString();
-
-  auto parse_camera = [](const Json::Value &item) {
-    RunConfig::CameraConfig camera;
-    camera.path = item.get("path", "").asString();
-    camera.profile_id = item.get("profile_id", "").asString();
-    camera.trigger_channel_id = item.get("trigger_channel_id", "").asString();
-    return camera;
-  };
-
-  if (root.isMember("master")) {
-    config.master = parse_camera(root["master"]);
-  }
-  for (const auto &item : root["slaves"]) {
-    config.slaves.push_back(parse_camera(item));
-  }
-
-  for (const auto &item : root["memory_backends"]) {
-    MemoryBackend backend;
-    if (parse_memory_backend(item.asString(), &backend)) {
-      config.memory_backends.push_back(backend);
-    }
-  }
-  if (config.memory_backends.empty()) {
-    config.memory_backends.push_back(MemoryBackend::Mmap);
-  }
-
-  for (const auto &item : root["test_selectors"]) {
-    config.test_selectors.push_back(item.asString());
-  }
-  if (config.test_selectors.empty()) {
-    config.test_selectors.push_back("implemented");
-  }
-
-  for (const auto &item : root["report_formats"]) {
-    ReportFormat format;
-    if (parse_report_format(item.asString(), &format)) {
-      config.report_formats.push_back(format);
-    }
-  }
-  if (config.report_formats.empty()) {
-    config.report_formats.push_back(ReportFormat::Json);
-    config.report_formats.push_back(ReportFormat::Html);
-  }
-
-  return config;
 }
 
 bool validate_run_config(const RunConfig &config, const WebServerOptions &options, std::string *error) {
@@ -625,27 +451,6 @@ bool validate_run_config(const RunConfig &config, const WebServerOptions &option
       *error = camera.path.empty() ? "camera path is required" : "camera paths must be unique";
       return false;
     }
-    if (config.trigger_mode == TriggerMode::FreeRun) {
-      return true;
-    }
-    DeviceProfile profile;
-    if (camera.profile_id.empty() || !profiles.get_profile(camera.profile_id, &profile)) {
-      *error = "active trigger modes require a valid profile for every camera";
-      return false;
-    }
-    const auto channel = std::find_if(profile.trigger_channels.begin(), profile.trigger_channels.end(),
-                                      [&](const TriggerChannel &item) { return item.id == camera.trigger_channel_id; });
-    if (channel == profile.trigger_channels.end()) {
-      *error = "active trigger modes require a valid trigger channel for every camera";
-      return false;
-    }
-    const bool compatible =
-        (config.trigger_mode == TriggerMode::Hardware && channel->type == TriggerChannel::Type::Hardware) ||
-        (config.trigger_mode == TriggerMode::Software && channel->type == TriggerChannel::Type::Software);
-    if (!compatible) {
-      *error = "trigger channel type does not match the selected trigger mode";
-      return false;
-    }
     return true;
   };
 
@@ -654,6 +459,46 @@ bool validate_run_config(const RunConfig &config, const WebServerOptions &option
   }
   for (const auto &slave : config.slaves) {
     if (!validate_camera(slave)) {
+      return false;
+    }
+  }
+
+  // Free-run does not route at all, so it needs no Trigger Profile.
+  if (config.trigger_mode == TriggerMode::FreeRun) {
+    return true;
+  }
+  DeviceProfile profile;
+  if (config.trigger_profile_id.empty() || !profiles.get_profile(config.trigger_profile_id, &profile)) {
+    *error = "active trigger modes require a valid run-level trigger profile";
+    return false;
+  }
+  // The same seam the CLI goes through, so both refuse an incomplete routing with
+  // the same words instead of maintaining two ideas of what is valid.
+  std::vector<std::string> channel_ids;
+  for (const auto &channel : profile.trigger_channels) {
+    channel_ids.push_back(channel.id);
+  }
+  const RoleResolution routing = resolve_role_bindings(profile.role_bindings, channel_ids, config.slaves.size());
+  if (!routing.ok()) {
+    *error = describe_role_resolution(routing);
+    return false;
+  }
+  // Every resolved channel has to match the selected mode. Same helper the CLI
+  // uses, so both refuse with the same words -- this check used to live only here,
+  // which meant the CLI did not make it at all.
+  for (const auto &binding : routing.resolved) {
+    const auto channel =
+        std::find_if(profile.trigger_channels.begin(), profile.trigger_channels.end(),
+                     [&](const TriggerChannel &item) { return item.id == binding.trigger_channel_id; });
+    if (channel == profile.trigger_channels.end()) {
+      *error = "trigger channel \"" + binding.trigger_channel_id + "\" (role " + binding.role +
+               ") is not defined by the profile";
+      return false;
+    }
+    const std::string mismatch = describe_mode_mismatch(
+        config.trigger_mode, channel->type == TriggerChannel::Type::Hardware, binding.role, binding.trigger_channel_id);
+    if (!mismatch.empty()) {
+      *error = mismatch;
       return false;
     }
   }
@@ -687,6 +532,12 @@ struct WebServer::RunState {
   std::size_t next_offset = 0;
   std::thread worker;
   std::atomic<bool> stop_requested{false};
+  // Set once the run's final status is resolved and persist_run_summary() has
+  // returned, so the thread-entry guard cannot double-finalise a run
+  // execute_run() already handled. Note that persist_run_summary() does not yet
+  // check the ofstream, so this flag does not prove the history reached disk --
+  // atomic write + real I/O verification stay open under plan 2.9.
+  std::atomic<bool> finalized{false};
   mutable std::mutex mutex;
 };
 
@@ -790,22 +641,39 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
 
   if (method == "GET" && path == "/api/dmesg") {
     *content_type = "text/plain; charset=utf-8";
+
+    // A download must name a real run, and it is checked BEFORE anything is executed
+    // (plan 3.4). Rejecting only the Content-Disposition header would still run
+    // journalctl and hand back the kernel log with a 200 -- the refusal has to be the
+    // response, not a missing header on an otherwise successful one.
+    //
+    // The live view (no download=1) needs no run: it is the current boot's log, not a
+    // particular run's artifact.
+    if (query_value(query, "download") == "1") {
+      const std::string run_id = query_value(query, "run");
+      if (run_id.empty()) {
+        *status_code = MHD_HTTP_BAD_REQUEST;
+        return "A kernel-log download must name a run: /api/dmesg?download=1&run=<run-id>.\n";
+      }
+      // Exact match against a live run or a history record. A prefix, a suffix or a
+      // traversal attempt selects nothing and is refused here, before any command runs.
+      if (!find_run(run_id) && !find_history_entry(run_id).isObject()) {
+        *status_code = MHD_HTTP_NOT_FOUND;
+        return "No such run: a kernel-log download is only served for a run this server knows.\n";
+      }
+    }
+
     // journalctl rather than dmesg: reading it needs only membership in "adm"
     // (or systemd-journal), which the journal directories grant by ACL, so the
     // server stays unprivileged. dmesg would additionally need CAP_SYSLOG or
     // root wherever kernel.dmesg_restrict=1. -b limits output to the current
     // boot — without it journalctl -k spans every retained boot.
-    const char *command = "journalctl -k -b --no-pager 2>&1";
+    //
+    // Fixed command, no user input: the request contributes a run id, which is used to
+    // look up a record and to name the download, and never reaches a shell.
     std::string output;
-    FILE *pipe = popen(command, "r");
-    if (pipe != nullptr) {
-      char buf[4096];
-      while (fgets(buf, sizeof(buf), pipe) != nullptr) {
-        output += buf;
-      }
-      if (pclose(pipe) == 0 && !output.empty()) {
-        return output;
-      }
+    if (read_kernel_log(&output)) {
+      return output;
     }
     // Hand back what journalctl actually said. A generic "permission denied?"
     // leaves the reader guessing between a missing group, a disabled journal
@@ -836,6 +704,24 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
     out["profiles"] = Json::Value(Json::arrayValue);
     for (const auto &profile : registry.list_profiles()) {
       out["profiles"].append(profile_to_json(profile));
+    }
+    // Migration state per stored config, including ones too new or too broken to
+    // load. The backend contract (MigrationReport) and what the UI shows are
+    // separate concerns: this is the wire model the UI will render.
+    out["schema_version"] = kProfileSchemaVersion;
+    out["configs"] = Json::Value(Json::arrayValue);
+    for (const auto &stored : registry.stored_configs()) {
+      Json::Value item = migration_report_to_json(stored.report);
+      item["file"] = stored.file;
+      item["profile_id"] = stored.profile_id;
+      if (stored.report.has_draft()) {
+        // Migrated values, for prefilling the migration form. Sent whenever the
+        // file parsed -- a Current config that fails field validation needs the
+        // form just as much as a Legacy one. Deliberately not in "profiles":
+        // neither is runnable until the user saves it.
+        item["draft_profile"] = profile_to_json(stored.draft);
+      }
+      out["configs"].append(item);
     }
     return json_to_string(out);
   }
@@ -874,7 +760,21 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
       out["error"] = body_json["parse_error"];
       return json_to_string(out);
     }
-    const DeviceProfile profile = profile_from_json(body_json);
+    DeviceProfile profile;
+    MigrationReport report;
+    if (!profile_from_json(body_json, &profile, &report)) {
+      // Future or Malformed: structured, not a generic id error.
+      return migration_error_response(report, status_code);
+    }
+    if (report.needs_user_input()) {
+      // A Legacy or incomplete import is previewed, never written. The user
+      // reviews the migration and saves it through POST /api/profiles.
+      Json::Value out(Json::objectValue);
+      out["imported"] = false;
+      out["migration"] = migration_report_to_json(report);
+      out["draft_profile"] = profile_to_json(profile);
+      return json_to_string(out);
+    }
     std::string error;
     if (!validate_device_profile(profile, &error)) {
       *status_code = MHD_HTTP_BAD_REQUEST;
@@ -901,7 +801,11 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
       out["error"] = body_json["parse_error"];
       return json_to_string(out);
     }
-    const DeviceProfile profile = profile_from_json(body_json);
+    DeviceProfile profile;
+    MigrationReport report;
+    if (!profile_from_json(body_json, &profile, &report) || report.needs_user_input()) {
+      return migration_error_response(report, status_code);
+    }
     std::string error;
     if (!validate_device_profile(profile, &error)) {
       *status_code = MHD_HTTP_BAD_REQUEST;
@@ -932,6 +836,80 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
     return json_to_string(profile_to_json(profile));
   }
 
+  // Explicit migration commit, addressed by source config file rather than by
+  // profile id.
+  //
+  // POST /api/profiles writes "<profile.id>.json", which is wrong for a
+  // migration whose file name differs from its id, or whose id the user edited on
+  // the form: it would leave the original file behind, still reported as needing
+  // migration. This endpoint knows which file it is replacing.
+  //
+  // The {config-id} is the file name from GET /api/profiles' configs[]. It is
+  // only ever compared against that list, so it cannot address anything outside
+  // the config directory.
+  if (method == "PUT" && path.rfind("/api/profiles/configs/", 0) == 0 &&
+      path.size() > std::string("/api/profiles/configs/").size() &&
+      path.substr(path.size() - std::string("/migrate").size()) == "/migrate") {
+    const std::string tail = path.substr(std::string("/api/profiles/configs/").size());
+    const std::string config_id = tail.substr(0, tail.size() - std::string("/migrate").size());
+    const Json::Value body_json = parse_json_body(body);
+    if (body_json.isMember("parse_error")) {
+      *status_code = MHD_HTTP_BAD_REQUEST;
+      Json::Value out(Json::objectValue);
+      out["error"] = body_json["parse_error"];
+      return json_to_string(out);
+    }
+    ProfileRegistry registry(options_.config_directory);
+    const auto configs = registry.stored_configs();
+    const auto source = std::find_if(configs.begin(), configs.end(),
+                                     [&](const ProfileRegistry::StoredConfig &c) { return c.file == config_id; });
+    if (source == configs.end()) {
+      *status_code = MHD_HTTP_NOT_FOUND;
+      Json::Value out(Json::objectValue);
+      out["error"] = "config not found";
+      return json_to_string(out);
+    }
+    // Only a config that genuinely needs repairing may be committed here. Without
+    // this, a valid current body aimed at a Future, Malformed or already-runnable
+    // config would rewrite or delete that file. migrate_config() enforces the same
+    // rule; this answers with the source's own migration report so the caller
+    // learns why, rather than getting a bare 400.
+    if (!source->report.has_draft() || !source->report.needs_user_input()) {
+      MigrationReport refused = source->report;
+      refused.error = source->report.usable_for_run()
+                          ? "this config does not need migration; use POST or PUT /api/profiles"
+                          : "this config cannot be migrated: it could not be read";
+      *status_code = MHD_HTTP_CONFLICT;
+      Json::Value out(Json::objectValue);
+      out["error"] = refused.error;
+      out["migration"] = migration_report_to_json(refused);
+      return json_to_string(out);
+    }
+    // The filled-in draft has to stand on its own at the current schema: the same
+    // strictness as any other save, so a migration cannot be committed while it
+    // is still Legacy or incomplete.
+    DeviceProfile profile;
+    MigrationReport report;
+    if (!profile_from_json(body_json, &profile, &report) || report.needs_user_input()) {
+      return migration_error_response(report, status_code);
+    }
+    // Target collisions are the registry's call: it sees every stored file, while
+    // get_profile() is blind to the Future/Legacy/Malformed ones a rename would
+    // overwrite.
+    std::string error;
+    if (!registry.migrate_config(config_id, profile, &error)) {
+      *status_code = error.find("already") != std::string::npos ? MHD_HTTP_CONFLICT : MHD_HTTP_BAD_REQUEST;
+      Json::Value out(Json::objectValue);
+      out["error"] = error;
+      return json_to_string(out);
+    }
+    Json::Value out(Json::objectValue);
+    out["migrated"] = true;
+    out["source_file"] = config_id;
+    out["profile"] = profile_to_json(profile);
+    return json_to_string(out);
+  }
+
   if ((method == "PUT" || method == "DELETE") && path.rfind("/api/profiles/", 0) == 0) {
     const std::string id = path.substr(std::string("/api/profiles/").size());
     ProfileRegistry registry(options_.config_directory);
@@ -953,7 +931,11 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
       out["error"] = body_json["parse_error"];
       return json_to_string(out);
     }
-    DeviceProfile profile = profile_from_json(body_json);
+    DeviceProfile profile;
+    MigrationReport put_report;
+    if (!profile_from_json(body_json, &profile, &put_report) || put_report.needs_user_input()) {
+      return migration_error_response(put_report, status_code);
+    }
     if (profile.id.empty()) {
       profile.id = id;
     }
@@ -1200,7 +1182,7 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
       out["error"] = body_json["parse_error"];
       return json_to_string(out);
     }
-    RunConfig config = run_config_from_json(body_json, options_, run_id);
+    RunConfig config = run_config_from_json(body_json, options_.report_root, options_.config_directory, run_id);
     std::string validation_error;
     if (!validate_run_config(config, options_, &validation_error)) {
       *status_code = MHD_HTTP_BAD_REQUEST;
@@ -1238,16 +1220,20 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
       return json_to_string(out);
     }
     run->stop_requested.store(true, std::memory_order_relaxed);
+    std::string observed;
     {
       std::lock_guard<std::mutex> lock(run->mutex);
       if (run->status == "running" || run->status == "queued") {
         run->status = "stopped";
       }
+      observed = run->status;
     }
     append_log(run, "warn", "Run stop requested by user.");
     Json::Value out(Json::objectValue);
     out["id"] = run->id;
-    out["status"] = "stopped";
+    // Report what the run actually is. A run that had already finished stays
+    // "completed"/"error"; claiming "stopped" told the UI a lie it then cached.
+    out["status"] = observed;
     return json_to_string(out);
   }
 
@@ -1256,8 +1242,14 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
     const std::size_t slash = tail.find('/');
     const std::string id = slash == std::string::npos ? tail : tail.substr(0, slash);
     const std::string sub = slash == std::string::npos ? "" : tail.substr(slash + 1);
+    // The in-memory run is always the primary source: it is the live one, and its
+    // result is more current than anything on disk.
     auto run = find_run(id);
-    if (!run) {
+    // Only if it is gone do we fall back to what the server itself recorded. The id is
+    // never pasted into a path -- it can only select an index entry (see
+    // find_history_entry) or select nothing.
+    const Json::Value history_entry = run ? Json::Value() : find_history_entry(id);
+    if (!run && !history_entry.isObject()) {
       *status_code = MHD_HTTP_NOT_FOUND;
       Json::Value out(Json::objectValue);
       out["error"] = "run not found";
@@ -1265,15 +1257,49 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
     }
 
     if (sub.empty()) {
-      std::lock_guard<std::mutex> lock(run->mutex);
+      if (run) {
+        std::lock_guard<std::mutex> lock(run->mutex);
+        Json::Value out(Json::objectValue);
+        out["id"] = run->id;
+        out["status"] = run->status;
+        out["result"] = run_result_to_json(run->result);
+        return json_to_string(out);
+      }
+      // Restored from the canonical JSON artifact, through the same serializer the
+      // live path uses, so the two documents are the same shape.
+      RunResult restored;
+      std::string load_error;
+      if (!load_historical_result(history_entry, &restored, &load_error)) {
+        // The run EXISTS -- 404 would be a lie -- but its structured result does not.
+        // An explicit code beats an empty result the UI would render as "no tests".
+        *status_code = MHD_HTTP_NOT_FOUND;
+        Json::Value out(Json::objectValue);
+        out["id"] = id;
+        out["status"] = history_entry["status"];
+        out["error"] = "structured_result_unavailable";
+        out["reason"] = load_error;
+        return json_to_string(out);
+      }
       Json::Value out(Json::objectValue);
-      out["id"] = run->id;
-      out["status"] = run->status;
-      out["result"] = run_result_to_json(run->result);
+      out["id"] = id;
+      out["status"] = history_entry["status"];
+      out["result"] = run_result_to_json(restored);
       return json_to_string(out);
     }
 
     if (sub == "logs") {
+      if (!run) {
+        // Logs are held in memory only, so a restart loses them. The run itself is
+        // known, so "run not found" would be wrong -- this says exactly what is
+        // missing instead.
+        *status_code = MHD_HTTP_NOT_FOUND;
+        Json::Value out(Json::objectValue);
+        out["id"] = id;
+        out["status"] = history_entry["status"];
+        out["error"] = "historical_logs_unavailable";
+        out["reason"] = "run logs are not persisted across a server restart";
+        return json_to_string(out);
+      }
       std::size_t after = 0;
       const std::string after_value = query_value(query, "after");
       if (!after_value.empty()) {
@@ -1302,6 +1328,17 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
     }
 
     if (sub == "reports") {
+      if (!run) {
+        // Served from the index metadata the server itself wrote: the entry already
+        // carries a url and a format per artifact, so no path is rebuilt from the id.
+        Json::Value out(Json::objectValue);
+        out["id"] = id;
+        out["reports"] = Json::Value(Json::arrayValue);
+        for (const auto &report : history_entry["reports"]) {
+          out["reports"].append(report);
+        }
+        return json_to_string(out);
+      }
       std::lock_guard<std::mutex> lock(run->mutex);
       Json::Value out(Json::objectValue);
       out["id"] = run->id;
@@ -1362,8 +1399,13 @@ std::string WebServer::handle_report_file(const std::string &path, int *status_c
   }
   const std::string run_id = relative.substr(0, slash);
   const std::string filename = relative.substr(slash + 1);
-  const std::string file_path = options_.report_root + "/web-run-" + run_id + "/" + filename;
-  if (!file_exists(file_path)) {
+  // The id selects a RECORD -- live run or runs-index entry -- and the record says
+  // which files it produced. Building a path straight out of the URL is what let an
+  // unknown id, a prefix of a real one, or an undeclared file be served.
+  const std::vector<std::string> declared = declared_artifact_filenames(run_id);
+  std::string file_path;
+  std::string resolve_error;
+  if (!resolve_artifact_path(run_id, filename, declared, &file_path, &resolve_error)) {
     *status_code = MHD_HTTP_NOT_FOUND;
     *content_type = "text/plain; charset=utf-8";
     return "report not found";
@@ -1383,19 +1425,58 @@ void WebServer::load_run_history() {
     return;
   }
   const Json::Value parsed = parse_json_body(read_file(index_path));
-  if (!parsed.isArray()) {
-    return;  // corrupt or unexpected index — start with empty history rather than block startup
+  // Older builds wrote a bare array with no version; the current shape is an
+  // object carrying schema_version plus "runs". Both are read; an index from a
+  // newer build or a corrupt file yields empty history rather than blocking
+  // startup, and clears history_index_writable_ so no later run writes the index
+  // at all -- the file we could not read is left exactly as it is.
+  const RunsIndexState state = classify_runs_index(parsed);
+  const Json::Value *entries = nullptr;
+  switch (state.state) {
+    case ConfigVersionState::Legacy:
+      entries = &parsed;  // bare array
+      break;
+    case ConfigVersionState::Current:
+      entries = &parsed["runs"];
+      break;
+    case ConfigVersionState::Future:
+    case ConfigVersionState::Malformed:
+      // Unsupported. Refuse to touch it: overwriting would destroy history this
+      // build cannot read but a newer one can.
+      history_index_writable_.store(false, std::memory_order_relaxed);
+      std::cerr << "v4l2diag: runs-index.json is " << to_string(state.state)
+                << "; leaving it untouched and not recording new runs there\n";
+      return;
+  }
+  if (entries == nullptr || !entries->isArray()) {
+    // A current-version document whose "runs" is not an array is malformed too.
+    history_index_writable_.store(false, std::memory_order_relaxed);
+    std::cerr << "v4l2diag: runs-index.json has no usable \"runs\" array; leaving it untouched\n";
+    return;
   }
   std::lock_guard<std::mutex> lock(history_mutex_);
   history_.clear();
-  for (const auto &entry : parsed) {
+  for (const auto &entry : *entries) {
     history_.push_back(entry);
   }
 }
 
 void WebServer::persist_run_summary(const Json::Value &summary) {
   std::lock_guard<std::mutex> lock(history_mutex_);
-  history_.insert(history_.begin(), summary);
+  // Upsert, not insert. Finalisation can be retried (execute_run() persists,
+  // and the worker's recovery path may persist again for the same run), so
+  // keying on the run id keeps the history free of duplicate entries.
+  const std::string id = summary.get("id", "").asString();
+  auto existing = history_.end();
+  if (!id.empty()) {
+    existing = std::find_if(history_.begin(), history_.end(),
+                            [&](const Json::Value &entry) { return entry.get("id", "").asString() == id; });
+  }
+  if (existing != history_.end()) {
+    *existing = summary;
+  } else {
+    history_.insert(history_.begin(), summary);
+  }
   if (history_.size() > kMaxHistoryEntries) {
     history_.resize(kMaxHistoryEntries);
   }
@@ -1403,9 +1484,19 @@ void WebServer::persist_run_summary(const Json::Value &summary) {
   for (const auto &entry : history_) {
     array.append(entry);
   }
+  if (!history_index_writable_.load(std::memory_order_relaxed)) {
+    // The stored index is unsupported (see load_run_history). The run itself
+    // still completed and its report files are on disk; only the index entry is
+    // skipped, because writing would truncate a file we could not read.
+    return;
+  }
+  // Versioned from now on, so a future reader can tell what shape this is.
+  Json::Value document(Json::objectValue);
+  document["schema_version"] = kRunsIndexSchemaVersion;
+  document["runs"] = array;
   ensure_directory(options_.report_root);
   std::ofstream out(options_.report_root + "/runs-index.json", std::ios::trunc);
-  out << json_to_string(array);
+  out << json_to_string(document);
 }
 
 std::shared_ptr<WebServer::RunState> WebServer::find_run(const std::string &id) const {
@@ -1415,6 +1506,173 @@ std::shared_ptr<WebServer::RunState> WebServer::find_run(const std::string &id) 
     return {};
   }
   return *it;
+}
+
+Json::Value WebServer::find_history_entry(const std::string &id) const {
+  if (id.empty()) {
+    return Json::Value();
+  }
+  std::lock_guard<std::mutex> lock(history_mutex_);
+  for (const auto &entry : history_) {
+    // Exact match only. A prefix or suffix match would let a crafted id select an
+    // entry that is not the one it names.
+    if (entry.isObject() && entry["id"].isString() && entry["id"].asString() == id) {
+      return entry;
+    }
+  }
+  return Json::Value();
+}
+
+bool WebServer::read_kernel_log(std::string *output) const {
+  if (options_.kernel_log_reader) {
+    // Only a test injects this (see WebServerOptions::kernel_log_reader).
+    return options_.kernel_log_reader(output);
+  }
+  // A fixed command string. Nothing from the request is interpolated, so there is no
+  // shell injection surface, and no privileged path is introduced: journalctl reads the
+  // journal through group membership alone.
+  FILE *pipe = popen("journalctl -k -b --no-pager 2>&1", "r");
+  if (pipe == nullptr) {
+    return false;
+  }
+  char buffer[4096];
+  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+    *output += buffer;
+  }
+  return pclose(pipe) == 0 && !output->empty();
+}
+
+std::string WebServer::dmesg_download_filename(const std::string &id) const {
+  // The live run first, then the index -- the same order every other lookup uses.
+  ReportNaming naming;
+  if (auto run = find_run(id)) {
+    std::lock_guard<std::mutex> lock(run->mutex);
+    naming.started_at_utc = run->result.started_at_utc;
+    naming.trigger_mode = run->config.trigger_mode;
+    naming.trigger_profile_file = run->config.trigger_profile_file;
+    naming.test_configuration_file = run->config.threshold_config_file;
+    return dmesg_log_filename(naming);
+  }
+
+  const Json::Value entry = find_history_entry(id);
+  if (!entry.isObject() || !entry["started_at_utc"].isString()) {
+    // Not a run this server knows about. No name is invented for it: a caller that
+    // cannot name a real run has nothing to download.
+    return std::string();
+  }
+  naming.started_at_utc = entry["started_at_utc"].asString();
+  if (entry["trigger_mode"].isString()) {
+    // An unparseable mode keeps the free-run default rather than guessing; free-run
+    // simply omits the profile part of the name.
+    TriggerMode mode = TriggerMode::FreeRun;
+    if (parse_trigger_mode(entry["trigger_mode"].asString(), &mode)) {
+      naming.trigger_mode = mode;
+    }
+  }
+  if (entry["trigger_profile_file"].isString()) {
+    naming.trigger_profile_file = entry["trigger_profile_file"].asString();
+  }
+  if (entry["threshold_config_file"].isString()) {
+    naming.test_configuration_file = entry["threshold_config_file"].asString();
+  }
+  return dmesg_log_filename(naming);
+}
+
+std::vector<std::string> WebServer::declared_artifact_filenames(const std::string &id) const {
+  std::vector<std::string> names;
+  // The live run is the primary source here too.
+  if (auto run = find_run(id)) {
+    std::lock_guard<std::mutex> lock(run->mutex);
+    for (const auto &artifact : run->artifacts) {
+      const std::size_t slash = artifact.path.find_last_of('/');
+      names.push_back(slash == std::string::npos ? artifact.path : artifact.path.substr(slash + 1));
+    }
+    return names;
+  }
+  const Json::Value entry = find_history_entry(id);
+  if (!entry.isObject()) {
+    return names;  // unknown id: nothing is declared, so nothing can be served
+  }
+  for (const auto &report : entry["reports"]) {
+    if (report.isObject() && report["filename"].isString()) {
+      names.push_back(report["filename"].asString());
+    }
+  }
+  return names;
+}
+
+bool WebServer::resolve_artifact_path(const std::string &run_id, const std::string &filename,
+                                      const std::vector<std::string> &declared_filenames, std::string *resolved,
+                                      std::string *error) const {
+  // The record is the authority, not the directory listing. A file that happens to sit
+  // next to the artifacts -- dropped there by anything -- is not an artifact.
+  if (std::find(declared_filenames.begin(), declared_filenames.end(), filename) == declared_filenames.end()) {
+    *error = "the run's record does not declare an artifact named \"" + filename + "\"";
+    return false;
+  }
+  // A declared name must still be a plain filename; an index can be hand-edited.
+  if (filename.empty() || filename.find('/') != std::string::npos || filename.find("..") != std::string::npos ||
+      filename.front() == '.') {
+    *error = "the declared artifact filename is unusable";
+    return false;
+  }
+
+  const std::string run_dir = options_.report_root + "/web-run-" + run_id;
+  const std::string candidate = run_dir + "/" + filename;
+  // Bounded by the run's OWN directory, not just the report root. A symlink from this
+  // run's directory into another run's would otherwise resolve fine and serve that
+  // run's result under this id.
+  const std::string resolved_dir = real_path_or_empty(run_dir);
+  const std::string resolved_file = real_path_or_empty(candidate);
+  if (resolved_dir.empty() || resolved_file.empty() ||
+      resolved_file.compare(0, resolved_dir.size() + 1, resolved_dir + "/") != 0) {
+    *error = "the artifact is missing or resolves outside the run's own directory";
+    return false;
+  }
+  *resolved = resolved_file;
+  return true;
+}
+
+bool WebServer::load_historical_result(const Json::Value &entry, RunResult *result, std::string *error) const {
+  // The id comes from the entry, not from the request, so the two cannot disagree.
+  const std::string id = entry["id"].asString();
+  std::string filename;
+  for (const auto &report : entry["reports"]) {
+    if (!report.isObject() || !report["format"].isString()) {
+      continue;
+    }
+    if (report["format"].asString() == to_string(ReportFormat::Json) && report["filename"].isString()) {
+      filename = report["filename"].asString();
+    }
+  }
+  if (filename.empty()) {
+    *error = "the run's index entry names no JSON artifact";
+    return false;
+  }
+  // The same resolver the HTTP download route uses, so both are bounded by the run's
+  // OWN directory. A symlink from this run's directory into another run's would
+  // otherwise pass a report-root check and serve that run's result under this id.
+  std::string path;
+  if (!resolve_artifact_path(id, filename, {filename}, &path, error)) {
+    return false;
+  }
+
+  const std::string text = read_file(path);
+  if (text.empty()) {
+    *error = "the run's JSON report artifact could not be read";
+    return false;
+  }
+  Json::CharReaderBuilder builder;
+  Json::Value root;
+  std::string parse_errors;
+  std::istringstream in(text);
+  if (!Json::parseFromStream(builder, in, &root, &parse_errors)) {
+    *error = "the run's JSON report artifact is not valid JSON: " + parse_errors;
+    return false;
+  }
+  // Malformed or from a newer build: refused with a reason rather than parsed as if it
+  // were the current shape.
+  return run_result_from_json(root, result, error);
 }
 
 std::shared_ptr<WebServer::RunState> WebServer::create_run(const RunConfig &config) {
@@ -1433,7 +1691,22 @@ std::shared_ptr<WebServer::RunState> WebServer::create_run(const RunConfig &conf
     runs_.push_back(run);
   }
   append_log(run, "info", "Diagnostic run queued.");
-  run->worker = std::thread([this, run]() { execute_run(run); });
+  run->worker = std::thread([this, run]() {
+    // Last line of defence. execute_run() guards the run itself, but setup
+    // (ProfileRegistry, callbacks), status finalisation, append_log and
+    // persist_run_summary are outside that block -- and this is a worker
+    // thread, so anything escaping here reaches std::terminate and kills the
+    // whole server along with every other run's history.
+    const GuardedOutcome outcome =
+        run_guarded_with_recovery([this, run]() { execute_run(run); },
+                                  [this, run](const std::string &message) { finalize_failed_run(run, message); });
+    if (outcome.recovery.failed) {
+      // The recovery path threw as well. There is nothing left to record --
+      // the history write is exactly what failed -- but the thread must still
+      // return normally instead of terminating the process.
+      std::cerr << "v4l2diag: run " << run->id << " could not be finalised: " << outcome.recovery.message << "\n";
+    }
+  });
   return run;
 }
 
@@ -1462,12 +1735,9 @@ void WebServer::execute_run(std::shared_ptr<RunState> run) {
     const std::string severity = test.status == TestStatus::Fail                                         ? "error"
                                  : test.status == TestStatus::Warn || test.status == TestStatus::Skipped ? "warn"
                                                                                                          : "info";
-    char elapsed[32];
-    if (test.duration_ms >= 1000.0) {
-      std::snprintf(elapsed, sizeof(elapsed), "%.1fs", test.duration_ms / 1000.0);
-    } else {
-      std::snprintf(elapsed, sizeof(elapsed), "%dms", static_cast<int>(test.duration_ms));
-    }
+    // The shared formatter (plan 3.2): the live log, the HTML report and the web UI all
+    // spell the same duration the same way.
+    const std::string elapsed = format_duration_ms(test.duration_ms);
     // The trailing "(duration)" also guarantees there is always text after the status tag,
     // so a test that reports no summary can no longer defeat the client-side parser.
     std::string message = test.id + " [" + std::string(to_string(test.status)) + "] ";
@@ -1489,23 +1759,101 @@ void WebServer::execute_run(std::shared_ptr<RunState> run) {
   run->config.stop_token = &run->stop_requested;
 
   const auto start_time = std::chrono::steady_clock::now();
-  RunResult result = runner.run(run->config);
-  auto artifacts = write_reports(result, run->config.report_formats, run->config.output_directory);
+
+  // Nothing below may throw past this frame. This is a detached worker thread:
+  // an escaping exception reaches std::terminate and takes the whole server
+  // down with it, losing every other run's history in the process.
+  RunResult result;
+  std::vector<ReportArtifact> artifacts;
+  const WorkerFailure failure = run_guarded([&]() {
+    result = runner.run(run->config);
+    // Naming inputs, before anything is written (plan 3.4 / 3.5). The runner produces a
+    // result; the id and the source filenames belong to the REQUEST that produced it, and
+    // the writer needs both to name the artifacts and to point Export DMESG at this run.
+    result.run_id = run->id;
+    result.trigger_profile_file = run->config.trigger_profile_file;
+    result.threshold_config_file = run->config.threshold_config_file;
+    artifacts = write_reports(result, run->config.output_directory);
+  });
+  const bool worker_failed = failure.failed;
+
   const auto duration_ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
 
   std::string final_status;
+  bool truncated = false;
   {
     std::lock_guard<std::mutex> lock(run->mutex);
     run->result = result;
     run->artifacts = artifacts;
-    run->status = "completed";
+    // Resolve rather than overwrite: the stop endpoint may already have set
+    // "stopped", and that must survive.
+    const RunOutcome outcome =
+        resolve_run_outcome(run->stop_requested.load(std::memory_order_relaxed), run->status, worker_failed);
+    run->status = to_string(outcome);
     final_status = run->status;
+    truncated = run_is_truncated(outcome);
+  }
+  // run->finalized is deliberately NOT set here. Everything below can throw --
+  // append_log, building the summary, persist_run_summary -- and if it does the
+  // worker's recovery path must still be allowed to record the failure. Setting
+  // the flag early made that recovery a no-op and lost the history entry.
+
+  if (worker_failed) {
+    append_log(run, "error", "Diagnostic run failed: " + failure.message);
   }
 
-  persist_run_summary(run_summary_to_json(run->id, final_status, run->config, result, artifacts, duration_ms));
+  // A summary is handed to persist_run_summary() on the failure path too, so a
+  // failed run does not vanish from the history.
+  Json::Value summary = run_summary_to_json(run->id, final_status, run->config, result, artifacts, duration_ms);
+  // A run cut short carries partial per-test counters; plan 2.8 excludes these
+  // from Pass Rate and Average Duration.
+  summary["truncated"] = truncated;
+  if (worker_failed) {
+    summary["error"] = failure.message;
+  }
+  persist_run_summary(summary);
+  // Only now: status resolved and persist_run_summary() returned. That call
+  // does not verify the write, so this marks "finalisation attempted and
+  // returned", not "durably stored" (plan 2.9).
+  run->finalized.store(true, std::memory_order_relaxed);
 
-  append_log(run, "info", "Diagnostic run completed.");
+  if (worker_failed) {
+    return;
+  }
+  append_log(run, "info", final_status == "stopped" ? "Diagnostic run stopped." : "Diagnostic run completed.");
+}
+
+// Records a run that failed outside execute_run()'s own guarded block. Safe to
+// call after execute_run() already finished: the finalized flag makes it a no-op
+// so a run is never written to the history twice.
+void WebServer::finalize_failed_run(const std::shared_ptr<RunState> &run, const std::string &message) {
+  // Only skip if the run was already fully recorded. Checking (rather than
+  // exchanging) the flag matters: execute_run() sets it only after
+  // persist_run_summary() returns, so a throw before that point still reaches
+  // this path.
+  if (run->finalized.load(std::memory_order_relaxed)) {
+    return;
+  }
+  std::string final_status;
+  RunResult result;
+  std::vector<ReportArtifact> artifacts;
+  {
+    std::lock_guard<std::mutex> lock(run->mutex);
+    run->status = to_string(RunOutcome::Error);
+    final_status = run->status;
+    result = run->result;
+    artifacts = run->artifacts;
+  }
+  Json::Value summary = run_summary_to_json(run->id, final_status, run->config, result, artifacts, /*duration_ms=*/0);
+  summary["truncated"] = run_is_truncated(RunOutcome::Error);
+  summary["error"] = message;
+  // persist_run_summary() first, flag second -- same ordering as the success
+  // path, so a throw in here leaves the run still eligible for a later attempt
+  // rather than silently marked done.
+  persist_run_summary(summary);
+  run->finalized.store(true, std::memory_order_relaxed);
+  append_log(run, "error", "Diagnostic run failed: " + message);
 }
 
 void WebServer::append_log(const std::shared_ptr<RunState> &run, const std::string &severity,
@@ -1600,6 +1948,17 @@ MhdRequestResult WebServer::handle_request_static(void *cls, MHD_Connection *con
     }
     query += "download=" + std::string(download_value);
   }
+  // MHD strips the query string from `url`, so each parameter the handlers use has to be
+  // read back explicitly. `run` selects which run's kernel-log download is being named
+  // (plan 3.4) -- without it here, /api/dmesg?download=1&run=... arrives with no run at
+  // all and the response silently carries no filename.
+  const char *run_value = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "run");
+  if (run_value && *run_value) {
+    if (!query.empty()) {
+      query += "&";
+    }
+    query += "run=" + std::string(run_value);
+  }
 
   int status_code = MHD_HTTP_OK;
   std::string content_type;
@@ -1611,8 +1970,19 @@ MhdRequestResult WebServer::handle_request_static(void *cls, MHD_Connection *con
   MHD_add_response_header(response, "Content-Type", content_type.c_str());
   MHD_add_response_header(response, "Access-Control-Allow-Origin", "http://127.0.0.1");
   MHD_add_response_header(response, "Cache-Control", "no-store");
-  if (path == "/api/dmesg" && query.find("download=1") != std::string::npos) {
-    MHD_add_response_header(response, "Content-Disposition", "attachment; filename=\"dmesg.txt\"");
+  if (path == "/api/dmesg" && query_value(query, "download") == "1" && status_code == MHD_HTTP_OK) {
+    // The name is GENERATED here from the run's own metadata (plan 3.4); the fixed
+    // "dmesg.txt" is gone. The client sends a run id and nothing else -- a filename
+    // arriving in a request would land in this header, where a CR/LF is header injection,
+    // and would not have to match the run it claims to describe.
+    //
+    // Reaching a 200 already means the handler resolved the run, so this lookup cannot
+    // name a run the response does not belong to.
+    const std::string filename = server->dmesg_download_filename(query_value(query, "run"));
+    if (!filename.empty()) {
+      const std::string disposition = "attachment; filename=\"" + filename + "\"";
+      MHD_add_response_header(response, "Content-Disposition", disposition.c_str());
+    }
   }
   const MhdRequestResult ret = MHD_queue_response(connection, status_code, response);
   MHD_destroy_response(response);

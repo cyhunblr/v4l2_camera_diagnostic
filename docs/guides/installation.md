@@ -37,9 +37,10 @@ command output only when a command fails.
    list and expects them to be installed manually before continuing.
 
 2. **Builds the web UI** (`source/frontend`), if `npm`-buildable: ensures a
-   working Node.js via `nvm` (installing `nvm` and Node 18 if the system
-   Node is older than 12), then runs `npm ci` (or `npm install` if no
-   lockfile exists) and `npm run build`.
+   working Node.js via `nvm` (installing `nvm` and Node 22 if the system
+   Node is older than 22), then runs `npm ci` (or `npm install` if no
+   lockfile exists) and `npm run build`. Node 22 is the project standard —
+   the web UI test toolchain requires it and CI pins the same major.
 
 3. **Builds the C++ project** with `cmake -S . -B build` and
    `cmake --build build --parallel` — the same build every executable in

@@ -11,21 +11,26 @@ import { CameraSelectionPage } from "./pages/CameraSelectionPage";
 import { ProfileSelectionPage } from "./pages/ProfileSelectionPage";
 import { TestSelectionPage } from "./pages/TestSelectionPage";
 import { ThresholdConfigPage } from "./pages/ThresholdConfigPage";
-import { ReportFormatsPage } from "./pages/ReportFormatsPage";
 import { LiveOutputPage } from "./pages/LiveOutputPage";
 import { ResultsPage } from "./pages/ResultsPage";
 import {
   CameraAssignment,
   Device,
+  MASTER_ROLE,
   PageId,
   Profile,
   TestDefinition,
   TestSummary,
   TriggerMode,
-  getTestLayerName
+  expectedRoles,
+  groupTestsByLayer,
+  slaveRole,
+  summariesFromResult
 } from "./types";
 
-const CONFIGURE_FLOW: PageId[] = ["cameras", "profiles", "tests", "config", "reports"];
+// No "reports" step: v5 removed the format choice, every run writes HTML, JSON and
+// Markdown (plan 2.10).
+const CONFIGURE_FLOW: PageId[] = ["cameras", "profiles", "tests", "config"];
 const TERMINAL_RUN_STATUSES = new Set(["completed", "stopped", "error"]);
 
 
@@ -37,6 +42,10 @@ type ToastState = {
 export default function App() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  // The schema version the backend writes, taken from its own response. A second
+  // constant in the frontend would have to be found and bumped alongside the
+  // backend's, and a missed one breaks profile creation outright.
+  const [profileSchemaVersion, setProfileSchemaVersion] = useState<number | null>(null);
   const [tests, setTests] = useState<TestDefinition[]>(api.DEFAULT_TESTS);
   const [cameraMode, setCameraMode] = useState<"single" | "multi">("single");
   const [masterPath, setMasterPath] = useState<string | null>(null);
@@ -49,7 +58,6 @@ export default function App() {
   const [selectedTests, setSelectedTests] = useState<string[]>([]);
   const [activeTags, setActiveTags] = useState<string[]>(["stable"]);
   const [activeAction, setActiveAction] = useState<"select-all" | "clear-all" | "reset-stable">("reset-stable");
-  const [reports, setReports] = useState(["json", "html"]);
   const [selectedThresholdId, setSelectedThresholdId] = useState("default");
   const [thresholdDirty, setThresholdDirty] = useState(false);
   const [severityFilter, setSeverityFilter] = useState("all");
@@ -69,6 +77,7 @@ export default function App() {
     isRunning,
     logs,
     setLogs,
+    liveResult,
     reportLinks,
     elapsedSec,
     secSinceLastLog,
@@ -102,6 +111,9 @@ export default function App() {
       const testJson = await testRes.json();
       setDevices(deviceJson.devices ?? []);
       setProfiles(profileJson.profiles ?? []);
+      setProfileSchemaVersion(
+        typeof profileJson.schema_version === "number" ? profileJson.schema_version : null
+      );
       setTests(testJson.tests ?? []);
       showError(null);
     } catch {
@@ -140,13 +152,15 @@ export default function App() {
     setActivePage("cameras");
   }, []);
 
+  // Roles come from the run topology, not from the user: master first, then
+  // slave-1..slave-N in slavePaths order. A camera moving to another node keeps
+  // its role, which is the point of v4's role-based routing.
   useEffect(() => {
-    setCameraAssignments((current) =>
-      involvedPaths.map((path) => current.find((assignment) => assignment.path === path) ?? {
+    setCameraAssignments(
+      involvedPaths.map((path, index) => ({
         path,
-        profile_id: "",
-        trigger_channel_id: ""
-      })
+        role: index === 0 ? MASTER_ROLE : slaveRole(index - 1)
+      }))
     );
   }, [involvedPaths]);
 
@@ -180,17 +194,7 @@ export default function App() {
     }
   }, [activePage]);
 
-  const groupedTests = useMemo(() => {
-    const groups = new Map<string, TestDefinition[]>();
-    for (const test of tests) {
-      const layerName = getTestLayerName(test.id);
-      if (!groups.has(layerName)) {
-        groups.set(layerName, []);
-      }
-      groups.get(layerName)!.push(test);
-    }
-    return [...groups.entries()];
-  }, [tests]);
+  const groupedTests = useMemo(() => groupTestsByLayer(tests), [tests]);
 
   const visibleLogs = useMemo(
     () => logs.filter((line) => severityFilter === "all" || line.severity === severityFilter),
@@ -199,17 +203,21 @@ export default function App() {
 
   const assignmentsReady = useMemo(() => {
     if (!masterPath) return false;
+    // Free-run does not route at all. Otherwise the run needs a Trigger Profile
+    // whose role_bindings cover this topology; the backend is the authority on
+    // whether they do (resolve_role_bindings), so the UI only checks that one was
+    // chosen rather than re-deriving the rule.
     if (triggerMode === "free-run") return true;
-    return involvedPaths.every((path) => {
-      const assignment = cameraAssignments.find((item) => item.path === path);
-      return Boolean(assignment?.profile_id && assignment?.trigger_channel_id);
-    });
-  }, [cameraAssignments, involvedPaths, masterPath, triggerMode]);
+    if (!singleProfileId) return false;
+    const profile = profiles.find((item) => item.id === singleProfileId);
+    if (!profile) return false;
+    const needed = expectedRoles(involvedPaths.length - 1);
+    return needed.every((role: string) => profile.role_bindings.some((binding) => binding.role === role));
+  }, [involvedPaths, masterPath, profiles, singleProfileId, triggerMode]);
 
   const testsReady = selectedTests.length > 0 || activeTags.length > 0;
   const configReady = Boolean(selectedThresholdId);
-  const reportsReady = reports.length > 0;
-  const canStartDiagnostic = setupComplete && Boolean(masterPath) && assignmentsReady && testsReady && configReady && reportsReady;
+  const canStartDiagnostic = setupComplete && Boolean(masterPath) && assignmentsReady && testsReady && configReady;
 
   const navigationAvailability = useMemo(() => {
     const available = new Map<PageId, boolean>();
@@ -236,16 +244,12 @@ export default function App() {
   }, [activePage, testsReady, unlockPage, unlockedPages]);
 
   useEffect(() => {
-    if (unlockedPages.has("config") && configReady && (activePage === "config" || unlockedPages.has("reports"))) {
-      unlockPage("reports");
-    }
-  }, [activePage, configReady, unlockPage, unlockedPages]);
-
-  useEffect(() => {
-    if (unlockedPages.has("reports") && reportsReady && (activePage === "reports" || setupComplete)) {
+    if (unlockedPages.has("config") && configReady) {
+      // Test Configuration is the last Configure step now, so completing it
+      // completes the setup flow.
       setSetupComplete(true);
     }
-  }, [activePage, reportsReady, setupComplete, unlockedPages]);
+  }, [activePage, configReady, unlockPage, unlockedPages]);
 
   useEffect(() => {
     if (logs.length > 0) unlockPage("output");
@@ -265,20 +269,10 @@ export default function App() {
   }, [runId, runStatus, unlockPage]);
 
   // Derive completed test summary from summary-type log lines.
-  const testSummaries: TestSummary[] = useMemo(() => {
-    const summaries: TestSummary[] = [];
-    for (const line of logs) {
-      if (line.log_type === "summary") {
-        const match = line.message.match(/^(.+?) \[(.+?)\] (.+)$/);
-        if (match) {
-          summaries.push({ test: match[1], status: match[2], message: match[3], camera: line.camera });
-        } else {
-          summaries.push({ test: line.test, status: "done", message: line.message, camera: line.camera });
-        }
-      }
-    }
-    return summaries;
-  }, [logs]);
+  // From the structured result, never from log text: a human-readable message is not a
+  // data source for a status (plan 2.6.1). This replaced a regex over summary lines
+  // that was duplicated byte-for-byte in ResultsPage.
+  const testSummaries: TestSummary[] = useMemo(() => summariesFromResult(liveResult), [liveResult]);
 
   function toggleListValue(value: string, values: string[], setter: (values: string[]) => void) {
     setter(values.includes(value) ? values.filter((item) => item !== value) : [...values, value]);
@@ -332,8 +326,8 @@ export default function App() {
       showError("Select a camera to test before starting a run.");
       return;
     }
-    if (triggerMode !== "free-run" && cameraAssignments.some((assignment) => !assignment.profile_id || !assignment.trigger_channel_id)) {
-      showError("Route every selected camera to a compatible trigger channel.");
+    if (triggerMode !== "free-run" && !singleProfileId) {
+      showError("Select a Trigger Profile for the run.");
       setActivePage("profiles");
       return;
     }
@@ -350,11 +344,12 @@ export default function App() {
         setViewedRunId(null);
         startRun({
           trigger_mode: triggerMode,
+          // One run-level Trigger Profile; free-run carries none.
+          trigger_profile_id: triggerMode === "free-run" ? "" : singleProfileId,
           master,
           slaves,
           memory_backends: backends,
           test_selectors: selectedTests.length ? selectedTests : ["stable"],
-          report_formats: reports,
           threshold_config_id: selectedThresholdId
         });
         unlockPage("output");
@@ -424,6 +419,7 @@ export default function App() {
           <ProfileSelectionPage
             devices={devices.filter((device) => involvedPaths.includes(device.path))}
             profiles={profiles}
+            profileSchemaVersion={profileSchemaVersion}
             triggerMode={triggerMode}
             onTriggerModeChange={setTriggerMode}
             assignmentMode={assignmentMode}
@@ -431,7 +427,6 @@ export default function App() {
             singleProfileId={singleProfileId}
             onSingleProfileChange={setSingleProfileId}
             assignments={cameraAssignments}
-            onAssignmentsChange={setCameraAssignments}
             onProfilesChanged={loadBasics}
             onError={showError}
             onSuccess={showSuccess}
@@ -461,13 +456,10 @@ export default function App() {
             selectedThresholdId={selectedThresholdId}
             onSelectedChange={setSelectedThresholdId}
             selectedTests={selectedTests}
+            tests={tests}
             onDirtyChange={setThresholdDirty}
             onError={showError}
           />
-        )}
-
-        {activePage === "reports" && (
-          <ReportFormatsPage reports={reports} onToggle={(format) => toggleListValue(format, reports, setReports)} />
         )}
 
         {activePage === "output" && (

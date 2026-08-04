@@ -3,19 +3,14 @@ import { CheckCircle2, Clock, Gauge, History, Play, Route, XCircle } from "lucid
 import { getRuns } from "../api";
 import { StatTile } from "../components/StatTile";
 import { RunSummary } from "../types";
+import { overallAverageDurationMs, overallPassRate } from "../passRate";
+import { formatDuration } from "../formatDuration";
 
 type Props = {
   onViewRun: (runId: string) => void;
   onStartNewDiagnostic: () => void;
   isRunning: boolean;
 };
-
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.round(ms / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
 
 // The backend already emits UTC as "%Y-%m-%dT%H:%M:%SZ", so this is a pure string
 // transform to the same readable form the HTML report uses ("... UTC"). Deliberately
@@ -52,23 +47,20 @@ export function DashboardPage({ onViewRun, onStartNewDiagnostic, isRunning }: Pr
     };
   }, []);
 
-  const totals = runs.reduce(
-    (acc, run) => {
-      acc.pass += run.pass_count;
-      acc.fail += run.fail_count;
-      acc.warn += run.warn_count;
-      acc.skip += run.skip_count;
-      acc.duration += run.duration_ms;
-      if (run.fail_count > 0) acc.runsWithFail += 1;
-      return acc;
-    },
-    { pass: 0, fail: 0, warn: 0, skip: 0, duration: 0, runsWithFail: 0 }
-  );
   const totalRuns = runs.length;
-  const totalChecks = totals.pass + totals.fail + totals.warn + totals.skip;
-  const passRate = totalChecks > 0 ? (totals.pass / totalChecks) * 100 : 0;
-  const failRate = totalRuns > 0 ? (totals.runsWithFail / totalRuns) * 100 : 0;
-  const avgDurationMs = totalRuns > 0 ? totals.duration / totalRuns : 0;
+  // The rates come from the shared helper (plan 2.8): one run, one vote, skips excluded,
+  // and only completed, untruncated runs with a real verdict counted. This page used to
+  // pool every run's counters and divide once, which let a multi-camera run dominate.
+  // Its only job now is formatting.
+  const passRate = overallPassRate(runs);
+  const avgDurationMs = overallAverageDurationMs(runs);
+  const runsWithFail = runs.filter((run) => run.fail_count > 0).length;
+  const failRate = totalRuns > 0 ? (runsWithFail / totalRuns) * 100 : 0;
+
+  // null means "nothing to measure", which is not 0% -- 0% would read as "everything
+  // failed".
+  const passRateLabel = passRate === null ? "N/A" : `${(passRate * 100).toFixed(1)}%`;
+  const avgDurationLabel = avgDurationMs === null ? "N/A" : formatDuration(avgDurationMs);
 
   return (
     <div className="page">
@@ -86,7 +78,7 @@ export function DashboardPage({ onViewRun, onStartNewDiagnostic, isRunning }: Pr
             <h3>Diagnostic Flow</h3>
           </div>
           <p className="panel-hint">
-            Start a guided run, then move through Cameras, Profiles, Test Selection, Test Configuration, and Report Formats in order.
+            Start a guided run, then move through Cameras, Profiles, Test Selection, and Test Configuration in order.
           </p>
         </div>
         <div className="dashboard-flow-action">
@@ -103,9 +95,9 @@ export function DashboardPage({ onViewRun, onStartNewDiagnostic, isRunning }: Pr
 
       <div className="stat-tile-row">
         <StatTile icon={<Gauge size={20} />} label="Total Runs" value={totalRuns} />
-        <StatTile icon={<CheckCircle2 size={20} />} label="Pass Rate" value={`${passRate.toFixed(1)}%`} tone="success" />
+        <StatTile icon={<CheckCircle2 size={20} />} label="Pass Rate" value={passRateLabel} tone="success" />
         <StatTile icon={<XCircle size={20} />} label="Runs With Failures" value={`${failRate.toFixed(1)}%`} tone="error" />
-        <StatTile icon={<Clock size={20} />} label="Avg Duration" value={formatDuration(avgDurationMs)} />
+        <StatTile icon={<Clock size={20} />} label="Avg Duration" value={avgDurationLabel} />
       </div>
 
       <div className="panel">
@@ -141,7 +133,17 @@ export function DashboardPage({ onViewRun, onStartNewDiagnostic, isRunning }: Pr
                   >
                     <td>{formatUtc(run.started_at_utc)}</td>
                     <td>{run.camera_paths.join(", ") || "—"}</td>
-                    <td>{run.profile_id}</td>
+                    {/*
+                      Free-run genuinely has no Trigger Profile, which is different from
+                      "a triggered run whose profile we failed to record". The mode says
+                      which case this is, so the cell can be explicit instead of showing
+                      a bare dash for both (plan 2.7).
+                    */}
+                    <td>
+                      {run.trigger_mode === "free-run"
+                        ? "Not required (free-run)"
+                        : run.trigger_profile_id || "—"}
+                    </td>
                     <td>{formatDuration(run.duration_ms)}</td>
                     <td>{run.pass_count}/{run.fail_count}/{run.warn_count}/{run.skip_count}</td>
                     <td className="col-status">

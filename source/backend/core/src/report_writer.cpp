@@ -1,5 +1,12 @@
 #include "v4l2diag/core/report_writer.hpp"
 
+#include "v4l2diag/core/duration_format.hpp"
+#include "v4l2diag/core/report_naming.hpp"
+#include "v4l2diag/core/result_card.hpp"
+#include "v4l2diag/core/test_content.hpp"
+
+#include "v4l2diag/core/run_result_json.hpp"
+
 #include <algorithm>
 #include <cerrno>
 #include <cctype>
@@ -31,33 +38,6 @@ bool ensure_directory(const std::string &path) {
     }
   }
   return mkdir(path.c_str(), 0755) == 0 || errno == EEXIST;
-}
-
-std::string json_escape(const std::string &value) {
-  std::ostringstream out;
-  for (char c : value) {
-    switch (c) {
-      case '\\':
-        out << "\\\\";
-        break;
-      case '"':
-        out << "\\\"";
-        break;
-      case '\n':
-        out << "\\n";
-        break;
-      case '\r':
-        out << "\\r";
-        break;
-      case '\t':
-        out << "\\t";
-        break;
-      default:
-        out << c;
-        break;
-    }
-  }
-  return out.str();
 }
 
 // Renders an ISO-8601 "%Y-%m-%dT%H:%M:%SZ" timestamp as "%Y-%m-%d %H:%M:%S UTC"
@@ -98,29 +78,9 @@ std::string readable_duration(const std::string &started_at_utc, const std::stri
   return out.str();
 }
 
-std::string html_escape(const std::string &value) {
-  std::ostringstream out;
-  for (char c : value) {
-    switch (c) {
-      case '&':
-        out << "&amp;";
-        break;
-      case '<':
-        out << "&lt;";
-        break;
-      case '>':
-        out << "&gt;";
-        break;
-      case '"':
-        out << "&quot;";
-        break;
-      default:
-        out << c;
-        break;
-    }
-  }
-  return out.str();
-}
+// The shared escaper (plan 3.1). Was a private copy here; the card renderer needs the
+// same one, and two copies of an escaper is one too many.
+using v4l2diag::html_escape;
 
 bool starts_with(const std::string &value, const std::string &prefix) {
   return value.size() >= prefix.size() && value.compare(0, prefix.size(), prefix) == 0;
@@ -130,12 +90,9 @@ bool ends_with(const std::string &value, const std::string &suffix) {
   return value.size() >= suffix.size() && value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-std::string humanize_metric_name(std::string value) {
-  std::replace(value.begin(), value.end(), '_', ' ');
-  if (!value.empty() && value[0] >= 'a' && value[0] <= 'z') {
-    value[0] = static_cast<char>(value[0] - 'a' + 'A');
-  }
-  return value;
+// The shared one, under the name this file's many call sites already use.
+std::string humanize_metric_name(const std::string &value) {
+  return v4l2diag::humanize(value);
 }
 
 std::string format_metric_value(double value) {
@@ -158,21 +115,8 @@ std::string format_metric_value(double value) {
   return rendered;
 }
 
-bool is_sentinel_metric(const MetricValue &metric) {
-  if (std::fabs(metric.value + 500.0) < 0.000001) {
-    return true;
-  }
-  if (std::fabs(metric.value + 1.0) >= 0.000001) {
-    return false;
-  }
-  std::string description = metric.description;
-  std::transform(description.begin(), description.end(), description.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  return metric.name.find("cliff") != std::string::npos || metric.name.find("safety_margin") != std::string::npos ||
-         metric.name.find("min_reliable") != std::string::npos || description.find("n/a") != std::string::npos ||
-         description.find("none") != std::string::npos || description.find("no cliff") != std::string::npos ||
-         description.find("could not") != std::string::npos;
-}
+// The shared sentinel rule (plan 3.1): every surface that shows a metric applies it.
+using v4l2diag::is_sentinel_metric;
 
 bool is_chartable_metric(const MetricValue &metric) {
   return metric.unit != "bool" && metric.unit != "errno" && std::isfinite(metric.value) && !is_sentinel_metric(metric);
@@ -328,23 +272,11 @@ enum class ColorRule {
 // "ll1_bp0_wi1_mean_ms" -> "LED 1 - BYP 0 - WIN 1". The metric keys themselves
 // never change: docs, the threshold registry and the tests reference them.
 // Docs: docs/backend/tests/t18-control-sweep.md
-std::string control_combo_label(const std::string &name) {
-  int led = 0;
-  int bypass = 0;
-  int window = 0;
-  if (std::sscanf(name.c_str(), "ll%d_bp%d_wi%d", &led, &bypass, &window) != 3) {
-    return humanize_metric_name(name);
-  }
-  std::ostringstream out;
-  out << "LED " << led << " \xc2\xb7 BYP " << bypass << " \xc2\xb7 WIN " << window;
-  return out.str();
-}
+// The shared one (plan 3.1).
+using v4l2diag::control_combo_label;
 
-std::string upper_case(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-  return value;
-}
+// The shared one (plan 3.1). Was a private copy here.
+using v4l2diag::upper_case;
 
 std::string lower_case(std::string value) {
   std::transform(value.begin(), value.end(), value.begin(),
@@ -739,7 +671,7 @@ void render_status_distribution(std::ostream &out, int pass_count, int fail_coun
     int count;
   } statuses[] = {
       {"Passed", "pass", pass_count},
-      {"Warnings", "warn", warn_count},
+      {"Warned", "warn", warn_count},
       {"Failed", "fail", fail_count},
       {"Skipped", "skip", skip_count},
   };
@@ -1359,40 +1291,6 @@ bool render_t13_visuals(std::ostream &out, const TestResult &test, std::vector<b
   return opened;
 }
 
-void render_plain_metrics(std::ostream &out, const std::vector<MetricValue> &metrics, const std::vector<bool> &used,
-                          bool has_visuals) {
-  bool has_plain_metrics = false;
-  for (std::size_t i = 0; i < metrics.size(); ++i)
-    has_plain_metrics = has_plain_metrics || !used[i];
-  if (!has_plain_metrics)
-    return;
-
-  if (has_visuals) {
-    out << "<div class=\"supporting-values\"><div class=\"supporting-title\">Supporting values</div>";
-  }
-  out << "<dl class=\"metric-kv-list\">";
-  for (std::size_t i = 0; i < metrics.size(); ++i) {
-    if (used[i])
-      continue;
-    const auto &metric = metrics[i];
-    out << "<div class=\"metric-kv-row\"><dt>" << html_escape(humanize_metric_name(metric.name)) << "</dt><dd>";
-    if (is_sentinel_metric(metric)) {
-      out << "N/A";
-    } else if (metric.unit == "bool") {
-      out << (metric.value != 0.0 ? "true" : "false");
-    } else {
-      out << html_escape(format_metric_value(metric.value));
-      if (!metric.unit.empty())
-        out << " <span>" << html_escape(metric.unit) << "</span>";
-    }
-    out << "</dd></div>";
-  }
-  out << "</dl>";
-  if (has_visuals) {
-    out << "</div>";
-  }
-}
-
 // A format or resolution that was enumerated but could not be measured emits no
 // metrics at all, so it disappears from the chart completely. List those under it
 // so "the camera only supports two formats" can be told apart from "we only
@@ -1410,20 +1308,25 @@ void render_chart_omissions(std::ostream &out, const TestResult &test, const std
     return;
   }
 
-  // One category appears on every chart of the sweep (latency and throughput), so
-  // it must only be counted once.
+  // The MEASURED set, taken from the metric names rather than from the charts.
+  //
+  // It used to come from the chart layout, which tied "was this measured?" to "did it get
+  // drawn?". Those are different questions, and once the unapproved charts were removed
+  // (plan 3.1, review round 3) every omission silently stopped being reported -- a
+  // format that failed S_FMT simply vanished from the report.
   std::vector<std::string> charted;
-  for (const auto &group : groups) {
-    if (group.category_kind != spec->category_kind) {
+  for (const auto &metric : metrics) {
+    const std::size_t underscore = metric.name.find('_');
+    if (underscore == std::string::npos || underscore == 0) {
       continue;
     }
-    const BarLayout layout = build_bar_layout(metrics, group);
-    for (const auto &category : layout.categories) {
-      if (std::find(charted.begin(), charted.end(), category) == charted.end()) {
-        charted.push_back(category);
-      }
+    const std::string category = metric.name.substr(0, underscore);
+    const std::string label = spec->category_kind == CategoryKind::Fourcc ? upper_case(category) : category;
+    if (std::find(charted.begin(), charted.end(), label) == charted.end()) {
+      charted.push_back(label);
     }
   }
+  (void)groups;
 
   // With nothing charted there is no measured set to contrast against, and the
   // heuristic below would mark every "<label>: <value>" detail line as an
@@ -1505,120 +1408,77 @@ void render_test_metrics(std::ostream &out, const TestResult &test) {
   }
   if (!groups.empty())
     out << "</div>";
-  render_chart_omissions(out, test, metrics, groups);
-  has_visuals = has_visuals || !groups.empty();
-  render_plain_metrics(out, metrics, used, has_visuals);
+  // The un-charted metrics used to be dumped here as a generic key/value list. The test's
+  // own content renderer presents them now (plan 3.1, review round 2), so emitting the
+  // list too would print the same number twice under two different labels.
+  (void)has_visuals;
 }
 
-void write_json(const RunResult &result, const std::string &path) {
+// Returns false when the stream could not be opened, or when anything went wrong up
+// to and including close(). Silently returning void here is what let a full disk or
+// an unwritable directory look like a successful run.
+// The JSON artifact and the live API are the SAME document: both go through
+// run_result_to_json(). They used to be two hand-maintained copies -- one streaming
+// text here, one building a Json::Value in web_server.cpp -- and they had already
+// drifted (`project` vs `project_name`, `path` vs `camera_path`). That only became
+// load-bearing once the API started reading this file back after a restart.
+bool write_json(const RunResult &result, const std::string &path) {
   std::ofstream out(path);
-  out << std::fixed << std::setprecision(3);
-  out << "{\n";
-  out << "  \"project\": \"" << json_escape(result.project_name) << "\",\n";
-  out << "  \"started_at_utc\": \"" << json_escape(result.started_at_utc) << "\",\n";
-  out << "  \"finished_at_utc\": \"" << json_escape(result.finished_at_utc) << "\",\n";
-  out << "  \"host_name\": \"" << json_escape(result.host_name) << "\",\n";
-  out << "  \"kernel_release\": \"" << json_escape(result.kernel_release) << "\",\n";
-  out << "  \"kernel_version\": \"" << json_escape(result.kernel_version) << "\",\n";
-  out << "  \"run_mode\": \"" << to_string(result.run_mode) << "\",\n";
-  out << "  \"cameras\": [\n";
-  for (std::size_t ci = 0; ci < result.cameras.size(); ++ci) {
-    const auto &camera = result.cameras[ci];
-    out << "    {\n";
-    out << "      \"path\": \"" << json_escape(camera.camera_path) << "\",\n";
-    out << "      \"profile_id\": \"" << json_escape(camera.profile_id) << "\",\n";
-    out << "      \"trigger_mode\": \"" << to_string(camera.trigger_mode) << "\",\n";
-    out << "      \"trigger_channel_id\": \"" << json_escape(camera.trigger_channel_id) << "\",\n";
-    out << "      \"trigger_description\": \"" << json_escape(camera.trigger_description) << "\",\n";
-    out << "      \"trigger_rate_hz\": " << camera.trigger_rate_hz << ",\n";
-    out << "      \"pulse_width_ms\": " << camera.pulse_width_ms << ",\n";
-    out << "      \"memory_backends\": [";
-    for (std::size_t bi = 0; bi < camera.memory_backends.size(); ++bi) {
-      if (bi) {
-        out << ", ";
-      }
-      out << "\"" << to_string(camera.memory_backends[bi]) << "\"";
-    }
-    out << "],\n";
-    out << "      \"tests\": [\n";
-    for (std::size_t ti = 0; ti < camera.tests.size(); ++ti) {
-      const auto &test = camera.tests[ti];
-      out << "        {\n";
-      out << "          \"id\": \"" << json_escape(test.id) << "\",\n";
-      out << "          \"name\": \"" << json_escape(test.name) << "\",\n";
-      out << "          \"category\": \"" << json_escape(test.category) << "\",\n";
-      out << "          \"memory_backend\": \"" << json_escape(test.memory_backend) << "\",\n";
-      out << "          \"status\": \"" << to_string(test.status) << "\",\n";
-      out << "          \"summary\": \"" << json_escape(test.summary) << "\",\n";
-      out << "          \"duration_ms\": " << test.duration_ms << ",\n";
-      out << "          \"metrics\": [";
-      for (std::size_t mi = 0; mi < test.metrics.size(); ++mi) {
-        const auto &metric = test.metrics[mi];
-        if (mi) {
-          out << ", ";
-        }
-        out << "{\"name\":\"" << json_escape(metric.name) << "\",\"unit\":\"" << json_escape(metric.unit)
-            << "\",\"value\":" << metric.value << ",\"description\":\"" << json_escape(metric.description) << "\"}";
-      }
-      out << "],\n";
-      out << "          \"details\": [";
-      for (std::size_t di = 0; di < test.details.size(); ++di) {
-        if (di) {
-          out << ", ";
-        }
-        out << "\"" << json_escape(test.details[di]) << "\"";
-      }
-      out << "],\n";
-      out << "          \"notes\": [";
-      for (std::size_t ni = 0; ni < test.notes.size(); ++ni) {
-        if (ni) {
-          out << ", ";
-        }
-        out << "\"" << json_escape(test.notes[ni]) << "\"";
-      }
-      out << "],\n";
-      // Warnings were previously dropped from the JSON entirely, so a machine
-      // reading this report could not see them at all.
-      out << "          \"warnings\": [";
-      for (std::size_t wi = 0; wi < test.warnings.size(); ++wi) {
-        if (wi) {
-          out << ", ";
-        }
-        out << "\"" << json_escape(test.warnings[wi]) << "\"";
-      }
-      out << "]\n";
-      out << "        }" << (ti + 1 == camera.tests.size() ? "" : ",") << "\n";
-    }
-    out << "      ]\n";
-    out << "    }" << (ci + 1 == result.cameras.size() ? "" : ",") << "\n";
+  if (!out) {
+    return false;
   }
-  out << "  ]\n";
-  out << "}\n";
+  Json::StreamWriterBuilder builder;
+  builder["indentation"] = "  ";
+  out << Json::writeString(builder, run_result_to_json(result)) << "\n";
+  out.close();
+  return static_cast<bool>(out);
 }
 
-void write_markdown(const RunResult &result, const std::string &path) {
+// Returns false when the stream could not be opened, or when anything went wrong up
+// to and including close(). Silently returning void here is what let a full disk or
+// an unwritable directory look like a successful run.
+bool write_markdown(const RunResult &result, const std::string &path) {
   std::ofstream out(path);
+  if (!out) {
+    return false;
+  }
   out << "# V4L2 Camera Diagnostic Report\n\n";
   out << "- Project: `" << result.project_name << "`\n";
   out << "- Started: `" << result.started_at_utc << "`\n";
   out << "- Finished: `" << result.finished_at_utc << "`\n";
   out << "- Host: `" << result.host_name << "`\n";
   out << "- Kernel: `" << result.kernel_release << "` (`" << result.kernel_version << "`)\n";
-  out << "- Run mode: `" << to_string(result.run_mode) << "`\n\n";
+  out << "- Run mode: `" << to_string(result.run_mode) << "`\n";
+  out << "- Trigger mode: `" << to_string(result.trigger_mode) << "`\n";
+  if (!result.trigger_profile_id.empty()) {
+    out << "- Trigger profile: `" << result.trigger_profile_id << "`\n";
+  }
+  // Timing is a property of the run, not of each camera.
+  if (result.trigger_mode != TriggerMode::FreeRun) {
+    out << "- Trigger rate: `" << std::fixed << std::setprecision(2) << result.trigger_rate_hz << " Hz`\n";
+    out << "- Pulse width: `" << std::fixed << std::setprecision(2) << result.pulse_width_ms << " ms`\n";
+  }
+  out << "\n";
+  // One routing table per run, not per camera. Free-run routes nothing, so the
+  // table is omitted entirely rather than printed empty.
+  if (!result.role_bindings.empty()) {
+    out << "### Trigger routing\n\n";
+    out << "| Role | Trigger channel |\n";
+    out << "| --- | --- |\n";
+    for (const auto &binding : result.role_bindings) {
+      out << "| " << binding.role << " | " << binding.trigger_channel_id << " |\n";
+    }
+    out << "\n";
+  }
 
   for (const auto &camera : result.cameras) {
     out << "## Camera `" << camera.camera_path << "`\n\n";
-    out << "- Profile: `" << camera.profile_id << "`\n";
-    out << "- Trigger mode: `" << to_string(camera.trigger_mode) << "`\n";
-    if (!camera.trigger_channel_id.empty()) {
-      out << "- Trigger channel: `" << camera.trigger_channel_id << "`\n";
+    // Only the role: the profile, mode and timing are run-level (report model (a)).
+    if (!camera.role.empty()) {
+      out << "- Role: `" << camera.role << "`\n";
     }
     if (!camera.trigger_description.empty()) {
       out << "- Trigger detail: `" << camera.trigger_description << "`\n";
-    }
-    if (camera.trigger_mode != TriggerMode::FreeRun) {
-      out << "- Trigger rate: `" << std::fixed << std::setprecision(2) << camera.trigger_rate_hz << " Hz`\n";
-      out << "- Pulse width: `" << std::fixed << std::setprecision(2) << camera.pulse_width_ms << " ms`\n";
     }
     out << "- Backends:";
     for (auto backend : camera.memory_backends) {
@@ -1662,12 +1522,107 @@ void write_markdown(const RunResult &result, const std::string &path) {
       }
     }
   }
+
+  // close() flushes; check the stream afterwards so a write that failed mid-file (a
+  // full disk, a vanished mount) is reported rather than assumed complete.
+  out.close();
+  return static_cast<bool>(out);
 }
 
-void write_html(const RunResult &result, const std::string &path) {
+// Returns false when the stream could not be opened, or when anything went wrong up
+// The naming inputs a result carries (plan 3.5). One place, so the artifacts, the
+// <title> and the toolbar's links cannot disagree.
+ReportNaming naming_of(const RunResult &result) {
+  ReportNaming naming;
+  naming.started_at_utc = result.started_at_utc;
+  naming.trigger_mode = result.trigger_mode;
+  naming.trigger_profile_file = result.trigger_profile_file;
+  naming.test_configuration_file = result.threshold_config_file;
+  return naming;
+}
+
+// Export DMESG (plan 3.4).
+//
+// The same HTML is read two ways -- served by the diagnostic server, and opened straight
+// off disk over file:// after the folder is archived -- and which one it is cannot be known
+// when the file is written. So both states are rendered and the choice is made at load
+// time by the small script below: a real <button disabled> for the archived case, because
+// only the disabled attribute makes a control unfocusable and unclickable, and a link to
+// /api/dmesg for the served case.
+//
+// The link carries the RUN ID and no filename. The server generates the
+// Content-Disposition name from that run's own metadata; a filename travelling in the URL
+// would end up in a response header, where a CR/LF is header injection.
+std::string render_dmesg_action(const RunResult &result) {
+  std::ostringstream out;
+  // Disabled is the default state, so a browser with scripting off gets the honest
+  // answer rather than a link that cannot work.
+  out << "<button type=\"button\" class=\"export-pdf-btn\" id=\"export-dmesg\" disabled "
+      << "data-run-id=\"" << html_escape(result.run_id) << "\">Export DMESG</button>";
+  return out.str();
+}
+
+// The note that explains the disabled control, and the script that resolves which state
+// the page is actually in.
+//
+// Rendered AFTER the export row so the note sits under the buttons, matching the approved
+// preview. Both live outside .export-actions: the note is prose, not an action.
+std::string render_dmesg_note_and_script(const RunResult &result) {
+  std::ostringstream out;
+  // Visible by default, because disabled is the default. A note that started hidden would
+  // leave an archived report showing a dead button and no explanation.
+  out << "<p class=\"export-note\" id=\"export-dmesg-note\">DMESG export requires the diagnostic server.</p>";
+  if (result.run_id.empty()) {
+    // A CLI run has no server to ask, so there is no state to resolve: the button stays
+    // disabled and the note stays up. Emitting the script anyway would be dead code.
+    return out.str();
+  }
+  out << "<script>(function(){"
+      << "var b=document.getElementById('export-dmesg');"
+      << "var n=document.getElementById('export-dmesg-note');"
+      << "if(!b||location.protocol==='file:'||!b.dataset.runId){return;}"
+      // Served by the server: turn the placeholder into the live download and drop the
+      // note, which would otherwise contradict a working button. Built with
+      // encodeURIComponent so an id can never break out of the query string.
+      << "b.disabled=false;"
+      << "if(n){n.hidden=true;}"
+      << "b.addEventListener('click',function(){"
+      << "location.href='/api/dmesg?download=1&run='+encodeURIComponent(b.dataset.runId);"
+      << "});"
+      << "})();</script>";
+  return out.str();
+}
+
+// The four export actions (plan 3.3), in the approved order.
+//
+// PDF prints; JSON and Markdown are plain relative links to the files this same run
+// wrote, so an archived folder opened over file:// still works. Nothing is serialised in
+// the browser and no name is derived a second time -- the hrefs come from the same
+// canonical naming the writer used, which is the only way a link and a file cannot drift.
+std::string render_export_toolbar(const RunResult &result) {
+  const ReportNaming naming = naming_of(result);
+  std::ostringstream out;
+  out << "<div class=\"export-row\"><div class=\"export-actions\">";
+  out << "<button type=\"button\" class=\"export-pdf-btn\" onclick=\"window.print()\">Export PDF</button>";
+  out << "<a class=\"export-pdf-btn\" href=\"" << html_escape(report_artifact_filename(naming, ReportFormat::Json))
+      << "\" download>Export JSON</a>";
+  out << "<a class=\"export-pdf-btn\" href=\"" << html_escape(report_artifact_filename(naming, ReportFormat::Markdown))
+      << "\" download>Export Markdown</a>";
+  out << render_dmesg_action(result);
+  out << "</div></div>";
+  return out.str();
+}
+
+// to and including close(). Silently returning void here is what let a full disk or
+// an unwritable directory look like a successful run.
+bool write_html(const RunResult &result, const std::string &path) {
   std::ofstream out(path);
+  if (!out) {
+    return false;
+  }
   out << R"(<!doctype html><html lang="en"><head><meta charset="utf-8">
-<title>V4L2 Camera Diagnostic Report</title>
+<title>)"
+      << html_escape(report_document_title(naming_of(result))) << R"(</title>
 <style>
 :root { --pass: #16a34a; --fail: #dc2626; --warn: #d97706; --skip: #64748b; }
 * { box-sizing: border-box; }
@@ -1684,7 +1639,6 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans
 .meta-row + .meta-row { border-top: 1px solid rgba(255,255,255,0.06); }
 .meta-row .k { color: #94a3b8; display: block; margin-bottom: 2px; }
 .meta-row .v { color: #f1f5f9; font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 12px; word-break: break-word; }
-.meta-note { color: #94a3b8; font-size: 11px; font-style: italic; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); }
 
 .section { background: white; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 24px; overflow: hidden; }
 .section-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 12px; }
@@ -1711,25 +1665,129 @@ table.overview tr:last-child td { border-bottom: none; }
 table.overview tr:hover { background: #f8fafc; }
 table.overview .test-id { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #1e293b; }
 table.overview .status-cell { font-weight: 700; font-size: 12px; text-transform: uppercase; }
+/* review-plan 5.1.5: the capability and its state on one line, the state right-aligned,
+   bold and in the semantic status colour. */
+.capability-list, .kv { margin: 0; }
+.capability-row, .kv-row { display: flex; align-items: baseline; gap: 12px; padding: 7px 0; border-bottom: 1px solid #eef2f6; font-size: 13px; }
+.capability-row:last-child, .kv-row:last-child { border-bottom: 0; }
+.capability-row dt, .kv-row dt { margin: 0; color: #354352; }
+.capability-row dd { margin: 0 0 0 auto; font-weight: 800; font-size: 12px; letter-spacing: 0.04em; }
+.capability-row dd.good { color: var(--pass); }
+.capability-row dd.bad { color: var(--fail); }
+.capability-row dd.unknown { color: var(--skip); }
+.kv-row dd { margin: 0 0 0 auto; font-family: 'JetBrains Mono', ui-monospace, monospace; color: #17202b; }
+/* review-plan 5.6.5: threshold-banded reliability bar. */
+.reliability-bar { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 12px; }
+.reliability-bar-label { flex: 0 0 90px; color: #354352; }
+.reliability-bar-track { flex: 1; height: 8px; border-radius: 4px; background: #eef2f6; overflow: hidden; }
+.reliability-bar-fill { height: 100%; border-radius: 4px; }
+.reliability-bar-fill.reliability-good { background: #4b9b69; }
+.reliability-bar-fill.reliability-warn { background: #b2872d; }
+.reliability-bar-fill.reliability-bad { background: #b54c4c; }
+.reliability-bar-value { flex: 0 0 40px; text-align: right; font-weight: 700; }
+/* 5.6.6: the Open + STREAMON trend line, cycle order on x. */
+.t06-trend-line { fill: none; stroke: #386fa4; stroke-width: 2; }
+.t06-trend-point { fill: #386fa4; stroke: #fff; stroke-width: 1.5; }
+/* review-plan 5.7.6: requested (line) vs allocated (bar) -- distinct geometry, not just
+   colour, so the two series read correctly in black-and-white print too. */
+.t07-allocated-bar { fill: #7bb7d9; }
+.t07-requested-line { fill: none; stroke: #344054; stroke-width: 2; stroke-dasharray: 4 3; }
+.t07-legend-requested { background: #344054; }
+.t07-legend-allocated { background: #7bb7d9; }
+/* 5.7.7: latency by allocated depth -- a point per depth, a range line when repeats at
+   the same depth differ. */
+.t07-depth-point { fill: #386fa4; }
+.t07-depth-range { stroke: #386fa4; stroke-width: 2; }
+.t07-depth-label { fill: #344054; font-size: 10px; font-weight: 700; }
+.t07-legend-range { background: #386fa4; }
+.t07-legend-mean { background: #386fa4; border-radius: 50%; }
+/* review-plan 5.8.5/5.8.6: saturation-load bars and queue slots, colours and geometry
+   from the approved preview (t08-buffer-saturation-preview.html). */
+.load-row { display: grid; grid-template-columns: 74px 1fr 112px; gap: 10px; align-items: center; margin-top: 14px; font-size: 11px; }
+.load-track { height: 18px; border: 1px solid #bcc6d0; background: #eef2f5; }
+.load-bar { height: 100%; background: #3477aa; }
+.interpretation { margin: 10px 0 0; color: #526171; font-size: 10px; }
+.queue-row { display: grid; grid-template-columns: 74px 1fr 70px; gap: 10px; align-items: center; margin-top: 14px; font-size: 11px; }
+.slots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.slot { min-height: 42px; display: flex; flex-direction: column; justify-content: center; padding: 5px 9px; border: 1px solid; border-radius: 3px; text-align: center; font-size: 10px; font-weight: 800; }
+.slot small { margin-top: 1px; font-size: 8px; font-weight: 600; }
+.slot.error { border-color: #b84c4c; background: #fff1f1; color: #932f2f; }
+.slot.ready { border-color: #43835b; background: #eff8f2; color: #23633b; }
+.queue-value { text-align: right; font-weight: 800; }
+.t08-legend-error { background: #fff1f1; border: 1px solid #b84c4c; }
+.t08-legend-ready { background: #eff8f2; border: 1px solid #43835b; }
+/* 5.8.8: the decoded flag evidence row. */
+.evidence-row { display: grid; grid-template-columns: 100px 1fr 1fr; gap: 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid #e5eaee; font-size: 11px; }
+.evidence-row:last-child { border-bottom: 0; }
+.evidence-row .raw { text-align: right; color: #64717e; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+/* review-plan 5.7: two charts side by side, per the approved preview's ".charts" rule. */
+.section.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.section.charts > .chart-frame { padding: 16px; }
+@media (max-width: 700px) { .section.charts { grid-template-columns: 1fr; } }
+/* review-plan 5.3.4: T03's stacked two-phase timing bar, colours from the approved
+   preview (docs/assets/previews/t03-unified-preview.html). */
+.t03-phase-streamon { fill: #386fa4; }
+.t03-phase-frame { fill: #7bb7d9; }
+.t03-bar-label { fill: #fff; font-size: 10px; font-weight: 700; }
+.t03-bar-note { fill: #344054; font-size: 10px; font-weight: 700; }
+.legend { display: flex; gap: 16px; margin-top: 6px; font-size: 11px; color: #475467; }
+.legend-item { display: flex; align-items: center; gap: 6px; }
+.legend-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+/* review-plan 5.3.3: a threshold sits beside the measurement it constrains. */
+.threshold-note { color: #64717e; font-weight: 500; font-size: 11px; }
+/* 5.3.8: the retries/attempts section is visually secondary to the main summary. */
+.kv-row dd { font-variant-numeric: tabular-nums; }
+/* review-plan 5.2.5: the hexadecimal id under the control name, at lower weight -- it
+   identifies the control without competing with its name. */
+.control-id { display: block; margin-top: 2px; color: #64717e; font-size: 11px; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+/* 5.2.3: a control-class record is a full-width group heading, not a control. */
+table.evidence tr.group-row td { background: #f1f5f9; color: #44515f; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+/* 5.1.6: the total sits with the section heading, not as a key/value row. */
+.section-count { margin: -4px 0 8px; color: #52606d; font-size: 12px; font-weight: 700; }
+.format-list { margin: 0; padding-left: 18px; color: #354352; font-size: 13px; }
+.format-list li { padding: 2px 0; }
+table.overview .details-cell a { color: #2563eb; text-decoration: none; font-weight: 600; }
+table.overview .details-cell a:hover { text-decoration: underline; }
+/* Overview tables sit indented under their backend band (review-plan 3.3): the indent is
+   what shows these rows belong to the band above them. */
+table.overview { margin-left: 28px; width: calc(100% - 28px); }
+table.overview .details-cell a { color: #2563eb; text-decoration: none; font-weight: 600; }
+table.overview .details-cell a:hover { text-decoration: underline; }
+/* Overview tables sit indented under their backend band (review-plan 3.3): the indent is
+   what shows that these rows belong to the band above them. */
+table.overview { margin-left: 28px; width: calc(100% - 28px); }
 table.overview .status-cell.pass { color: var(--pass); }
 table.overview .status-cell.fail { color: var(--fail); }
 table.overview .status-cell.warn { color: var(--warn); }
-table.overview .status-cell.skipped { color: var(--skip); }
+table.overview .status-cell.skip { color: var(--skip); }
 table.overview .duration { color: #64748b; font-family: monospace; }
 table.overview .summary-text { color: #475569; }
 
-.test-section { border: 1px solid #e2e8f0; border-radius: 8px; margin: 16px 24px; overflow: hidden; }
-.test-section-header { padding: 12px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #f1f5f9; }
-.test-section-header.pass { background: #f0fdf4; border-left: 4px solid var(--pass); }
-.test-section-header.fail { background: #fef2f2; border-left: 4px solid var(--fail); }
-.test-section-header.warn { background: #fffbeb; border-left: 4px solid var(--warn); }
-.test-section-header.skipped { background: #f8fafc; border-left: 4px solid var(--skip); }
-.test-section-header h3 { margin: 0; font-size: 14px; }
-.test-section-header .badge { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-.test-section-header .badge.pass { background: #dcfce7; color: var(--pass); }
-.test-section-header .badge.fail { background: #fee2e2; color: var(--fail); }
-.test-section-header .badge.warn { background: #fef3c7; color: var(--warn); }
-.test-section-header .badge.skipped { background: #f1f5f9; color: var(--skip); }
+/* Detailed Result Card Template (plan 3.1) -- transferred from the approved
+   docs/assets/previews/detailed-result-card.css. Only the outer shell: the band, the
+   card, the header and the section rhythm. Chart and table styles stay test-specific. */
+/* review-plan 3.2 / 4.2: light grey ground, dark left accent, a visible BACKEND label
+   and the value in monospace at high weight. */
+.backend { display: flex; align-items: center; height: 42px; padding: 0 18px; border-top: 1px solid #aeb9c5; border-bottom: 1px solid #aeb9c5; border-left: 5px solid #44515f; background: #eef2f5; color: #44515f; font-size: 12px; font-weight: 750; text-transform: uppercase; }
+.backend-label { letter-spacing: 0.08em; }
+.backend strong { margin-left: 12px; color: #111820; font-size: 14px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 800; }
+.backend-note { margin-left: auto; color: #52606d; font-size: 11px; font-weight: 600; text-transform: none; }
+.backend-gap { height: 16px; }
+/* Status colours in one place. Without a modifier a card reads as PASS. */
+.test-card { --status: #23834e; --status-text: #17643a; }
+.test-card.pass { --status: #23834e; --status-text: #17643a; }
+.test-card.warn { --status: #b37a00; --status-text: #8a5a00; }
+.test-card.fail { --status: #b54141; --status-text: #a73737; }
+.test-card.skip { --status: #697886; --status-text: #536171; }
+.test-card { display: block; margin: 14px 0 44px 28px; border: 1px solid #cbd3dc; border-left: 5px solid var(--status); border-radius: 6px; overflow: hidden; background: #fff; }
+.test-header { display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; align-items: center; min-height: 56px; padding: 11px 16px; border-bottom: 1px solid #d6dde5; background: #f8fafb; }
+.test-header .status { color: var(--status-text); font-size: 13px; font-weight: 800; }
+.test-header h2 { margin: 0; font-size: 16px; font-weight: 750; text-transform: none; line-height: 1.25; }
+.test-header .duration { color: #536171; font-size: 13px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.test-card .section-label { margin: 0 0 8px; color: #52606d; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+.test-card .section { padding: 16px; border-bottom: 1px solid #dfe5eb; }
+.test-card .section:last-child { border-bottom: 0; }
+.test-card .section p { margin: 0; color: #354352; font-size: 12px; }
 .test-body { padding: 16px; }
 /* Charts use a ~520-unit viewBox so one SVG unit renders at roughly one CSS
    pixel: with the old 760-unit box inside a 360px column every label was scaled
@@ -1802,49 +1860,123 @@ table.overview .summary-text { color: #475569; }
 .warnings-box { background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 10px 14px; margin-top: 8px;
                 color: #92400e; font-size: 13px; }
 .footer { text-align: center; color: #94a3b8; font-size: 12px; margin-top: 40px; padding-top: 24px; border-top: 1px solid #e2e8f0; }
-.export-actions { position: fixed; top: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; }
+/* Export toolbar (plan 3.3), transferred from the layout approved in plan 1.7.
+
+   The toolbar belongs to the report header, not to the viewport. The earlier
+   `position: fixed; right: 20px` anchored it to the window, so on a wide screen the
+   buttons sat outside the dark header entirely. It now rides the normal document flow
+   and scrolls with the title.
+
+   Its own row, below the title group: beside the title the four buttons (527px) left
+   381px for a 426px H1, which wrapped to two lines. On its own row they have the full
+   inner width and the title is untouched. */
+.export-row { display: flex; justify-content: flex-end;
+              /* The same 24px rhythm the header already used between the subtitle and
+                 the metadata cards -- no separator or nested panel is introduced. The
+                 margin lives on this row, so print (where the row is display:none)
+                 loses the space with it and the printed header geometry is unchanged. */
+              margin: 24px 0; }
+.export-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-content: center; gap: 10px; }
 .export-pdf-btn { display: flex; align-items: center; gap: 8px; text-decoration: none;
                   background: #0f172a; color: white; border: none; border-radius: 8px; padding: 10px 18px;
                   font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
 .export-pdf-btn:hover { background: #1e293b; }
+/* A real disabled control: unfocusable and unclickable, which only the disabled
+   attribute gives. An ARIA-only placeholder still takes focus and still fires clicks. */
+.export-pdf-btn:disabled { background: #334155; color: #94a3b8; cursor: not-allowed; box-shadow: none; }
+.export-pdf-btn:disabled:hover { background: #334155; }
+.export-note { text-align: right; color: #94a3b8; font-size: 11px; margin: -16px 0 24px; }
 @media (max-width: 700px) {
   .container { padding: 20px 12px; }
   .header { padding: 28px 20px; border-radius: 8px; }
-  .test-section { margin: 12px; }
-  .test-section-header { align-items: flex-start; flex-wrap: wrap; }
+  .test-card { margin: 12px; }
+  .test-header { grid-template-columns: 1fr; row-gap: 4px; }
   table.overview thead { display: none; }
   table.overview tbody { display: block; }
-  table.overview tr { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px 12px; padding: 12px 14px; }
+  table.overview tr { display: grid; grid-template-columns: auto auto; gap: 6px 12px; padding: 12px 14px; }
   table.overview td { padding: 0; border: none; }
   table.overview tr + tr { border-top: 1px solid #e2e8f0; }
-  table.overview td:nth-child(1) { grid-column: 1 / 4; grid-row: 1; overflow-wrap: anywhere; }
-  table.overview td:nth-child(2) { grid-column: 1; grid-row: 2; color: #64748b; }
+  /* review-plan 3.9: with the header row hidden, each cell has to name its own field --
+     "Status: FAIL", not a bare "FAIL". The Details link sits below the test information. */
+  table.overview td::before { content: attr(data-label) ": "; color: #64748b; font-weight: 600; }
+  table.overview td:nth-child(1) { grid-column: 1 / 3; grid-row: 1; overflow-wrap: anywhere; }
+  table.overview td:nth-child(1)::before { content: none; }
+  table.overview td:nth-child(2) { grid-column: 1; grid-row: 2; }
   table.overview td:nth-child(3) { grid-column: 2; grid-row: 2; }
-  table.overview td:nth-child(4) { grid-column: 3; grid-row: 2; }
-  table.overview td:nth-child(5) { grid-column: 1 / 4; grid-row: 3; }
+  table.overview td:nth-child(4) { grid-column: 1 / 3; grid-row: 3; }
+  table.overview td:nth-child(4)::before { content: none; }
+  /* 3.9: the band keeps its full width on a narrow screen. */
+  .backend { margin-left: 0; }
+  table.overview { margin-left: 0; width: 100%; }
   /* The chart viewBox now matches its rendered width, so the label sizes no
      longer need to be scaled up to compensate for a 760-unit box. */
-  .export-actions { position: static; flex-direction: row; padding: 12px; background: #f8fafc; }
+  /* Centred when the row cannot hold four buttons, so a wrapped 2x2 does not sit
+     lopsided against the right edge. */
+  .export-row { justify-content: center; }
+  .export-actions { justify-content: center; }
+  .export-note { text-align: center; }
 }
-@media print { body { background: white; } .container { padding: 20px; } .header { break-inside: avoid; }
-               .test-section, .metric-chart, .result-distribution { break-inside: avoid; }
-               .export-actions { display: none; }
+/* Page geometry, from review-plan 6.8. Its SINGLE source is this rule: a second
+   margin declaration would fight it, and the user's print-dialog margin choice
+   could no longer take effect. The dialog can still override these values --
+   6.8 says so, and the application does not try to prevent it. */
+@page { size: A4; margin: 12mm 10mm 14mm; }
+/* Status colour is meaning, not decoration: with background-graphics off, a PASS
+   and a FAIL row would otherwise print identically. 6.8 rules 3-4. */
+* { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+@media print { body { background: white; }
+               /* review-plan 3.10 / 6.4: the head repeats on every continuation page, so a
+                  reader never meets a bare column of values, and a row is never split. */
+               table.overview thead { display: table-header-group; }
+               table.overview tr { break-inside: avoid; page-break-inside: avoid; }
+               /* 3.10 / 6.5: a band must not be orphaned from its first row. */
+               .backend { break-after: avoid; page-break-after: avoid; }
+               /* review-plan 3.10 / 6.4: the head repeats on every continuation page, so a
+                  reader never meets a bare column of values; and a row is never split. */
+               table.overview thead { display: table-header-group; }
+               table.overview tr { break-inside: avoid; page-break-inside: avoid; }
+               /* 3.10 / 6.5: a band must not be orphaned from its first row. */
+               .backend { break-after: avoid; page-break-after: avoid; }
+               /* No container padding in print: the page margin comes from @page
+                  alone (6.8 rules 1-2). Vertical breathing room stays. */
+               .container { padding: 20px 0; }
+               .header { break-inside: avoid; }
+               .result-distribution { break-inside: avoid; }
+               /* review-plan 6.5: Detailed Results always opens a fresh page. */
+               .detailed-results { break-before: page; page-break-before: always; }
+               /* 6.6: a card that fits stays whole; a card longer than the printable area
+                  splits at its BLOCK boundaries, never mid-block. break-inside: avoid on
+                  the card would instead push a long card onto a page it still overflows. */
+               .test-card { break-inside: auto; }
+               .test-card .test-header { break-after: avoid; page-break-after: avoid; }
+               .test-card .section { break-inside: avoid; page-break-inside: avoid; }
+               .test-card > .summary { break-inside: avoid; page-break-inside: avoid; }
+               .test-card .test-note, .test-card .warnings-box { break-inside: avoid; }
+               /* 6.6 / 6.7: a single row, chart or configuration item never splits, and a
+                  long table repeats its head. */
+               table.evidence thead { display: table-header-group; }
+               table.evidence tr { break-inside: avoid; page-break-inside: avoid; }
+               .metric-chart { break-inside: avoid; page-break-inside: avoid; }
+               .export-row, .export-note { display: none; }
                /* A printed column is narrower than a screen row, so a narrow chart
                   would be blown up while a wide one shrank. Cap the narrow ones and
                   let the wide ones use the full text width. */
                .metric-chart:not(.metric-chart--wide) svg { max-width: 500px; }
-               @page { margin: 15mm 10mm; size: A4; } }
+               /* Page geometry is declared once, above this block. */ }
 </style></head><body>
-<div class="export-actions">
-<button class="export-pdf-btn" onclick='window.print()'>Export as PDF</button>
-<a class="export-pdf-btn" href="/api/dmesg?download=1" download="dmesg.txt">Export DMESG</a>
-</div>
 <div class="container">
 )";
 
   // Header
-  out << "<div class=\"header\"><h1>V4L2 Camera Diagnostic Report</h1>";
+  out << "<div class=\"header\"><div class=\"header-title-group\">";
+  out << "<h1>V4L2 Camera Diagnostic Report</h1>";
   out << "<p class=\"subtitle\">Automated hardware diagnostic test results</p>";
+  out << "</div>";
+  // The four-button export toolbar, transferred from the layout approved in plan 1.7:
+  // its own row inside the header, BELOW the title. An earlier attempt put it above the
+  // H1, which made the export actions read as the report's primary content.
+  out << render_export_toolbar(result);
+  out << render_dmesg_note_and_script(result);
   out << "<div class=\"meta-groups\">";
 
   out << "<div class=\"meta-group\"><div class=\"group-title\">Run</div>";
@@ -1857,6 +1989,11 @@ table.overview .summary-text { color: #475569; }
     out << "<div class=\"meta-row\"><span class=\"k\">Duration</span><span class=\"v\">" << html_escape(duration)
         << "</span></div>";
   }
+  // review-plan 1.5. A CLI run has no server-side id; the row stays and says so rather
+  // than disappearing, because an absent row reads as missing information.
+  out << "<div class=\"meta-row\"><span class=\"k\">Run ID</span><span class=\"v\">"
+      << (result.run_id.empty() ? std::string("Not applicable (CLI run)") : html_escape(result.run_id))
+      << "</span></div>";
   out << "</div>";
 
   out << "<div class=\"meta-group\"><div class=\"group-title\">System</div>";
@@ -1872,28 +2009,75 @@ table.overview .summary-text { color: #475569; }
     out << "<div class=\"meta-group\"><div class=\"group-title\">Camera</div>";
     out << "<div class=\"meta-row\"><span class=\"k\">Device</span><span class=\"v\">"
         << html_escape(result.cameras[0].camera_path) << "</span></div>";
-    out << "<div class=\"meta-row\"><span class=\"k\">Profile</span><span class=\"v\">"
-        << html_escape(result.cameras[0].profile_id) << "</span></div>";
+    // review-plan 1.7: the Trigger Profile row is ALWAYS shown here. Under free-run its
+    // value states that none is required; the row is never hidden.
+    out << "<div class=\"meta-row\"><span class=\"k\">Trigger Profile</span><span class=\"v\">"
+        << (result.trigger_mode == TriggerMode::FreeRun
+                ? std::string("Not required (free-run)")
+                : (result.trigger_profile_id.empty() ? std::string("Unavailable")
+                                                     : html_escape(result.trigger_profile_id)))
+        << "</span></div>";
+    // The backends this camera actually ran, in the order the runner used them.
+    std::string backends;
+    for (const auto &backend : result.cameras[0].memory_backends) {
+      if (!backends.empty()) {
+        backends += ", ";
+      }
+      backends += upper_case(to_string(backend));
+    }
+    if (backends.empty()) {
+      // Fall back to the backends the tests actually ran on. Deduplicated by exact value:
+      // a substring check against the accumulated string would match "MMAP" inside
+      // "MMAP, ..." only after the first entry, so every later test appended again.
+      std::vector<std::string> seen;
+      for (const auto &test : result.cameras[0].tests) {
+        if (std::find(seen.begin(), seen.end(), test.memory_backend) != seen.end()) {
+          continue;
+        }
+        seen.push_back(test.memory_backend);
+        if (!backends.empty()) {
+          backends += ", ";
+        }
+        backends += upper_case(test.memory_backend);
+      }
+    }
+    out << "<div class=\"meta-row\"><span class=\"k\">Backend</span><span class=\"v\">"
+        << (backends.empty() ? std::string("Unavailable") : html_escape(backends)) << "</span></div>";
+    out << "<div class=\"meta-row\"><span class=\"k\">Role</span><span class=\"v\">"
+        << html_escape(result.cameras[0].role) << "</span></div>";
     out << "</div>";
 
     out << "<div class=\"meta-group\"><div class=\"group-title\">Trigger</div>";
-    out << "<div class=\"meta-row\"><span class=\"k\">Mode</span><span class=\"v\">"
-        << to_string(result.cameras[0].trigger_mode) << "</span></div>";
-    if (!result.cameras[0].trigger_description.empty()) {
-      out << "<div class=\"meta-row\"><span class=\"k\">Channel</span><span class=\"v\">"
-          << html_escape(result.cameras[0].trigger_description) << "</span></div>";
+    // Run-level, like JSON and Markdown. Free-run shows only the mode.
+    out << "<div class=\"meta-row\"><span class=\"k\">Mode</span><span class=\"v\">" << to_string(result.trigger_mode)
+        << "</span></div>";
+    // The Trigger Profile row belongs to the CAMERA card (review-plan 1.7); this card
+    // carries Mode, Channel and -- under a triggered mode -- the rate and width (1.8).
+    for (const auto &binding : result.role_bindings) {
+      out << "<div class=\"meta-row\"><span class=\"k\">" << html_escape(binding.role) << "</span><span class=\"v\">"
+          << html_escape(binding.trigger_channel_id) << "</span></div>";
     }
-    if (result.cameras[0].trigger_mode != TriggerMode::FreeRun) {
+    // review-plan 1.8 lists Channel for BOTH free-run and triggered reports, so the row
+    // stays either way and states the absence rather than vanishing.
+    out << "<div class=\"meta-row\"><span class=\"k\">Channel</span><span class=\"v\">"
+        << (result.cameras[0].trigger_description.empty()
+                ? (result.trigger_mode == TriggerMode::FreeRun ? std::string("Not required (free-run)")
+                                                               : std::string("Unavailable"))
+                : html_escape(result.cameras[0].trigger_description))
+        << "</span></div>";
+    // Run-level, and not rendered under free-run: the values exist but are
+    // meaningless when nothing is driven. Same rule as JSON and Markdown.
+    if (result.trigger_mode != TriggerMode::FreeRun) {
       std::ostringstream rate_ss, pulse_ss;
-      rate_ss << std::fixed << std::setprecision(2) << result.cameras[0].trigger_rate_hz;
-      pulse_ss << std::fixed << std::setprecision(2) << result.cameras[0].pulse_width_ms;
+      rate_ss << std::fixed << std::setprecision(2) << result.trigger_rate_hz;
+      pulse_ss << std::fixed << std::setprecision(2) << result.pulse_width_ms;
       out << "<div class=\"meta-row\"><span class=\"k\">Nominal pulse rate</span><span class=\"v\">" << rate_ss.str()
           << " Hz</span></div>";
       out << "<div class=\"meta-row\"><span class=\"k\">Pulse width</span><span class=\"v\">" << pulse_ss.str()
           << " ms</span></div>";
-      out << "<div class=\"meta-note\">\"Nominal pulse rate\" is the profile's configured GPIO trigger "
-             "frequency; most tests pace their own capture loop independently and do not follow this "
-             "rate (see each test's own sample-interval parameters).</div>";
+      // review-plan 1.8 forbids a CONFIGURATION NOTE or any field serving the same
+      // purpose here. What the pulse rate means belongs to each test's own documentation,
+      // not to a paragraph inside a metadata card.
     }
     out << "</div>";
   }
@@ -1922,54 +2106,88 @@ table.overview .summary-text { color: #475569; }
 
     render_status_distribution(out, pass_count, fail_count, warn_count, skip_count);
 
-    // Overview table
+    // Overview, grouped by backend (review-plan 3.1-3.8).
+    //
+    // Was a single flat table with a Backend column and a Summary column. The backend now
+    // names its own group in a full-width band, and Summary became DETAILS: a link into the
+    // test's own card, which is where the detail actually lives.
     out << "<div class=\"section\"><div class=\"section-header\"><h2>Test Results Overview</h2></div>";
-    out << "<table "
-           "class=\"overview\"><thead><tr><th>Test</th><th>Backend</th><th>Status</th><th>Duration</th><th>Summary</"
-           "th></tr></thead><tbody>";
-    for (const auto &test : camera.tests) {
-      const std::string status = to_string(test.status);
-      out << "<tr><td class=\"test-id\">" << html_escape(test.id) << "</td>";
-      out << "<td>" << html_escape(test.memory_backend) << "</td>";
-      out << "<td class=\"status-cell " << status << "\">" << status << "</td>";
-      out << "<td class=\"duration\">" << std::fixed << std::setprecision(0) << test.duration_ms << "ms</td>";
-      out << "<td class=\"summary-text\">" << html_escape(test.summary) << "</td></tr>";
+    {
+      std::string current_backend;
+      bool table_open = false;
+      for (const auto &test : camera.tests) {
+        if (test.memory_backend != current_backend) {
+          if (table_open) {
+            out << "</tbody></table>";
+          }
+          out << render_backend_band(test.memory_backend, current_backend.empty());
+          // 3.10: the head repeats on every print continuation page, so a reader never
+          // meets a bare column of values.
+          out << "<table class=\"overview\"><thead><tr><th>Test</th><th>Status</th><th>Duration</th>"
+                 "<th>Details</th></tr></thead><tbody>";
+          current_backend = test.memory_backend;
+          table_open = true;
+        }
+        // 3.5: the number and the readable name. The slug stays in the anchor below.
+        out << "<tr><td class=\"test-id\" data-label=\"Test\">" << html_escape(test_display_name(test.id, test.name))
+            << "</td>";
+        out << "<td class=\"status-cell " << card_status_class(test.status) << "\" data-label=\"Status\">"
+            << card_status_text(test.status) << "</td>";
+        // The shared formatter (plan 3.2), so a duration reads the same here as on the card
+        // and in the web UI. Raw milliseconds stay in the JSON and Markdown artifacts.
+        out << "<td class=\"duration\" data-label=\"Duration\">" << html_escape(format_duration_ms(test.duration_ms))
+            << "</td>";
+        out << "<td class=\"details-cell\" data-label=\"Details\"><a href=\"#"
+            << html_escape(result_card_anchor(test.memory_backend, test.id)) << "\">View detailed result</a></td></tr>";
+      }
+      if (table_open) {
+        out << "</tbody></table>";
+      }
     }
-    out << "</tbody></table></div>";
+    out << "</div>";
 
     // Detailed per-test sections
-    out << "<div class=\"section\"><div class=\"section-header\"><h2>Detailed Results</h2></div><div "
+    out << "<div class=\"section detailed-results\"><div class=\"section-header\"><h2>Detailed Results</h2></div><div "
            "style=\"padding:8px 0\">";
+    // The shared card shell (plan 3.1): backend band once per backend, then the cards.
+    // Only the shell is shared -- the metric strips, charts, tables and prose below stay
+    // test-specific.
+    std::string current_backend;
     for (const auto &test : camera.tests) {
-      const std::string status = to_string(test.status);
-      out << "<div class=\"test-section\">";
-      out << "<div class=\"test-section-header " << status << "\">";
-      out << "<span class=\"badge " << status << "\">" << status << "</span>";
-      out << "<h3>" << html_escape(test.id) << " &mdash; " << html_escape(test.name) << "</h3>";
-      out << "<span style=\"margin-left:auto;color:#64748b;font-size:12px\">" << std::fixed << std::setprecision(0)
-          << test.duration_ms << "ms</span>";
-      out << "</div><div class=\"test-body\">";
+      if (test.memory_backend != current_backend) {
+        out << render_backend_band(test.memory_backend, current_backend.empty());
+        current_backend = test.memory_backend;
+      }
+      out << render_result_card_open(test);
+      out << "<div class=\"test-body\">";
 
-      if (!test.metrics.empty()) {
+      // The charts come first: they are this test's visual evidence, and several of them
+      // consume metrics that the table below would otherwise repeat.
+      // Charts only where an approved preview has one (plan 3.1, review round 3): the
+      // selector picks statistic families automatically, which grew a dot chart on eight
+      // tests whose previews show none. An unapproved chart in a customer-facing report is
+      // not a bonus.
+      if (!test.metrics.empty() && test_charts_approved(test.id)) {
         render_test_metrics(out, test);
       }
+      // "Not measured" is a FINDING, not chart furniture: a format or resolution that was
+      // enumerated but failed to stream must be reported whether or not this test draws a
+      // chart. It used to live inside render_test_metrics(), so removing the unapproved
+      // charts silently took the omission notices with it.
+      render_chart_omissions(out, test, test.metrics, {});
 
-      // Notes: prose that explains the result, before the raw data it explains.
-      // Each note is its own box — two unrelated explanations run together read
-      // as one confused paragraph.
-      for (const auto &n : test.notes) {
-        out << "<div class=\"test-note\">" << html_escape(n) << "</div>";
-      }
+      // The per-test content renderer (plan 3.1, review round 2): each approved test has
+      // its OWN table with its own column names, because each measures something
+      // different. This replaced a generic metric-kv-list that rendered every test
+      // identically -- which matched none of the 22 approved previews.
+      //
+      // It also emits the Result block, the Metric definitions section and the notes,
+      // because whether those appear and where is part of each test's approved
+      // architecture rather than a property of the shell.
+      out << render_test_content(test);
 
-      // Details
-      if (!test.details.empty()) {
-        out << "<div class=\"detail-list\">";
-        for (const auto &d : test.details)
-          out << html_escape(d) << "\n";
-        out << "</div>";
-      }
-
-      // Warnings
+      // Warnings stay here: a warning belongs to the run, not to a test's content
+      // architecture, and every test presents them the same way.
       if (!test.warnings.empty()) {
         out << "<div class=\"warnings-box\">";
         for (const auto &w : test.warnings)
@@ -1977,69 +2195,79 @@ table.overview .summary-text { color: #475569; }
         out << "</div>";
       }
 
-      out << "</div></div>";
+      out << "</div>";
+      out << render_result_card_close();
     }
     out << "</div></div>";
   }
 
   out << "<div class=\"footer\">Generated by v4l2-camera-diagnostic</div>";
   out << "</div></body></html>\n";
-}
 
-void write_pdf(const RunResult &result, const std::string &path) {
-  // Strategy: generate the professional HTML report to a temp file, then convert
-  // to PDF using wkhtmltopdf. If wkhtmltopdf is unavailable, fall back to writing
-  // the HTML directly with .pdf extension (browsers handle it gracefully).
-  const std::string html_tmp = path + ".tmp.html";
-  write_html(result, html_tmp);
-
-  // Try wkhtmltopdf first (best quality)
-  const std::string cmd =
-      "wkhtmltopdf --quiet --enable-local-file-access --page-size A4 --margin-top 10mm "
-      "--margin-bottom 10mm --margin-left 10mm --margin-right 10mm "
-      "\"" +
-      html_tmp + "\" \"" + path + "\" 2>/dev/null";
-  const int ret = std::system(cmd.c_str());
-  if (ret == 0) {
-    std::remove(html_tmp.c_str());
-    return;
-  }
-
-  // Fallback: try weasyprint
-  const std::string cmd2 = "weasyprint \"" + html_tmp + "\" \"" + path + "\" 2>/dev/null";
-  const int ret2 = std::system(cmd2.c_str());
-  if (ret2 == 0) {
-    std::remove(html_tmp.c_str());
-    return;
-  }
-
-  // Last fallback: rename HTML as PDF (browsers will still render it)
-  std::rename(html_tmp.c_str(), path.c_str());
+  // close() flushes; check the stream afterwards so a write that failed mid-file (a
+  // full disk, a vanished mount) is reported rather than assumed complete.
+  out.close();
+  return static_cast<bool>(out);
 }
 
 }  // namespace
 
-std::vector<ReportArtifact> write_reports(const RunResult &result, const std::vector<ReportFormat> &formats,
-                                          const std::string &output_directory) {
-  ensure_directory(output_directory);
+namespace {
+
+// The three artifacts every run writes. Internal on purpose: exposing it would let a
+// caller build a subset and break the guarantee plan 2.6 depends on.
+//
+// Order is fixed so the artifact list is stable across runs.
+const std::vector<ReportFormat> &mandatory_formats() {
+  static const std::vector<ReportFormat> formats = {ReportFormat::Html, ReportFormat::Json, ReportFormat::Markdown};
+  return formats;
+}
+
+std::string artifact_path(const RunResult &result, const std::string &output_directory, ReportFormat format) {
+  return output_directory + "/" + report_artifact_filename(naming_of(result), format);
+}
+
+}  // namespace
+
+std::vector<ReportArtifact> write_reports(const RunResult &result, const std::string &output_directory) {
+  // Name everything BEFORE creating anything. A run that cannot be named honestly -- a
+  // triggered run whose Trigger Profile source file was never resolved -- must fail here
+  // rather than leave a directory of mis-named artifacts that look correct (plan 3.5.2).
+  std::string first_name;
+  try {
+    first_name = report_artifact_filename(naming_of(result), mandatory_formats().front());
+  } catch (const ReportNamingError &error) {
+    throw ReportWriteError(std::string("cannot name this run's artifacts: ") + error.what());
+  }
+  (void)first_name;
+
+  if (!ensure_directory(output_directory)) {
+    throw ReportWriteError("could not create the report output directory \"" + output_directory + "\"");
+  }
+
   std::vector<ReportArtifact> artifacts;
-  for (ReportFormat format : formats) {
-    const std::string path = output_directory + "/diagnostic-report." + to_string(format);
+  for (ReportFormat format : mandatory_formats()) {
+    const std::string path = artifact_path(result, output_directory, format);
+    bool written = false;
     switch (format) {
       case ReportFormat::Json:
-        write_json(result, path);
+        written = write_json(result, path);
         break;
       case ReportFormat::Markdown:
-        write_markdown(result, output_directory + "/diagnostic-report.md");
-        artifacts.push_back({format, output_directory + "/diagnostic-report.md"});
-        continue;
-      case ReportFormat::Html:
-        write_html(result, path);
+        written = write_markdown(result, path);
         break;
-      case ReportFormat::Pdf:
-        write_pdf(result, path);
+      case ReportFormat::Html:
+        written = write_html(result, path);
         break;
     }
+    if (!written) {
+      // All three are mandatory, so one failure fails the whole report. Throwing
+      // rather than returning a shorter list means a caller cannot accidentally
+      // advertise a file that is missing or half-written.
+      throw ReportWriteError(std::string("could not write the ") + to_string(format) + " report to \"" + path + "\"");
+    }
+    // Appended only after the file is closed and the stream checked, so every entry
+    // in the returned list names a file that really exists.
     artifacts.push_back({format, path});
   }
   return artifacts;

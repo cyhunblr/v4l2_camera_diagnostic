@@ -1,4 +1,4 @@
-# t03 — Pipeline Readiness After STREAMON
+# t03 — Pipeline Readiness after STREAMON
 
 **Layer:** 2 — State-machine correctness  
 **Category:** stream-state  

@@ -70,7 +70,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: source/frontend/package-lock.json
 
@@ -83,10 +83,12 @@ jobs:
         run: npm run lint
 
   # ---------------------------------------------------------------------
-  # Frontend build (type-check + Vite production bundle).
+  # Frontend tests + build (Vitest, then type-check + Vite production bundle).
+  # Tests run before the build so a behaviour regression fails ahead of a
+  # bundle that would still compile fine.
   # ---------------------------------------------------------------------
   build-frontend:
-    name: Build Frontend
+    name: Test & Build Frontend
     needs: quality-checks
     runs-on: ubuntu-latest
     steps:
@@ -94,13 +96,17 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: source/frontend/package-lock.json
 
       - name: Install dependencies
         working-directory: source/frontend
         run: npm ci
+
+      - name: Run web UI tests (Vitest)
+        working-directory: source/frontend
+        run: npm test
 
       - name: Build web UI
         working-directory: source/frontend

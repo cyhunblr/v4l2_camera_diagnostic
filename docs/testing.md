@@ -1,8 +1,8 @@
 # Testing
 
 This project has three independent layers of testing: backend unit tests,
-frontend type-checking, and physical-camera diagnostics. Each layer has a
-different scope, a different local command, and a different place in CI (see
+web UI tests, and physical-camera diagnostics. Each layer has a different
+scope, a different local command, and a different place in CI (see
 [`docs/ci.md`](ci.md)).
 
 ## Backend Unit Tests
@@ -40,20 +40,44 @@ cmake -S . -B build -DV4L2DIAG_ENABLE_WARNINGS_AS_ERRORS=ON
 cmake --build build --parallel
 ```
 
-## Frontend Checks
+## Web UI Tests
 
-The web UI (`source/frontend`) has no runtime test suite yet — the
-type checker is the primary safety net:
+The web UI (`source/frontend`) is tested with [Vitest](https://vitest.dev) and
+[React Testing Library](https://testing-library.com/react) in a `jsdom`
+environment. Tests live next to the code they cover as `*.test.tsx`.
+
+**Node 22 is required** — the project standard, matching CI and
+`installation.sh`.
 
 ```bash
 cd source/frontend
 npm ci
-npm run build   # tsc --noEmit && vite build
-npm run lint    # eslint .
+npm test            # vitest run
+npm run test:watch  # vitest, re-runs on change
+npm run test:coverage
+npm run build       # tsc --noEmit && vite build
+npm run lint        # eslint .
 ```
 
-Adding a real component/unit test suite (e.g. Vitest) is tracked as future
-work; until then, `npm run build` and `npm run lint` are the required checks.
+Run `npm run lint` after `npm run test:coverage` if you like — `coverage/` is
+in both `.gitignore` and the ESLint ignore list, so it never shows up as
+lint noise.
+
+Vitest is configured inside [`vite.config.ts`](../source/frontend/vite.config.ts)
+rather than a separate config file, so the app and the tests share one plugin
+setup. Global setup (jest-dom matchers, per-test cleanup) lives in
+[`src/test/setup.ts`](../source/frontend/src/test/setup.ts).
+
+What the current suite covers:
+
+| Area | Locked behaviour |
+| --- | --- |
+| `SelectableCard` | `aria-pressed`/`aria-disabled`, Enter/Space activation, disabled cards stay focusable but do not toggle, corner action is not nested in the selection button and never toggles the card |
+| `ResultsTable` | empty state, row order, status labels, `status-*` row class, leading `✓` stripped, summaries sharing a message are not de-duplicated |
+| `Sidebar` | sidebar nav and the mobile `<select>` offer the same destinations, Configure/Output grouping, locked pages disabled in both surfaces with the same reason, Start/Stop swap |
+
+All four commands must pass before pushing; `npm run lint` must report zero
+warnings.
 
 ## Local Git Hooks
 

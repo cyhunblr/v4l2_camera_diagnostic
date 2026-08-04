@@ -16,6 +16,14 @@ using TestThresholds = std::map<std::string, double>;
 // that test's key-value set.
 struct ThresholdConfig {
   std::string id;
+  // The file this config was loaded from, without a directory (e.g. "stress-test.json").
+  // Empty for a config that has not been read from disk.
+  //
+  // Recorded because the id and the filename are INDEPENDENT: the loader accepts any
+  // *.json in the directory and takes the id from inside the document, so
+  // "stress-test.json" can legitimately hold id "default". Artifact naming (plan 3.5.2)
+  // uses the user's real file name, so it cannot be derived from the id.
+  std::string source_file;
   std::string name;
   std::string description;
   // Verdict thresholds: pass/fail cut-off values per test.

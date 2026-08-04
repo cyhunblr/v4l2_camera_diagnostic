@@ -1,4 +1,4 @@
-# t18 — Control Parameter Sweep
+# t18 — V4L2 Control Value Impact Analysis
 
 **Layer:** 5 — Latency  
 **Category:** controls  

@@ -1,5 +1,7 @@
 #include "v4l2diag/core/diagnostic_runner.hpp"
 
+#include "v4l2diag/core/run_routing.hpp"
+
 #include "v4l2diag/hw/gpio_trigger.hpp"
 #include "v4l2diag/hw/trigger_source.hpp"
 #include "v4l2diag/hw/v4l2_controls.hpp"
@@ -1271,7 +1273,13 @@ void run_multi_buffer(const std::string &camera_path, MemoryBackend backend, Tri
   emit(log, camera_path, "t07",
        "Multi-buffer configurations: testing 1-" + std::to_string(MAX_BUFFERS) + " buffers...");
 
+  std::vector<MultiBufferOutcome> outcomes;
+
   for (int bc = 1; bc <= MAX_BUFFERS; bc++) {
+    outcomes.push_back(MultiBufferOutcome());
+    MultiBufferOutcome &outcome = outcomes.back();
+    outcome.requested = bc;
+
     V4lSession s;
     std::string err;
     if (!s.open(camera_path, &err)) {
@@ -1290,6 +1298,7 @@ void run_multi_buffer(const std::string &camera_path, MemoryBackend backend, Tri
       continue;
     }
     const int granted = static_cast<int>(req.count);
+    outcome.allocated = granted;
     r.metrics.push_back(metric("granted_for_" + std::to_string(bc), "count", static_cast<double>(granted),
                                "Buffers granted when " + std::to_string(bc) + " requested."));
     req.count = 0;
@@ -1300,6 +1309,8 @@ void run_multi_buffer(const std::string &camera_path, MemoryBackend backend, Tri
         r.details.push_back("count=" + std::to_string(bc) + ": start failed");
         continue;
       }
+      outcome.setup_ok = true;
+      outcome.samples_requested = SAMPLES;
       s.warmup(*trigger, WARMUP_COUNT, SAMPLE_INTERVAL_MS, nullptr, pulse_ns);
       std::vector<double> lat;
       int misses = 0;
@@ -1311,20 +1322,44 @@ void run_multi_buffer(const std::string &camera_path, MemoryBackend backend, Tri
           misses++;
         V4lSession::sleep_ms(SAMPLE_INTERVAL_MS);
       }
+      outcome.samples_captured = static_cast<int>(lat.size());
       std::ostringstream d10;
       d10 << "count=" << bc << " granted=" << granted;
       if (!lat.empty())
         d10 << " mean=" << static_cast<int>(compute_stats(lat).mean) << "ms miss=" << misses << "/" << SAMPLES;
       r.details.push_back(d10.str());
     } else {
+      // Allocation probe only: nothing was requested, so nothing can be missed.
+      outcome.setup_ok = true;
       r.details.push_back("count=" + std::to_string(bc) + " granted=" + std::to_string(granted) +
                           " (GPIO unavailable, capture skipped)");
     }
   }
 
-  r.status = TestStatus::Pass;
-  r.summary = "Buffer count probe complete. See details for granted counts" +
-              std::string(trigger ? " and capture latency." : ".");
+  r.status = multi_buffer_verdict(outcomes);
+
+  const int usable = multi_buffer_usable_count(outcomes);
+  int missed = 0;
+  for (const MultiBufferOutcome &o : outcomes) {
+    if (o.setup_ok) {
+      missed += o.samples_requested - o.samples_captured;
+    }
+  }
+  const int total = static_cast<int>(outcomes.size());
+  if (r.status == TestStatus::Fail) {
+    r.summary = "No buffer configuration completed a capture (0/" + std::to_string(total) + ").";
+  } else if (r.status == TestStatus::Warn) {
+    std::ostringstream w;
+    w << usable << "/" << total << " buffer configurations usable";
+    if (missed > 0) {
+      w << ", " << missed << " frame(s) missed";
+    }
+    w << ". See details.";
+    r.summary = w.str();
+  } else {
+    r.summary = "Buffer count probe complete. See details for granted counts" +
+                std::string(trigger ? " and capture latency." : ".");
+  }
 }
 
 // Docs: docs/backend/tests/t09-buffer-recycling.md
@@ -2073,6 +2108,7 @@ void run_gpio_pulse_width(const std::string &camera_path, MemoryBackend backend,
 
   double sum_rh = 0.0, sum_rl = 0.0;
   int full_rows = 0;
+  std::vector<PulseWidthOutcome> pw_outcomes;
   for (int wi = 0; wi < N; wi++) {
     const int pw = pws[wi];
     const uint64_t pw_ns = static_cast<uint64_t>(pw) * 1'000'000UL;
@@ -2114,6 +2150,10 @@ void run_gpio_pulse_width(const std::string &camera_path, MemoryBackend backend,
       }
     }
     const std::string pstr = std::to_string(pw);
+    pw_outcomes.push_back(PulseWidthOutcome());
+    pw_outcomes.back().width_ms = pw;
+    pw_outcomes.back().samples_requested = SAMPLES;
+    pw_outcomes.back().samples_captured = hits;
     r.metrics.push_back(metric("hits_" + pstr + "ms", "count", static_cast<double>(hits), "Hits at " + pstr + "ms."));
     if (hits > 0) {
       r.metrics.push_back(
@@ -2216,8 +2256,29 @@ void run_gpio_pulse_width(const std::string &camera_path, MemoryBackend backend,
     }
     r.details.push_back("Edge detection: " + edge);
   }
-  r.status = TestStatus::Pass;
-  r.summary = "GPIO pulse width sweep complete. Trigger edge: " + edge + ".";
+  // "Inconclusive" is exactly the case the edge classifier could not decide.
+  const bool edge_conclusive = (edge != "inconclusive");
+  r.status = pulse_width_verdict(pw_outcomes, edge_conclusive);
+
+  int captured = 0;
+  int requested = 0;
+  for (const PulseWidthOutcome &o : pw_outcomes) {
+    captured += o.samples_captured;
+    requested += o.samples_requested;
+  }
+  if (r.status == TestStatus::Fail) {
+    r.summary = "No frame was captured at any pulse width (0/" + std::to_string(requested) + ").";
+  } else if (r.status == TestStatus::Warn) {
+    std::ostringstream w;
+    w << "Pulse width sweep incomplete: " << captured << "/" << requested << " captures";
+    if (!edge_conclusive) {
+      w << ", edge evidence inconclusive";
+    }
+    w << ".";
+    r.summary = w.str();
+  } else {
+    r.summary = "GPIO pulse width sweep complete. Trigger edge: " + edge + ".";
+  }
 }
 
 // Docs: docs/backend/tests/t18-control-sweep.md
@@ -3099,6 +3160,61 @@ void run_multi_camera(const std::vector<MultiCamParticipant> &participants, Memo
 
 }  // anonymous namespace
 
+int multi_buffer_usable_count(const std::vector<MultiBufferOutcome> &outcomes) {
+  // "Usable" means the configuration completed the whole chain the test cares
+  // about -- allocate, start, and deliver at least one frame. Setup alone is
+  // not enough: a configuration that never produced a frame proved nothing.
+  int usable = 0;
+  for (const MultiBufferOutcome &o : outcomes) {
+    if (o.setup_ok && o.samples_captured > 0) {
+      usable++;
+    }
+  }
+  return usable;
+}
+
+TestStatus multi_buffer_verdict(const std::vector<MultiBufferOutcome> &outcomes) {
+  bool any_setup_failure = false;
+  bool any_capture_miss = false;
+  for (const MultiBufferOutcome &o : outcomes) {
+    if (!o.setup_ok) {
+      any_setup_failure = true;
+      continue;
+    }
+    if (o.samples_captured < o.samples_requested || o.samples_requested == 0) {
+      // samples_requested == 0 is the allocation-only path: capture was never
+      // attempted, so this configuration did not complete the capture stage.
+      any_capture_miss = true;
+    }
+  }
+  // §5.7.3 rule 1: no configuration completed allocation/start/capture.
+  if (multi_buffer_usable_count(outcomes) == 0) {
+    return TestStatus::Fail;
+  }
+  if (any_setup_failure || any_capture_miss) {
+    return TestStatus::Warn;
+  }
+  return TestStatus::Pass;
+}
+
+TestStatus pulse_width_verdict(const std::vector<PulseWidthOutcome> &outcomes, bool edge_evidence_conclusive) {
+  int total_captured = 0;
+  bool any_partial = false;
+  for (const PulseWidthOutcome &o : outcomes) {
+    total_captured += o.samples_captured;
+    if (o.samples_captured < o.samples_requested) {
+      any_partial = true;
+    }
+  }
+  if (outcomes.empty() || total_captured == 0) {
+    return TestStatus::Fail;
+  }
+  if (any_partial || !edge_evidence_conclusive) {
+    return TestStatus::Warn;
+  }
+  return TestStatus::Pass;
+}
+
 /* =========================================================================
  * DiagnosticRunner
  * ========================================================================= */
@@ -3135,31 +3251,67 @@ RunResult DiagnosticRunner::run(const RunConfig &config) {
   result.output_directory = config.output_directory;
   result.run_mode = config.run_mode;
 
-  const auto tests = select_tests(config.test_selectors);
+  std::vector<std::string> unmatched_selectors;
+  const auto tests = select_tests(config.test_selectors, &unmatched_selectors);
+  for (const std::string &selector : unmatched_selectors) {
+    emit(config.log_callback, std::string(), std::string(),
+         "selector \"" + selector + "\" matched no test and was ignored", "warn");
+  }
+  if (tests.empty()) {
+    emit(config.log_callback, std::string(), std::string(), "no tests were selected; nothing will run", "warn");
+  }
+
+  // Normalised at the entry point, through the same helper the CLI and the JSON
+  // parser use. Free-run carries no Trigger Profile, so a caller reaching core
+  // directly cannot produce a result that says "free-run" and names a profile.
+  const std::string trigger_profile_id = effective_trigger_profile_id(config.trigger_mode, config.trigger_profile_id);
 
   DeviceProfile master_profile;
-  if (!config.master.profile_id.empty()) {
-    profiles_->get_profile(config.master.profile_id, &master_profile);
+  if (!trigger_profile_id.empty()) {
+    profiles_->get_profile(trigger_profile_id, &master_profile);
+  }
+  // Routing is resolved once, for the whole run, against the run's own topology.
+  // Free-run does not route at all, so it stays empty.
+  RoleResolution routing;
+  if (config.trigger_mode != TriggerMode::FreeRun) {
+    std::vector<std::string> channel_ids;
+    for (const auto &channel : master_profile.trigger_channels) {
+      channel_ids.push_back(channel.id);
+    }
+    routing = resolve_role_bindings(master_profile.role_bindings, channel_ids, config.slaves.size());
+  }
+  result.trigger_mode = config.trigger_mode;
+  result.trigger_profile_id = trigger_profile_id;
+  result.role_bindings = routing.resolved;
+  // Run-level timing, filled once here. Consumers read it from RunResult rather
+  // than reaching into cameras.front().
+  //
+  // Guarded on the mode even though free-run leaves master_profile default-
+  // constructed (so the values would coincide today): that coincidence is not the
+  // contract, and it would break silently the moment profile loading changes. The
+  // report formats and the API apply the same guard when rendering.
+  if (config.trigger_mode != TriggerMode::FreeRun) {
+    result.trigger_rate_hz = master_profile.defaults.trigger_rate_hz;
+    result.pulse_width_ms = master_profile.defaults.pulse_width_ms;
   }
 
   // Exactly one test subject (the master) — no grouping/parallelism needed.
   // t25-multi-camera, if applicable, is dispatched as one of the master's
   // own tests (see run_test()'s t25 branch) and opens the slaves directly.
-  result.cameras.push_back(run_camera(config.master, config, master_profile, tests));
+  result.cameras.push_back(run_camera(config.master, config, master_profile, tests, kMasterRole(), routing));
 
   result.finished_at_utc = utc_timestamp();
   return result;
 }
 
 CameraRunResult DiagnosticRunner::run_camera(const RunConfig::CameraConfig &camera, const RunConfig &config,
-                                             const DeviceProfile &profile, const std::vector<TestDefinition> &tests) {
+                                             const DeviceProfile &profile, const std::vector<TestDefinition> &tests,
+                                             const std::string &role, const RoleResolution &routing) {
   CameraRunResult camera_result;
   camera_result.camera_path = camera.path;
-  camera_result.profile_id = camera.profile_id;
-  camera_result.trigger_channel_id = camera.trigger_channel_id;
-  camera_result.trigger_mode = config.trigger_mode;
-  camera_result.trigger_rate_hz = profile.defaults.trigger_rate_hz;
-  camera_result.pulse_width_ms = profile.defaults.pulse_width_ms;
+  // Assigned here, while the run executes. The report writer must not recompute it
+  // from the camera's position in the list.
+  camera_result.role = role;
   camera_result.memory_backends = config.memory_backends;
 
   std::shared_ptr<TriggerSource> trigger;
@@ -3168,11 +3320,24 @@ CameraRunResult DiagnosticRunner::run_camera(const RunConfig::CameraConfig &came
     trigger = std::make_shared<FreeRunTrigger>();
     camera_result.trigger_description = "free-run (no external trigger)";
   } else {
+    // The channel comes from this camera's ROLE, via the routing resolved for the
+    // whole run. Nothing is guessed: a routing that does not cover the topology
+    // failed validation before the run started.
+    std::string channel_id;
+    for (const auto &binding : routing.resolved) {
+      if (binding.role == role) {
+        channel_id = binding.trigger_channel_id;
+      }
+    }
     const auto channel = std::find_if(profile.trigger_channels.begin(), profile.trigger_channels.end(),
-                                      [&](const TriggerChannel &item) { return item.id == camera.trigger_channel_id; });
-    if (channel == profile.trigger_channels.end()) {
+                                      [&](const TriggerChannel &item) { return item.id == channel_id; });
+    if (!routing.ok()) {
+      trigger_error = describe_role_resolution(routing);
+    } else if (channel_id.empty()) {
+      trigger_error = "trigger profile '" + config.trigger_profile_id + "' binds no channel for role '" + role + "'";
+    } else if (channel == profile.trigger_channels.end()) {
       trigger_error =
-          "trigger channel '" + camera.trigger_channel_id + "' was not found in profile '" + camera.profile_id + "'";
+          "trigger channel '" + channel_id + "' was not found in profile '" + config.trigger_profile_id + "'";
     } else {
       if (channel->type == TriggerChannel::Type::Hardware) {
         camera_result.trigger_description =
@@ -3220,7 +3385,7 @@ CameraRunResult DiagnosticRunner::run_camera(const RunConfig::CameraConfig &came
         break;
       }
       auto test_result =
-          run_test(camera.path, backend, tests[ti], config, profile, trigger.get(), trigger, trigger_error);
+          run_test(camera.path, backend, tests[ti], config, profile, trigger.get(), trigger, trigger_error, routing);
       if (config.progress_callback) {
         config.progress_callback(camera.path, test_result);
       }
@@ -3249,7 +3414,7 @@ TestResult DiagnosticRunner::run_test(const std::string &camera_path, MemoryBack
                                       const TestDefinition &definition, const RunConfig &config,
                                       const DeviceProfile &profile, TriggerSource *trigger,
                                       const std::shared_ptr<TriggerSource> &master_trigger,
-                                      const std::string &trigger_error) {
+                                      const std::string &trigger_error, const RoleResolution &routing) {
   TestResult result;
   result.id = definition.id;
   result.name = definition.name;
@@ -3397,16 +3562,22 @@ TestResult DiagnosticRunner::run_test(const std::string &camera_path, MemoryBack
     } else {
       std::vector<MultiCamParticipant> participants;
       participants.push_back({camera_path, master_trigger});
-      for (const auto &slave : config.slaves) {
-        DeviceProfile slave_profile;
-        if (!slave.profile_id.empty()) {
-          profiles_->get_profile(slave.profile_id, &slave_profile);
+      // One profile for the whole run; each slave's channel comes from its
+      // slave-N role, numbered by position in config.slaves.
+      for (std::size_t i = 0; i < config.slaves.size(); i++) {
+        const auto &slave = config.slaves[i];
+        const std::string slave_role_name = slave_role(i);
+        std::string slave_channel_id;
+        for (const auto &binding : routing.resolved) {
+          if (binding.role == slave_role_name) {
+            slave_channel_id = binding.trigger_channel_id;
+          }
         }
-        const auto channel =
-            std::find_if(slave_profile.trigger_channels.begin(), slave_profile.trigger_channels.end(),
-                         [&](const TriggerChannel &item) { return item.id == slave.trigger_channel_id; });
-        if (channel == slave_profile.trigger_channels.end() || channel->type != TriggerChannel::Type::Hardware) {
-          result.details.push_back(slave.path + ": no valid hardware trigger channel — excluded from t25");
+        const auto channel = std::find_if(profile.trigger_channels.begin(), profile.trigger_channels.end(),
+                                          [&](const TriggerChannel &item) { return item.id == slave_channel_id; });
+        if (channel == profile.trigger_channels.end() || channel->type != TriggerChannel::Type::Hardware) {
+          result.details.push_back(slave.path + " (" + slave_role_name +
+                                   "): no valid hardware trigger channel — excluded from t25");
           continue;
         }
         std::string slave_error;

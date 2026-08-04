@@ -41,8 +41,6 @@ const char *to_string(ReportFormat format) {
       return "markdown";
     case ReportFormat::Html:
       return "html";
-    case ReportFormat::Pdf:
-      return "pdf";
   }
   return "unknown";
 }
@@ -83,6 +81,21 @@ const char *to_string(TestStatus status) {
   return "unknown";
 }
 
+bool parse_test_status(const std::string &value, TestStatus *status) {
+  if (value == "pass") {
+    *status = TestStatus::Pass;
+  } else if (value == "fail") {
+    *status = TestStatus::Fail;
+  } else if (value == "warn") {
+    *status = TestStatus::Warn;
+  } else if (value == "skipped") {
+    *status = TestStatus::Skipped;
+  } else {
+    return false;
+  }
+  return true;
+}
+
 bool parse_memory_backend(const std::string &value, MemoryBackend *backend) {
   const std::string lowered = lower_copy(trim(value));
   if (lowered == "mmap") {
@@ -114,10 +127,9 @@ bool parse_report_format(const std::string &value, ReportFormat *format) {
     *format = ReportFormat::Html;
     return true;
   }
-  if (lowered == "pdf") {
-    *format = ReportFormat::Pdf;
-    return true;
-  }
+  // "pdf" deliberately falls through to the failure return: stored requests and
+  // configs from older builds may still list it, and the caller drops unknown
+  // formats rather than failing the whole run.
   return false;
 }
 

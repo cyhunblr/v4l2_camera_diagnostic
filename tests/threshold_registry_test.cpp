@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iterator>
 #include <iostream>
 #include <set>
 #include <vector>
@@ -18,6 +19,14 @@ std::string make_temp_dir() {
   buffer.push_back('\0');
   char *created = mkdtemp(buffer.data());
   return created ? created : "/tmp/v4l2diag-threshold-test";
+}
+
+std::string read_file(const std::string &path) {
+  std::ifstream in(path);
+  if (!in.good()) {
+    return std::string();
+  }
+  return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
 bool require(bool condition, const std::string &message) {
@@ -140,6 +149,58 @@ int main() {
         require(both.params["t18-control-sweep"]["sample_count"] == 2, "a migrated id overwrote an already-current id");
     unlink((second + "/default.json").c_str());
     rmdir(second.c_str());
+  }
+
+  // The default preset is read-only. remove_config() already refused it, but
+  // add_or_update_config() did not, so PUT /api/thresholds/default could
+  // overwrite it -- the UI's read-only badge was client-side only.
+  {
+    const std::string guard_dir = make_temp_dir();
+    v4l2diag::ThresholdRegistry registry(guard_dir);
+
+    v4l2diag::ThresholdConfig overwrite;
+    overwrite.id = "default";
+    overwrite.name = "Hijacked";
+    overwrite.description = "should never be written";
+    overwrite.params["t13-poll-timeout-cliff"]["sample_count"] = 1;
+
+    // The constructor seeds default.json, so the invariant is that the
+    // rejected write leaves that file byte-for-byte untouched.
+    const std::string default_path = guard_dir + "/default.json";
+    const std::string before = read_file(default_path);
+    ok &= require(!before.empty(), "the constructor did not seed default.json");
+
+    std::string error;
+    ok &= require(!registry.add_or_update_config(overwrite, &error),
+                  "add_or_update_config accepted the reserved \"default\" id");
+    ok &= require(!error.empty(), "rejecting the default preset produced no error message");
+    ok &= require(read_file(default_path) == before, "the rejected write still modified default.json");
+
+    // import_config() funnels through add_or_update_config(), so the same id
+    // must be refused when it arrives as imported JSON.
+    std::string import_error;
+    ok &= require(!registry.import_config(R"({"id":"default","name":"Hijacked"})", &import_error),
+                  "import_config accepted the reserved \"default\" id");
+    ok &= require(read_file(default_path) == before, "a rejected import still modified default.json");
+
+    // The built-in default must still be readable and unchanged.
+    v4l2diag::ThresholdConfig fallback;
+    ok &= require(registry.get_config("default", &fallback), "the built-in default became unreadable");
+    ok &= require(fallback.name != "Hijacked", "the built-in default was replaced");
+
+    // A non-reserved id still round-trips.
+    v4l2diag::ThresholdConfig custom = v4l2diag::default_threshold_config();
+    custom.id = "stress-test";
+    custom.name = "Stress Test";
+    ok &= require(registry.add_or_update_config(custom, &error),
+                  "add_or_update_config rejected a normal id: " + error);
+    v4l2diag::ThresholdConfig read_back;
+    ok &= require(registry.get_config("stress-test", &read_back) && read_back.name == "Stress Test",
+                  "a normal config did not round-trip");
+
+    unlink((guard_dir + "/stress-test.json").c_str());
+    unlink((guard_dir + "/default.json").c_str());
+    rmdir(guard_dir.c_str());
   }
 
   unlink((dir + "/default.json").c_str());

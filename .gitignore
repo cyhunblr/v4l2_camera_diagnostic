@@ -1,7 +1,10 @@
 # Build output
 /build/
-/build-verify/
+/build-*/
 /Testing/
+
+# Docs
+/docs/assets/
 
 # Generated diagnostic reports
 /reports/*
@@ -13,6 +16,8 @@
 # Node / frontend
 source/frontend/dist/
 source/frontend/node_modules/
+# Vitest coverage output
+source/frontend/coverage/
 
 # Editor
 .vscode/

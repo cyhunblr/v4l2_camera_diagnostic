@@ -1,4 +1,4 @@
-# t12 — DMA_BUF_IOCTL_SYNC Cache Coherency
+# t12 — DMABUF CPU Read Synchronization
 
 **Layer:** 3 — Buffer & memory  
 **Category:** dmabuf  

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SlidersHorizontal, Download, Upload, Plus, Trash2, Save, RotateCcw, AlertTriangle, Info } from "lucide-react";
-import { ThresholdConfig, getTestLayerName } from "../types";
+import { TestDefinition, ThresholdConfig, groupTestIdsByLayer } from "../types";
 import * as api from "../api";
 
 function formatTestName(testId: string): string {
@@ -37,6 +37,8 @@ type Props = {
   selectedThresholdId: string;
   onSelectedChange: (id: string) => void;
   selectedTests?: string[];
+  /** Registry definitions, used for the layer metadata behind the grouping. */
+  tests?: TestDefinition[];
   onDirtyChange: (dirty: boolean) => void;
   onError: (msg: string) => void;
 };
@@ -45,6 +47,7 @@ export function ThresholdConfigPage({
   selectedThresholdId,
   onSelectedChange,
   selectedTests = [],
+  tests = [],
   onDirtyChange,
   onError
 }: Props) {
@@ -286,13 +289,9 @@ export function ThresholdConfigPage({
   const displayTestIds =
     selectedTests.length === 0 ? allTestIds : allTestIds.filter((id) => selectedTests.includes(id));
 
-  // Group display test IDs by Layer
-  const categoryMap = new Map<string, string[]>();
-  for (const id of displayTestIds) {
-    const layerName = getTestLayerName(id);
-    if (!categoryMap.has(layerName)) categoryMap.set(layerName, []);
-    categoryMap.get(layerName)!.push(id);
-  }
+  // Grouped by the layer the backend reports for each test; stale preset keys
+  // land under "Unknown test" after the real layers.
+  const categoryMap = new Map<string, string[]>(groupTestIdsByLayer(displayTestIds, tests));
 
   // Count modified parameters across preset
   let modifiedCount = 0;

@@ -2,25 +2,26 @@
 
 The terminal output is not the canonical diagnostic result. Every run should produce structured artifacts.
 
-The web UI can generate:
+Every run generates all three artifacts:
 
+- HTML
 - JSON
 - Markdown
-- HTML
+
+The formats are **not selectable** -- not in the web UI, and not on the CLI
+(there is no `--report` option). Every run writes all three, which is also what
+lets the structured result be read back from the JSON artifact after a restart.
 
 HTML reports include an **Export as PDF** control that uses the browser print
-dialog, so they can be saved as PDF from the report page. The web UI does not
-currently expose PDF as a separate report format.
-
-The CLI also supports PDF artifacts:
+dialog, so they can be saved as PDF from the report page. No `pdf` artifact is
+generated on either surface.
 
 Example:
 
 ```bash
 v4l2-camera-diagnostic run \
   --camera /dev/video0 \
-  --tests implemented \
-  --report json,md,html,pdf \
+  --tests stable \
   --output-dir reports
 ```
 
@@ -47,10 +48,17 @@ knowing when reading a report:
   the test's detail lines. This is what distinguishes "the camera only supports two formats" from
   "only two of its formats could be measured".
 
-Requested PDF artifacts are generated from the same HTML report using
-`wkhtmltopdf` first and `weasyprint` second. When neither converter is
-installed, the report writer falls back to the same printable HTML content at
-the requested `.pdf` path.
+There is no `pdf` report format. The HTML report carries an **Export as PDF**
+button that calls `window.print()` -- the same thing Ctrl+P does -- so the PDF
+is produced by the browser, with its own paper size, margin and header/footer
+options. The application generates no PDF artifact and depends on no PDF
+converter (`wkhtmltopdf`, `weasyprint` and headless Chromium are all gone).
+Print layout is controlled solely by the report's print CSS.
+
+A stored run request from an older build keeps working: a `report_formats` field
+is **ignored** outright. There is no fallback to `json,html` and no attempt to
+honour the old selection -- the field selects nothing because every run already
+writes all three artifacts.
 
 JSON is intended for automation. Markdown and HTML are intended for human
 review.

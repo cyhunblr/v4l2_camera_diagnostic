@@ -1,5 +1,7 @@
 #include "v4l2diag/core/profile_registry.hpp"
 
+#include "v4l2diag/core/config_migration.hpp"
+
 #include "v4l2diag/core/types.hpp"
 
 #include <json/json.h>
@@ -59,32 +61,6 @@ const char *selector_kind_to_string(ControlDeviceSelector::Kind kind) {
   return "capture";
 }
 
-ControlDeviceSelector::Kind selector_kind_from_string(const std::string &value) {
-  if (value == "video") {
-    return ControlDeviceSelector::Kind::VideoDevice;
-  }
-  if (value == "subdevice") {
-    return ControlDeviceSelector::Kind::SubDevice;
-  }
-  return ControlDeviceSelector::Kind::CaptureDevice;
-}
-
-Json::Value matcher_to_json(const CameraMatcher &matcher) {
-  Json::Value out(Json::objectValue);
-  out["driver"] = matcher.driver;
-  out["card"] = matcher.card;
-  out["bus_info"] = matcher.bus_info;
-  return out;
-}
-
-CameraMatcher matcher_from_json(const Json::Value &root) {
-  CameraMatcher matcher;
-  matcher.driver = root.get("driver", "").asString();
-  matcher.card = root.get("card", "").asString();
-  matcher.bus_info = root.get("bus_info", "").asString();
-  return matcher;
-}
-
 Json::Value control_write_to_json(const V4l2ControlWrite &write) {
   Json::Value out(Json::objectValue);
   out["id"] = Json::UInt(write.id);
@@ -94,23 +70,12 @@ Json::Value control_write_to_json(const V4l2ControlWrite &write) {
   return out;
 }
 
-V4l2ControlWrite control_write_from_json(const Json::Value &root) {
-  V4l2ControlWrite write;
-  write.id = root.get("id", 0).asUInt();
-  write.name = root.get("name", "").asString();
-  write.type = root.get("type", 0).asUInt();
-  write.value = root.get("value", 0).asInt64();
-  return write;
-}
-
 Json::Value profile_to_json(const DeviceProfile &profile) {
   Json::Value root(Json::objectValue);
-  root["schema_version"] = 2;
+  root["schema_version"] = kProfileSchemaVersion;
   root["id"] = profile.id;
   root["name"] = profile.name;
   root["description"] = profile.description;
-  root["enabled"] = profile.enabled;
-  root["camera_match"] = matcher_to_json(profile.camera_match);
 
   Json::Value defaults(Json::objectValue);
   defaults["trigger_mode"] = to_string(profile.defaults.trigger_mode);
@@ -119,9 +84,6 @@ Json::Value profile_to_json(const DeviceProfile &profile) {
   }
   for (const auto &selector : profile.defaults.test_selectors) {
     defaults["test_selectors"].append(selector);
-  }
-  for (ReportFormat format : profile.defaults.report_formats) {
-    defaults["report_formats"].append(to_string(format));
   }
   defaults["trigger_rate_hz"] = profile.defaults.trigger_rate_hz;
   defaults["pulse_width_ms"] = profile.defaults.pulse_width_ms;
@@ -156,98 +118,16 @@ Json::Value profile_to_json(const DeviceProfile &profile) {
     root["trigger_channels"].append(item);
   }
 
-  for (const auto &binding : profile.camera_bindings) {
+  // Always an array, even when empty: a free-run profile legitimately routes
+  // nothing, and an absent key becomes undefined.map() in the UI.
+  root["role_bindings"] = Json::Value(Json::arrayValue);
+  for (const auto &binding : profile.role_bindings) {
     Json::Value item(Json::objectValue);
-    item["camera"] = matcher_to_json(binding.camera);
+    item["role"] = binding.role;
     item["trigger_channel_id"] = binding.trigger_channel_id;
-    root["camera_bindings"].append(item);
+    root["role_bindings"].append(item);
   }
   return root;
-}
-
-bool parse_json_profile(const std::string &path, DeviceProfile *profile) {
-  std::ifstream in(path);
-  if (!in) {
-    return false;
-  }
-  Json::CharReaderBuilder builder;
-  Json::Value root;
-  std::string errors;
-  if (!Json::parseFromStream(builder, in, &root, &errors) || !root.isObject()) {
-    return false;
-  }
-
-  DeviceProfile parsed;
-  parsed.schema_version = root.get("schema_version", 2).asInt();
-  parsed.id = root.get("id", "").asString();
-  parsed.name = root.get("name", parsed.id).asString();
-  parsed.description = root.get("description", "").asString();
-  parsed.enabled = root.get("enabled", true).asBool();
-  parsed.camera_match = matcher_from_json(root["camera_match"]);
-
-  const Json::Value &defaults = root["defaults"];
-  parse_trigger_mode(defaults.get("trigger_mode", "free-run").asString(), &parsed.defaults.trigger_mode);
-  for (const auto &value : defaults["memory_backends"]) {
-    MemoryBackend backend;
-    if (parse_memory_backend(value.asString(), &backend)) {
-      parsed.defaults.memory_backends.push_back(backend);
-    }
-  }
-  for (const auto &value : defaults["test_selectors"]) {
-    parsed.defaults.test_selectors.push_back(value.asString());
-  }
-  for (const auto &value : defaults["report_formats"]) {
-    ReportFormat format;
-    if (parse_report_format(value.asString(), &format)) {
-      parsed.defaults.report_formats.push_back(format);
-    }
-  }
-  parsed.defaults.trigger_rate_hz = defaults.get("trigger_rate_hz", 30.0).asDouble();
-  parsed.defaults.pulse_width_ms = defaults.get("pulse_width_ms", 13.0).asDouble();
-
-  for (const auto &value : root["trigger_channels"]) {
-    TriggerChannel channel;
-    channel.id = value.get("id", "").asString();
-    channel.name = value.get("name", "").asString();
-    channel.description = value.get("description", "").asString();
-    channel.type = value.get("type", "hardware").asString() == "software" ? TriggerChannel::Type::Software
-                                                                          : TriggerChannel::Type::Hardware;
-    if (channel.type == TriggerChannel::Type::Hardware) {
-      channel.gpio.chip_id = value["gpio"].get("chip_id", 0).asInt();
-      channel.gpio.line_number = value["gpio"].get("line_number", 0).asInt();
-      channel.gpio.description = value["gpio"].get("description", "").asString();
-    } else {
-      const Json::Value &selector = value["control_device"];
-      channel.control_device.kind = selector_kind_from_string(selector.get("kind", "capture").asString());
-      channel.control_device.driver = selector.get("driver", "").asString();
-      channel.control_device.card = selector.get("card", "").asString();
-      channel.control_device.bus_info = selector.get("bus_info", "").asString();
-      channel.control_device.sysfs_name = selector.get("sysfs_name", "").asString();
-      for (const auto &write : value["setup"]) {
-        channel.setup_controls.push_back(control_write_from_json(write));
-      }
-      for (const auto &write : value["fire"]) {
-        channel.fire_controls.push_back(control_write_from_json(write));
-      }
-      for (const auto &write : value["teardown"]) {
-        channel.teardown_controls.push_back(control_write_from_json(write));
-      }
-    }
-    parsed.trigger_channels.push_back(channel);
-  }
-
-  for (const auto &value : root["camera_bindings"]) {
-    CameraBinding binding;
-    binding.camera = matcher_from_json(value["camera"]);
-    binding.trigger_channel_id = value.get("trigger_channel_id", "").asString();
-    parsed.camera_bindings.push_back(binding);
-  }
-
-  if (!valid_id(parsed.id)) {
-    return false;
-  }
-  *profile = std::move(parsed);
-  return true;
 }
 
 }  // namespace
@@ -259,7 +139,7 @@ bool validate_device_profile(const DeviceProfile &profile, std::string *error) {
     }
     return false;
   };
-  if (profile.schema_version != 2) {
+  if (profile.schema_version != kProfileSchemaVersion) {
     return fail("unsupported profile schema version");
   }
   if (!valid_id(profile.id)) {
@@ -267,6 +147,12 @@ bool validate_device_profile(const DeviceProfile &profile, std::string *error) {
   }
   if (profile.name.empty()) {
     return fail("profile name is required");
+  }
+  if (profile.trigger_channels.empty()) {
+    // Every save path shares this rule. It used to live only in the migration
+    // contract's collect_required(), so a channel-less profile passed validation
+    // here and was written, then came straight back as "migration required".
+    return fail("at least one trigger channel is required");
   }
   std::set<std::string> channel_ids;
   for (const auto &channel : profile.trigger_channels) {
@@ -280,10 +166,26 @@ bool validate_device_profile(const DeviceProfile &profile, std::string *error) {
       return fail("software trigger channel requires at least one fire control");
     }
   }
-  for (const auto &binding : profile.camera_bindings) {
+  // Same rules as the migration contract's collect_invalid(), so a profile cannot
+  // pass one and fail the other. The run-topology check lives in
+  // resolve_role_bindings() and runs per run.
+  std::set<std::string> bound_roles;
+  for (const auto &binding : profile.role_bindings) {
     if (channel_ids.count(binding.trigger_channel_id) == 0) {
-      return fail("camera binding references an unknown trigger channel");
+      return fail("role binding references an unknown trigger channel");
     }
+    if (!bound_roles.insert(binding.role).second) {
+      return fail("a role may be bound only once");
+    }
+    if (!is_canonical_role(binding.role)) {
+      return fail("role must be one of master, slave-1, slave-2, ...");
+    }
+  }
+  if (profile.defaults.trigger_mode != TriggerMode::FreeRun && bound_roles.count(kMasterRole()) == 0) {
+    // Specifically master, not merely "some binding": every run has a master, so a
+    // slave-only profile can never start one. Refusing it at save time is better
+    // than storing something guaranteed to fail later.
+    return fail("a triggered profile must bind the master role");
   }
   if (profile.defaults.trigger_rate_hz <= 0 || profile.defaults.trigger_rate_hz > 1000) {
     return fail("trigger_rate_hz must be > 0 and <= 1000");
@@ -312,19 +214,14 @@ ProfileRegistry::ProfileRegistry(std::string config_directory)
 }
 
 std::vector<DeviceProfile> ProfileRegistry::list_profiles() const {
-  std::vector<DeviceProfile> enabled;
-  for (const auto &profile : profiles_) {
-    if (profile.enabled) {
-      enabled.push_back(profile);
-    }
-  }
-  std::sort(enabled.begin(), enabled.end(), [](const DeviceProfile &a, const DeviceProfile &b) { return a.id < b.id; });
-  return enabled;
+  std::vector<DeviceProfile> out = profiles_;
+  std::sort(out.begin(), out.end(), [](const DeviceProfile &a, const DeviceProfile &b) { return a.id < b.id; });
+  return out;
 }
 
 bool ProfileRegistry::get_profile(const std::string &id, DeviceProfile *profile) const {
   const auto it = std::find_if(profiles_.begin(), profiles_.end(),
-                               [&](const DeviceProfile &candidate) { return candidate.id == id && candidate.enabled; });
+                               [&](const DeviceProfile &candidate) { return candidate.id == id; });
   if (it == profiles_.end()) {
     return false;
   }
@@ -334,6 +231,112 @@ bool ProfileRegistry::get_profile(const std::string &id, DeviceProfile *profile)
 
 bool ProfileRegistry::add_or_update_profile(const DeviceProfile &profile, std::string *error) {
   if (!validate_device_profile(profile, error) || !write_profile_file(profile, error)) {
+    return false;
+  }
+  load();
+  return true;
+}
+
+bool ProfileRegistry::migrate_config(const std::string &source_file, const DeviceProfile &profile, std::string *error) {
+  // First of three gates: membership, then eligibility, then target collisions.
+  //
+  // The name has to match a file this registry actually enumerated from its own
+  // directory, so "../" or an absolute path cannot get through -- there is no
+  // string sanitising to get subtly wrong.
+  const auto it = std::find_if(stored_configs_.begin(), stored_configs_.end(),
+                               [&](const StoredConfig &stored) { return stored.file == source_file; });
+  if (it == stored_configs_.end()) {
+    if (error) {
+      *error = "unknown config file";
+    }
+    return false;
+  }
+  // Only a config that actually needs repairing may be committed through here.
+  // Membership alone was not enough: a valid current body aimed at a Future,
+  // Malformed or already-runnable config would rewrite or delete that file.
+  //
+  //   has_draft()        -- it parsed, so there is something to migrate
+  //   needs_user_input() -- it is Legacy or has required/invalid fields
+  //
+  // Together these exclude Future and Malformed (neither parses, so no draft) and
+  // a runnable Current config (nothing for the user to supply).
+  if (!it->report.has_draft() || !it->report.needs_user_input()) {
+    if (error) {
+      *error = it->report.usable_for_run() ? "this config does not need migration; use POST or PUT /api/profiles"
+                                           : "this config cannot be migrated: it could not be read";
+    }
+    return false;
+  }
+  if (!validate_device_profile(profile, error)) {
+    return false;
+  }
+
+  const std::string source_path = config_directory_ + "/" + source_file;
+  const std::string target_path = profile_path(profile.id);
+  const bool in_place = target_path == source_path;
+
+  // Collision checks run against every stored config, not just the runnable ones:
+  // get_profile() reports nothing for a Future, Legacy or Malformed file, so such a
+  // file used to be overwritten silently.
+  //
+  // The two checks have different scopes, which is the part that was wrong before:
+  //
+  //   target path -- only when the write lands somewhere else. An in-place write
+  //                  legitimately replaces its own file.
+  //   profile id  -- ALWAYS. An in-place migration can still promote a second
+  //                  config to a profile id another file already defines, leaving
+  //                  two configs claiming the same id and load order deciding
+  //                  which one wins. Skipping this for in_place made the whole
+  //                  loop dead in exactly that case.
+  for (const auto &stored : stored_configs_) {
+    if (stored.file == source_file) {
+      continue;
+    }
+    if (!in_place && config_directory_ + "/" + stored.file == target_path) {
+      if (error) {
+        *error = "another config file (" + stored.file + ") already occupies the target path";
+      }
+      return false;
+    }
+    if (!stored.profile_id.empty() && stored.profile_id == profile.id) {
+      if (error) {
+        *error = "another config (" + stored.file + ") already defines profile \"" + profile.id + "\"";
+      }
+      return false;
+    }
+  }
+
+  if (!write_profile_file(profile, error)) {
+    return false;
+  }
+  // The rename case: the migrated profile lives somewhere else now, so the source
+  // has to go, or it keeps being reported as needing migration.
+  //
+  // Two files are involved, so this is not one atomic step. If the source cannot
+  // be removed, a rollback of the new target is attempted; when it succeeds the
+  // source is left as the only config for this profile -- the state the caller
+  // started from. Better that than leaving both on disk with no way to tell which
+  // one is authoritative. The rollback itself can fail; see below.
+  if (!in_place && unlink(source_path.c_str()) != 0 && errno != ENOENT) {
+    const std::string reason = std::strerror(errno);
+    // The rollback can fail too. Claiming "rolled back" without checking would be
+    // the worst of the three outcomes: both files on disk and a message saying
+    // otherwise. Name both paths so the operator can resolve it by hand.
+    //
+    // Not covered by a test: reaching this needs the source unlink to fail while
+    // the target unlink also fails, in the directory that just accepted the write.
+    // That is not constructible without fault injection, so this branch is
+    // reasoned-about rather than exercised -- see tests/config_migration_test.cpp,
+    // which covers the successful-rollback branch only.
+    const bool rolled_back = unlink(target_path.c_str()) == 0 || errno == ENOENT;
+    if (error) {
+      *error = rolled_back ? "could not remove the original config (" + reason + "); the migration was rolled back"
+                           : "could not remove the original config (" + reason +
+                                 ") and the new one could not be rolled back; "
+                                 "both " +
+                                 source_path + " and " + target_path + " are now on disk and must be resolved by hand";
+    }
+    load();
     return false;
   }
   load();
@@ -360,8 +363,13 @@ bool ProfileRegistry::remove_profile(const std::string &id, std::string *error) 
   return true;
 }
 
+std::vector<ProfileRegistry::StoredConfig> ProfileRegistry::stored_configs() const {
+  return stored_configs_;
+}
+
 void ProfileRegistry::load() {
   profiles_.clear();
+  stored_configs_.clear();
   load_user_profiles();
 }
 
@@ -383,8 +391,25 @@ void ProfileRegistry::load_user_profiles() {
   for (const auto &name : names) {
     DeviceProfile user_profile;
     const std::string path = config_directory_ + "/" + name;
-    const bool parsed = parse_json_profile(path, &user_profile);
-    if (!parsed) {
+    // One migration entry point for disk and API alike. Reports are kept even
+    // for files that cannot be loaded, so an unusable config is explained
+    // instead of silently vanishing from the list.
+    MigrationReport report;
+    const bool parsed = migrate_profile_file(path, &user_profile, &report);
+
+    StoredConfig stored;
+    stored.file = name;
+    stored.report = report;
+    if (parsed) {
+      stored.profile_id = user_profile.id;
+      stored.draft = user_profile;
+    }
+    stored_configs_.push_back(stored);
+
+    // Only configs already at the current schema and free of problems become
+    // runnable. A Legacy one is kept as a draft so the UI can prefill its
+    // migration form; it becomes runnable when the user saves it explicitly.
+    if (!parsed || !report.usable_for_run()) {
       continue;
     }
     auto it = std::find_if(profiles_.begin(), profiles_.end(),

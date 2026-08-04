@@ -1,4 +1,4 @@
-# t19 — Resolution Sweep
+# t19 — Resolution Capability and Performance
 
 **Layer:** 5 — Latency  
 **Category:** format  

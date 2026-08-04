@@ -321,9 +321,11 @@ build_frontend() {
   local node_major
   node_major=$(node -e "process.stdout.write(String(process.versions.node.split('.')[0]))" 2>/dev/null || echo "0")
 
-  if [[ "${node_major}" -lt 12 ]]; then
-    nvm install 18 >/dev/null
-    nvm use 18 >/dev/null
+  # The web UI toolchain (Vitest + @testing-library/jest-dom 7) requires
+  # Node 22; CI pins the same major.
+  if [[ "${node_major}" -lt 22 ]]; then
+    nvm install 22 >/dev/null
+    nvm use 22 >/dev/null
   fi
 
   pushd "${ROOT_DIR}/source/frontend" >/dev/null

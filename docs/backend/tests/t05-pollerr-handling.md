@@ -1,4 +1,4 @@
-# t05 — POLLERR/POLLHUP Handling
+# t05 — STREAMOFF Error Handling and Recovery
 
 **Layer:** 2 — State-machine correctness  
 **Category:** stream-state  

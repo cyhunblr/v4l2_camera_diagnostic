@@ -1,4 +1,4 @@
-# t09 — Buffer Recycling Timing
+# t09 — Buffer Requeue Delay Tolerance
 
 **Layer:** 3 — Buffer & memory  
 **Category:** buffering  

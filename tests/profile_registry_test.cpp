@@ -1,5 +1,7 @@
 #include "v4l2diag/core/profile_registry.hpp"
 
+#include "v4l2diag/core/config_version.hpp"
+
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
@@ -45,7 +47,11 @@ int main() {
   channel.type = v4l2diag::TriggerChannel::Type::Hardware;
   channel.gpio = {0, 3, 42, "TEST"};
   profile.trigger_channels.push_back(channel);
-  profile.camera_bindings.push_back({{"driver-test", "card-test", "bus-test"}, channel.id});
+  // v4: routing is role-based. No physical camera matcher.
+  v4l2diag::RoleBinding binding;
+  binding.role = "master";
+  binding.trigger_channel_id = channel.id;
+  profile.role_bindings.push_back(binding);
 
   std::string error;
   if (!empty_registry.add_or_update_profile(profile, &error)) {
@@ -59,8 +65,11 @@ int main() {
 
   v4l2diag::ProfileRegistry reloaded(dir);
   v4l2diag::DeviceProfile loaded;
-  if (!reloaded.get_profile(profile.id, &loaded) || loaded.schema_version != 2 || loaded.trigger_channels.size() != 1 ||
-      loaded.trigger_channels.front().gpio.line_number != 42 || loaded.camera_bindings.size() != 1) {
+  if (!reloaded.get_profile(profile.id, &loaded) || loaded.schema_version != v4l2diag::kProfileSchemaVersion ||
+      loaded.trigger_channels.size() != 1 ||
+      loaded.trigger_channels.front().gpio.line_number != 42 || loaded.role_bindings.size() != 1 ||
+      loaded.role_bindings.front().role != "master" ||
+      loaded.role_bindings.front().trigger_channel_id != channel.id) {
     std::cerr << "JSON profile did not round-trip\n";
     return 1;
   }

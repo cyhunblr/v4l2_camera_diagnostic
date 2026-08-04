@@ -13,7 +13,7 @@ and frontend components.
 - web server exposes device/control discovery, profile CRUD, trigger tests,
   runs, live logs, historical runs, and report downloads
 - frontend provides the browser workflow for camera selection, trigger
-  routing, tests, report formats, live output, and results
+  routing, tests, live output, and results
 
 ## Directory Layout
 
@@ -67,9 +67,9 @@ Profiles are local machine configuration, loaded from
 `~/.config/v4l2-camera-diagnostic/profiles`. Versioned JSON profiles are the
 format used by both the registry and the web API.
 
-Profile defaults can include trigger mode, memory backends, test selectors,
-report formats, and camera-to-channel bindings. Camera matching uses V4L2
-driver, card, and bus metadata.
+Profile defaults can include trigger mode, memory backends and test selectors.
+Trigger routing is role-based: a profile binds run roles (`master`, `slave-1`, ...)
+to trigger channels rather than matching physical cameras.
 
 ## HTTP API
 
@@ -106,13 +106,13 @@ current run configuration in client state and moves the operator through:
 - camera selection
 - profile selection and trigger routing
 - test selection
-- report format selection
 - live output
 - results
 
-The report format page exposes JSON, Markdown, and HTML. HTML reports include
-an in-report browser print action for saving as PDF. CLI runs can still request
-PDF artifacts directly.
+Every run writes all three artifacts — HTML, JSON and Markdown. The formats are
+not selectable: there is no report-format page and no `--report` option. HTML
+reports include an in-report browser print action for saving as PDF; the
+application never generates a PDF artifact.
 
 ## Timekeeping
 

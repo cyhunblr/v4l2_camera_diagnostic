@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as api from "../api";
-import { LogLine, ReportLink, StartRunPayload } from "../types";
+import { LogLine, ReportLink, RunResultPayload, StartRunPayload } from "../types";
 
 const RUN_ID_KEY = "v4l2diag_run_id";
 const RUN_STATUS_KEY = "v4l2diag_run_status";
@@ -16,6 +16,8 @@ export function useRunPolling(onError: (message: string | null) => void) {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [nextOffset, setNextOffset] = useState(0);
   const [reportLinks, setReportLinks] = useState<ReportLink[]>([]);
+  // The structured result for the current run, from GET /api/runs/{id}.
+  const [liveResult, setLiveResult] = useState<RunResultPayload | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [secSinceLastLog, setSecSinceLastLog] = useState(0);
   const [actionInProgress, setActionInProgress] = useState(false);
@@ -115,6 +117,13 @@ export function useRunPolling(onError: (message: string | null) => void) {
             const reportsJson = await reportsRes.json();
             setReportLinks(reportsJson.reports ?? []);
           }
+          // The structured result, from the one endpoint that serves it. Test statuses
+          // come from here rather than from the log text above (plan 2.6.1).
+          const runRes = await api.getRun(runId);
+          if (runRes.ok) {
+            const runJson = await runRes.json();
+            setLiveResult(runJson.result ?? null);
+          }
         }
       } catch {
         // Network error — keep polling, server may recover.
@@ -128,6 +137,7 @@ export function useRunPolling(onError: (message: string | null) => void) {
     setLogs([]);
     setNextOffset(0);
     setReportLinks([]);
+    setLiveResult(null);
     setRunStatus("queued");
     onError(null);
     try {
@@ -171,6 +181,7 @@ export function useRunPolling(onError: (message: string | null) => void) {
     isRunning,
     logs,
     setLogs,
+    liveResult,
     reportLinks,
     elapsedSec,
     secSinceLastLog,

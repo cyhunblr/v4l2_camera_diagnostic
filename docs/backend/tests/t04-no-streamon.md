@@ -1,4 +1,4 @@
-# t04 — Frame Capture Without STREAMON
+# t04 — Frame Capture without STREAMON
 
 **Layer:** 2 — State-machine correctness  
 **Category:** stream-state  

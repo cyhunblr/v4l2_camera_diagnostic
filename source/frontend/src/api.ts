@@ -83,6 +83,17 @@ export async function getTests() {
   return jsonResp({ tests: DEFAULT_TESTS });
 }
 
+/**
+ * The single structured-result source (plan 2.6.1).
+ *
+ * The backend answers from the in-memory run when it is live and from the canonical
+ * JSON artifact after a restart -- the caller cannot tell, and must not try: there is
+ * deliberately no disk fallback, no report URL and no second parser on this side.
+ */
+export function getRun(runId: string) {
+  return fetch(`/api/runs/${encodeURIComponent(runId)}`);
+}
+
 export function getRunLogs(runId: string, after: number) {
   return fetch(`/api/runs/${runId}/logs?after=${after}`);
 }

@@ -231,7 +231,10 @@ export function TestSelectionPage({
                       title={test.id}
                       subtitle={subtitleText}
                       badges={
-                        <div className="test-card-badges">
+                        /* span, not div: this lands inside SelectableCard's
+                           native <button>, which may only contain phrasing
+                           content. */
+                        <span className="test-card-badges">
                           {test.tags?.map((tag) => {
                             const def = TAG_DEFINITIONS.find((td) => td.id === tag);
                             return (
@@ -240,7 +243,7 @@ export function TestSelectionPage({
                               </span>
                             );
                           })}
-                        </div>
+                        </span>
                       }
                       layout="horizontal"
                       cornerAction={

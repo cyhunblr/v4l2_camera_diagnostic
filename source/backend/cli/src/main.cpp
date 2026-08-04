@@ -3,6 +3,8 @@
 #include "v4l2diag/hw/device_discovery.hpp"
 #include "v4l2diag/core/diagnostic_runner.hpp"
 #include "v4l2diag/core/profile_registry.hpp"
+#include "v4l2diag/core/role_bindings.hpp"
+#include "v4l2diag/core/run_routing.hpp"
 #include "v4l2diag/core/report_writer.hpp"
 #include "v4l2diag/core/test_registry.hpp"
 #include "v4l2diag/core/types.hpp"
@@ -21,29 +23,31 @@ namespace {
 using namespace v4l2diag;
 
 void print_usage() {
-  std::cout
-      << "v4l2-camera-diagnostic\n\n"
-      << "Usage:\n"
-      << "  v4l2-camera-diagnostic list-devices\n"
-      << "  v4l2-camera-diagnostic tests list [--all]\n"
-      << "  v4l2-camera-diagnostic profiles list [--config-dir DIR]\n"
-      << "  v4l2-camera-diagnostic profiles add --id ID --name NAME --gpio FSYNC:CHIP:LINE:DESC [--config-dir DIR]\n"
-      << "  v4l2-camera-diagnostic profiles remove --id ID [--config-dir DIR]\n"
-      << "  v4l2-camera-diagnostic run [options]\n\n"
-      << "Run options:\n"
-      << "  --camera PATH              Camera path. May be repeated or comma-separated.\n"
-      << "  --trigger-mode MODE        hardware, software, or free-run. Default: free-run.\n"
-      << "  --profile ID               Profile applied to every selected camera.\n"
-      << "  --trigger-channel ID       Trigger channel applied to every selected camera.\n"
-      << "  --backend LIST             mmap, dmabuf, userptr. Default: mmap.\n"
-      << "  --tests LIST               Test ids, categories, all, stable, or implemented. Default: implemented.\n"
-      << "                             A test named by its exact id always runs, even if long-running or\n"
-      << "                             experimental; the flags below only affect group selectors.\n"
-      << "  --report LIST              json, markdown, md, html, pdf. Default: json,html.\n"
-      << "  --output-dir DIR           Report output directory. Default: reports.\n"
-      << "  --thresholds ID            Verdict threshold config id. Default: default.\n"
-      << "  --run-mode MODE            sequential or parallel. Default: sequential.\n"
-      << "  --run-mode MODE            sequential or parallel. Default: sequential.\n";
+  std::cout << "v4l2-camera-diagnostic\n\n"
+            << "Usage:\n"
+            << "  v4l2-camera-diagnostic list-devices\n"
+            << "  v4l2-camera-diagnostic tests list [--all]\n"
+            << "  v4l2-camera-diagnostic profiles list [--config-dir DIR]\n"
+            << "  v4l2-camera-diagnostic profiles add --id ID --name NAME --gpio FSYNC:CHIP:LINE:DESC\n"
+            << "                                        --bind-role ROLE:CHANNEL_ID [--config-dir DIR]\n"
+            << "  v4l2-camera-diagnostic profiles remove --id ID [--config-dir DIR]\n"
+            << "  v4l2-camera-diagnostic run [options]\n\n"
+            << "Run options:\n"
+            << "  --camera PATH              Camera path. May be repeated or comma-separated.\n"
+            << "  --trigger-mode MODE        hardware, software, or free-run. Default: free-run.\n"
+            << "  --profile ID               Run-level Trigger Profile. Required unless free-run.\n"
+            << "  --backend LIST             mmap, dmabuf, userptr. Default: mmap.\n"
+            << "  --tests LIST               Test ids, categories, tags, or all. Default: stable.\n"
+            << "                             A test named by its exact id always runs, even if long-running or\n"
+            << "                             experimental; the flags below only affect group selectors.\n"
+            << "  --output-dir DIR           Report output directory. Default: reports.\n"
+            << "  --thresholds ID            Verdict threshold config id. Default: default.\n"
+            << "  --run-mode MODE            sequential or parallel. Default: sequential.\n\n"
+            << "Profile options (profiles add):\n"
+            << "  --gpio F:CHIP:LINE:DESC    Hardware trigger channel, id \"gpio-<F>\". May be repeated.\n"
+            << "  --bind-role ROLE:CHANNEL   Bind a run role to a channel, e.g. master:gpio-0 or\n"
+            << "                             slave-1:gpio-1. May be repeated. Required: no channel is\n"
+            << "                             bound to a role automatically.\n";
 }
 
 std::string arg_value(int *i, int argc, char **argv) {
@@ -72,23 +76,6 @@ std::vector<MemoryBackend> parse_backend_list(const std::vector<std::string> &va
   }
   if (out.empty()) {
     out.push_back(MemoryBackend::Mmap);
-  }
-  return out;
-}
-
-std::vector<ReportFormat> parse_report_list(const std::vector<std::string> &values) {
-  std::vector<ReportFormat> out;
-  for (const auto &value : values) {
-    ReportFormat format;
-    if (!parse_report_format(value, &format)) {
-      std::cerr << "Unknown report format: " << value << "\n";
-      std::exit(2);
-    }
-    out.push_back(format);
-  }
-  if (out.empty()) {
-    out.push_back(ReportFormat::Json);
-    out.push_back(ReportFormat::Html);
   }
   return out;
 }
@@ -168,6 +155,23 @@ GpioMapping parse_gpio_mapping(const std::string &value) {
   return mapping;
 }
 
+// ROLE:CHANNEL_ID, e.g. "master:gpio-0". Repeatable.
+RoleBinding parse_role_binding(const std::string &value) {
+  const std::size_t colon = value.find(':');
+  if (colon == std::string::npos || colon == 0 || colon + 1 == value.size()) {
+    std::cerr << "--bind-role must use ROLE:CHANNEL_ID, e.g. master:gpio-0\n";
+    std::exit(2);
+  }
+  RoleBinding binding;
+  binding.role = trim(value.substr(0, colon));
+  binding.trigger_channel_id = trim(value.substr(colon + 1));
+  if (!is_canonical_role(binding.role)) {
+    std::cerr << "Not a role: \"" << binding.role << "\". Use master, slave-1, slave-2, ...\n";
+    std::exit(2);
+  }
+  return binding;
+}
+
 int command_list_devices() {
   const auto devices = discover_video_devices();
   if (devices.empty()) {
@@ -218,6 +222,7 @@ int command_profiles(int argc, char **argv) {
   std::string name;
   std::string description;
   std::vector<GpioMapping> gpio;
+  std::vector<RoleBinding> role_bindings;
 
   for (int i = 3; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -231,6 +236,8 @@ int command_profiles(int argc, char **argv) {
       description = arg_value(&i, argc, argv);
     } else if (arg == "--gpio") {
       gpio.push_back(parse_gpio_mapping(arg_value(&i, argc, argv)));
+    } else if (arg == "--bind-role") {
+      role_bindings.push_back(parse_role_binding(arg_value(&i, argc, argv)));
     }
   }
 
@@ -245,6 +252,9 @@ int command_profiles(int argc, char **argv) {
         std::cout << "  channel=" << channel.id
                   << " type=" << (channel.type == TriggerChannel::Type::Hardware ? "hardware" : "software") << "\n";
       }
+      for (const auto &binding : profile.role_bindings) {
+        std::cout << "  role=" << binding.role << " -> " << binding.trigger_channel_id << "\n";
+      }
     }
     return 0;
   }
@@ -252,6 +262,15 @@ int command_profiles(int argc, char **argv) {
   if (sub == "add") {
     if (id.empty() || name.empty() || gpio.empty()) {
       std::cerr << "profiles add requires --id, --name, and at least one --gpio.\n";
+      return 2;
+    }
+    // No automatic master binding, not even with exactly one --gpio. A profile
+    // with no routing cannot start a triggered run, so it is refused at save time
+    // rather than stored and failed later (plan 2.5.5).
+    if (role_bindings.empty()) {
+      std::cerr << "profiles add requires at least --bind-role master:CHANNEL_ID.\n";
+      std::cerr << "Channel ids are gpio-<FSYNC>, one per --gpio; a single channel is not "
+                   "bound to master automatically.\n";
       return 2;
     }
     DeviceProfile profile;
@@ -267,6 +286,9 @@ int command_profiles(int argc, char **argv) {
       channel.gpio = mapping;
       profile.trigger_channels.push_back(std::move(channel));
     }
+    // Duplicate, non-canonical and unknown-channel bindings are all rejected by
+    // validate_device_profile() below, so the CLI does not re-implement the rules.
+    profile.role_bindings = role_bindings;
     std::string error;
     if (!registry.add_or_update_profile(profile, &error)) {
       std::cerr << error << "\n";
@@ -298,10 +320,8 @@ int command_run(int argc, char **argv) {
   RunConfig config;
   std::vector<std::string> camera_paths;
   std::string profile_id;
-  std::string trigger_channel_id;
   bool trigger_mode_set = false;
   std::vector<std::string> backend_values;
-  std::vector<std::string> report_values;
 
   for (int i = 2; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -315,14 +335,10 @@ int command_run(int argc, char **argv) {
       trigger_mode_set = true;
     } else if (arg == "--profile") {
       profile_id = arg_value(&i, argc, argv);
-    } else if (arg == "--trigger-channel") {
-      trigger_channel_id = arg_value(&i, argc, argv);
     } else if (arg == "--backend") {
       append_csv(&backend_values, arg_value(&i, argc, argv));
     } else if (arg == "--tests") {
       append_csv(&config.test_selectors, arg_value(&i, argc, argv));
-    } else if (arg == "--report") {
-      append_csv(&report_values, arg_value(&i, argc, argv));
     } else if (arg == "--output-dir") {
       config.output_directory = arg_value(&i, argc, argv);
     } else if (arg == "--config-dir") {
@@ -341,7 +357,6 @@ int command_run(int argc, char **argv) {
   }
 
   config.memory_backends = parse_backend_list(backend_values);
-  config.report_formats = parse_report_list(report_values);
 
   if (camera_paths.empty()) {
     camera_paths = choose_cameras_interactively(discover_video_devices());
@@ -356,38 +371,64 @@ int command_run(int argc, char **argv) {
   if (!trigger_mode_set && !profile_id.empty()) {
     config.trigger_mode = profile.defaults.trigger_mode;
   }
+  // First --camera is the master (the full test suite runs against it); any
+  // further ones are slaves that only participate in t25-multi-camera.
+  config.master.path = camera_paths.front();
+  for (size_t i = 1; i < camera_paths.size(); i++) {
+    RunConfig::CameraConfig slave;
+    slave.path = camera_paths[i];
+    config.slaves.push_back(slave);
+  }
+  // Free-run carries no Trigger Profile; normalised centrally so the CLI cannot
+  // produce a run that says "free-run" and names a profile.
+  config.trigger_profile_id = effective_trigger_profile_id(config.trigger_mode, profile_id);
+
   if (config.trigger_mode != TriggerMode::FreeRun) {
     if (profile_id.empty()) {
       std::cerr << "Hardware and software trigger modes require --profile.\n";
       return 2;
     }
-    if (trigger_channel_id.empty()) {
-      std::vector<std::string> compatible;
-      for (const auto &channel : profile.trigger_channels) {
-        const bool matches_mode =
-            (config.trigger_mode == TriggerMode::Hardware && channel.type == TriggerChannel::Type::Hardware) ||
-            (config.trigger_mode == TriggerMode::Software && channel.type == TriggerChannel::Type::Software);
-        if (matches_mode) {
-          compatible.push_back(channel.id);
-        }
-      }
-      if (compatible.size() != 1) {
-        std::cerr << "Choose a compatible channel with --trigger-channel.\n";
+    // No automatic channel selection. This used to take the only compatible
+    // channel silently, which is the guess plan 2.5.4 forbids: routing a trigger
+    // to the wrong camera is worse than making the user state the binding.
+    //
+    // Deliberately the same seam the web server uses, so both refuse an
+    // incomplete routing with identical wording.
+    std::vector<std::string> channel_ids;
+    for (const auto &channel : profile.trigger_channels) {
+      channel_ids.push_back(channel.id);
+    }
+    const RoleResolution routing = resolve_role_bindings(profile.role_bindings, channel_ids, config.slaves.size());
+    if (!routing.ok()) {
+      std::cerr << "Cannot start the run: " << describe_role_resolution(routing) << "\n";
+      std::cerr << "Bind the missing roles on the profile (see `profiles add --bind-role`).\n";
+      return 2;
+    }
+    // Channel/mode compatibility, through the same helper the web server uses. A
+    // hardware channel cannot serve a software run; this check existed only on the
+    // web side, so the CLI would have opened the wrong kind of trigger.
+    for (const auto &binding : routing.resolved) {
+      const auto channel =
+          std::find_if(profile.trigger_channels.begin(), profile.trigger_channels.end(),
+                       [&](const TriggerChannel &item) { return item.id == binding.trigger_channel_id; });
+      if (channel == profile.trigger_channels.end()) {
+        std::cerr << "Cannot start the run: trigger channel \"" << binding.trigger_channel_id << "\" (role "
+                  << binding.role << ") is not defined by the profile\n";
         return 2;
       }
-      trigger_channel_id = compatible.front();
+      const std::string mismatch =
+          describe_mode_mismatch(config.trigger_mode, channel->type == TriggerChannel::Type::Hardware, binding.role,
+                                 binding.trigger_channel_id);
+      if (!mismatch.empty()) {
+        std::cerr << "Cannot start the run: " << mismatch << "\n";
+        return 2;
+      }
     }
-  }
-  // First --camera is the master (the full test suite runs against it); any
-  // further ones are slaves that only participate in t25-multi-camera.
-  config.master = {camera_paths.front(), profile_id, trigger_channel_id};
-  for (size_t i = 1; i < camera_paths.size(); i++) {
-    config.slaves.push_back({camera_paths[i], profile_id, trigger_channel_id});
   }
 
   DiagnosticRunner runner(&profiles);
   const RunResult result = runner.run(config);
-  const auto artifacts = write_reports(result, config.report_formats, config.output_directory);
+  const auto artifacts = write_reports(result, config.output_directory);
 
   std::cout << "Diagnostic run complete.\n";
   for (const auto &camera : result.cameras) {
@@ -441,5 +482,17 @@ int run_cli(int argc, char **argv) {
 }  // namespace v4l2diag
 
 int main(int argc, char **argv) {
-  return v4l2diag::run_cli(argc, argv);
+  // A report that cannot be written is a failed run, and the user has to be told in
+  // words rather than by std::terminate. Without this, a ReportWriteError -- an
+  // unwritable output directory, a full disk -- escaped as an uncaught exception and
+  // the process aborted with no usable message.
+  try {
+    return v4l2diag::run_cli(argc, argv);
+  } catch (const v4l2diag::ReportWriteError &error) {
+    std::cerr << "Report generation failed: " << error.what() << "\n";
+    return 1;
+  } catch (const std::exception &error) {
+    std::cerr << "Diagnostic run failed: " << error.what() << "\n";
+    return 1;
+  }
 }

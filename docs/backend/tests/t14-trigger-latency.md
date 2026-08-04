@@ -1,4 +1,4 @@
-# t14 — Trigger to DQBUF Latency
+# t14 — Trigger-to-Frame Delivery Latency
 
 **Layer:** 5 — Latency  
 **Category:** latency  
