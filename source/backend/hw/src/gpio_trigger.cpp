@@ -1,6 +1,7 @@
 #include "v4l2diag/hw/gpio_trigger.hpp"
 
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <ctime>
 #include <mutex>
@@ -97,6 +98,12 @@ void GpioTrigger::worker_loop() {
 void GpioTrigger::wait_pulse_done() {
   std::unique_lock<std::mutex> lk(mtx_);
   cv_.wait(lk, [this] { return !pulse_in_progress_ && !pulse_pending_; });
+}
+
+bool GpioTrigger::wait_pulse_done_for(int timeout_ms) {
+  std::unique_lock<std::mutex> lk(mtx_);
+  return cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms),
+                      [this] { return !pulse_in_progress_ && !pulse_pending_; });
 }
 
 }  // namespace v4l2diag

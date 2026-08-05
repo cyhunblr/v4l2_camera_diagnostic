@@ -2367,7 +2367,7 @@ void run_gpio_pulse_width(const std::string &camera_path, MemoryBackend backend,
 
 // Docs: docs/backend/tests/t18-control-sweep.md
 void run_control_sweep(const std::string &camera_path, TriggerSource &trigger, MemoryBackend backend, TestResult &r,
-                       const LogFn &log, const TestThresholds &tp) {
+                       const LogFn &log, const TestThresholds &tp, const std::atomic<bool> *stop_token) {
   const int warmup_count = static_cast<int>(tpv(tp, "t18-control-sweep", "warmup_count"));
   const int sample_count = static_cast<int>(tpv(tp, "t18-control-sweep", "sample_count"));
   const int capture_timeout_ms = static_cast<int>(tpv(tp, "t18-control-sweep", "capture_timeout_ms"));
@@ -2436,6 +2436,8 @@ void run_control_sweep(const std::string &camera_path, TriggerSource &trigger, M
   for (int ll = 0; ll <= 1; ll++)
     for (int bp = 0; bp <= 1; bp++)
       for (int wi = 0; wi <= 1; wi++) {
+        if (stop_token && stop_token->load(std::memory_order_relaxed))
+          break;
         set_c(ISX_LL, ll);
         set_c(ISX_BP, bp);
         set_c(ISX_WI, wi);
@@ -2444,9 +2446,11 @@ void run_control_sweep(const std::string &camera_path, TriggerSource &trigger, M
         ss.open(camera_path, &serr);
         if (!ss.start(2, backend, &serr))
           continue;
-        ss.warmup(trigger, warmup_count, capture_timeout_ms, nullptr, pulse_ns);
+        ss.warmup(trigger, warmup_count, capture_timeout_ms, stop_token, pulse_ns);
         std::vector<double> lats;
         for (int i = 0; i < sample_count; i++) {
+          if (stop_token && stop_token->load(std::memory_order_relaxed))
+            break;
           auto f = ss.capture(trigger, capture_timeout_ms, true, true, pulse_ns);
           if (f.success)
             lats.push_back(f.latency_ms);
@@ -3639,7 +3643,7 @@ TestResult DiagnosticRunner::run_test(const std::string &camera_path, MemoryBack
   else if (definition.id == "t17-format-comparison")
     run_format_comparison(camera_path, backend, *trigger, result, log, tp);
   else if (definition.id == "t18-control-sweep")
-    run_control_sweep(camera_path, *trigger, backend, result, log, tp);
+    run_control_sweep(camera_path, *trigger, backend, result, log, tp, config.stop_token);
   else if (definition.id == "t19-resolution-sweep") {
     run_resolution_sweep(camera_path, backend, *trigger, result, log, tp);
   } else if (definition.id == "t20-sequence-continuity")

@@ -46,6 +46,7 @@ class GpioTrigger final : public TriggerSource {
   }
   struct timespec send_async(uint64_t pulse_ns = 13'000'000UL) override;
   void wait_pulse_done() override;
+  bool wait_pulse_done_for(int timeout_ms);
 
  private:
   void worker_loop();
