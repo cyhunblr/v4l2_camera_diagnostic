@@ -1631,8 +1631,79 @@ int main() {
     rmdir(dir.c_str());
   }
 
-  for (const char *name :
-       {"legacy.json", "disabled.json", "current.json", "broken.json", "future.json", "invalid-current.json"}) {
+  // --- hardware-trigger run sets trigger_profile_file in the history entry --
+  //
+  // Regression: run_config_from_json set trigger_profile_id but never
+  // trigger_profile_file. The web server must resolve the filename from the
+  // profile registry after validation so report_writer can name the artifacts.
+  // Failing to do so caused every hardware-trigger web run to end in "error"
+  // with "cannot name this run's artifacts: a hardware-trigger run has no
+  // usable Trigger Profile source file (got \"\")".
+  {
+    // Add a fresh profile to the shared config_dir; clean it up at the end.
+    const std::string anvil_profile_path = config_dir + "/anvil-hw-regression.json";
+    write_file(anvil_profile_path, v4_profile("anvil-hw-regression"));
+
+    const std::string hw_dir = make_temp_dir("hw-profile-file");
+    v4l2diag::WebServerOptions hw_opts = options;
+    hw_opts.report_root = hw_dir;
+    hw_opts.port = 18937;
+    hw_opts.max_port = 18960;
+    v4l2diag::WebServer hw_server(hw_opts);
+    std::string hw_error;
+    if (check(hw_server.start(&hw_error), "the hw-profile-file server did not start: " + hw_error)) {
+      const unsigned short hw_port = hw_server.port();
+
+      Json::Value body(Json::objectValue);
+      body["trigger_mode"] = "hardware";
+      body["trigger_profile_id"] = "anvil-hw-regression";
+      body["master"]["path"] = "/dev/null";
+      body["test_selectors"].append("t01-device-compliance");
+      Json::StreamWriterBuilder builder;
+      const Response started = request(hw_port, "POST", "/api/runs", Json::writeString(builder, body));
+      ok &= check(started.status == 200 || started.status == 202,
+                  "the hw-profile-file run was not accepted: " + std::to_string(started.status) + " " + started.body);
+      const std::string run_id = as_json(started.body)["id"].asString();
+
+      Json::Value final_runs;
+      if (check(!run_id.empty(), "the hw-profile-file run returned no id")) {
+        for (int i = 0; i < 400; i++) {
+          final_runs = as_json(request(hw_port, "GET", "/api/runs").body);
+          bool finished = false;
+          for (const auto &entry : final_runs["runs"]) {
+            if (entry["id"].asString() == run_id) {
+              const std::string status = entry["status"].asString();
+              if (status == "completed" || status == "stopped" || status == "error") {
+                finished = true;
+              }
+              break;
+            }
+          }
+          if (finished) {
+            break;
+          }
+          usleep(25 * 1000);
+        }
+
+        bool found = false;
+        for (const auto &entry : final_runs["runs"]) {
+          if (entry["id"].asString() == run_id) {
+            found = true;
+            ok &= check(entry["trigger_profile_file"].asString() == "anvil-hw-regression.json",
+                        "hardware-trigger run did not set trigger_profile_file in history: \"" +
+                            entry["trigger_profile_file"].asString() + "\"");
+            break;
+          }
+        }
+        ok &= check(found, "the hw-profile-file run was not found in the history");
+      }
+      hw_server.stop();
+    }
+    unlink(anvil_profile_path.c_str());
+  }
+
+  for (const char *name : {"legacy.json", "disabled.json", "current.json", "broken.json", "future.json",
+                           "invalid-current.json", "anvil-hw-regression.json"}) {
     unlink((config_dir + "/" + name).c_str());
   }
   unlink((report_dir + "/runs-index.json").c_str());

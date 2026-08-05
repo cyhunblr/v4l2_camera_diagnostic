@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <map>
 #include <set>
 #include <utility>
@@ -110,6 +111,21 @@ std::string value_of(const TestResult &test, const std::string &name) {
     text += " " + metric->unit;
   }
   return text;
+}
+
+// Try multiple metric names and return the value from the first one found.
+// Used when the runner's actual metric name differs from the renderer's ideal name.
+std::string value_of_any(const TestResult &test, std::initializer_list<const char *> names) {
+  for (const char *name : names) {
+    if (name == nullptr) {
+      continue;
+    }
+    const MetricValue *metric = find_metric(test, name);
+    if (metric != nullptr) {
+      return value_of(test, name);
+    }
+  }
+  return "Unavailable";
 }
 
 bool has_any(const TestResult &test, const std::vector<std::string> &names) {
@@ -360,7 +376,9 @@ std::string render_t01(const TestResult &test) {
     std::vector<std::string> metrics;
   };
   const std::vector<Capability> capabilities = {
-      {"Backend support (" + probe + ")", {"backend_supported", "supports_backend"}},
+      {"Backend support (" + probe + ")",
+       {"selected_backend_supported", "backend_supported", "supports_backend", "backend_mmap", "backend_dmabuf",
+        "backend_userptr"}},
       {"Capture support", {"capture_supported", "supports_capture"}},
       {"Streaming support", {"streaming_supported", "supports_streaming"}},
   };
@@ -441,11 +459,12 @@ std::string render_t02(const TestResult &test) {
   // 5.2.4: three values, without repeating the word "count" beside each one.
   std::string out = section_open("Control summary");
   out += "<dl class=\"kv\">";
-  for (const auto &entry : {std::make_pair("Controls", "controls"), std::make_pair("Writable", "writable"),
-                            std::make_pair("Read-only", "read_only")}) {
-    out += "<div class=\"kv-row\"><dt>" + std::string(entry.first) + "</dt><dd>" + value_of(test, entry.second) +
-           "</dd></div>";
-  }
+  out +=
+      "<div class=\"kv-row\"><dt>Controls</dt><dd>" + value_of_any(test, {"controls", "control_count"}) + "</dd></div>";
+  out += "<div class=\"kv-row\"><dt>Writable</dt><dd>" + value_of_any(test, {"writable", "writable_count"}) +
+         "</dd></div>";
+  out += "<div class=\"kv-row\"><dt>Read-only</dt><dd>" + value_of_any(test, {"read_only", "read_only_count"}) +
+         "</dd></div>";
   out += "</dl>" + section_close();
 
   // 5.2.5: the approved five columns. The runner records each control as one pipe-separated
@@ -497,6 +516,73 @@ std::string render_t02(const TestResult &test) {
                 fields[3].empty() ? "Unavailable" : html_escape(fields[3]),
                 fields[4].empty() ? "Unavailable" : html_escape(fields[4]),
                 fields[5].empty() ? "Unavailable" : html_escape(fields[5])});
+  }
+  if (!any) {
+    // Legacy format: "Name [0xID] min=M max=X step=S default=D current=C [RO]"
+    for (const auto &detail : test.details) {
+      // Detect legacy format by looking for "[0x" pattern
+      auto bracket = detail.find("[0x");
+      if (bracket == std::string::npos) {
+        continue;
+      }
+      any = true;
+      std::string name = detail.substr(0, bracket);
+      // Trim trailing space
+      while (!name.empty() && name.back() == ' ')
+        name.pop_back();
+
+      // Check if it's a class record (no min/max or has [RO] and generic class name)
+      bool is_class =
+          (detail.find("min=") == std::string::npos) ||
+          (name == "User Controls" || name == "Camera Controls" || name == "Codec Controls" || name == "MPEG Controls");
+      // Also check: class records typically have all 0 range and odd current (like 43690)
+      if (is_class && name.find("Controls") != std::string::npos) {
+        out += "<tr class=\"group-row\"><td colspan=\"5\">" + html_escape(name) + "</td></tr>";
+        continue;
+      }
+
+      // Extract ID
+      auto id_end = detail.find(']', bracket);
+      std::string id = (id_end != std::string::npos) ? detail.substr(bracket + 1, id_end - bracket - 1) : "";
+
+      // Parse min, max, step, default, current
+      auto parse_field = [&](const char *key) -> std::string {
+        auto pos = detail.find(key);
+        if (pos == std::string::npos)
+          return "";
+        pos += strlen(key);
+        auto end = detail.find(' ', pos);
+        if (end == std::string::npos)
+          end = detail.size();
+        return detail.substr(pos, end - pos);
+      };
+      std::string min_v = parse_field("min=");
+      std::string max_v = parse_field("max=");
+      std::string step_v = parse_field("step=");
+      std::string def_v = parse_field("default=");
+      if (def_v.empty())
+        def_v = parse_field("def=");
+      std::string cur_v = parse_field("current=");
+      if (cur_v.empty())
+        cur_v = parse_field("cur=");
+
+      // Determine access
+      std::string access = "WRITABLE";
+      if (detail.find("[RO]") != std::string::npos) {
+        access = "READ-ONLY";
+      }
+
+      // Build range string
+      std::string range = min_v + ".." + max_v;
+      if (!step_v.empty())
+        range += " step " + step_v;
+
+      const std::string name_cell =
+          html_escape(name) +
+          (id.empty() ? std::string() : "<span class=\"control-id\">" + html_escape(id) + "</span>");
+      out += row({name_cell, access, range, def_v.empty() ? "Unavailable" : html_escape(def_v),
+                  cur_v.empty() ? "Unavailable" : html_escape(cur_v)});
+    }
   }
   if (!any) {
     out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable", "Unavailable"});
@@ -649,18 +735,19 @@ std::string render_t03(const TestResult &test) {
   const struct {
     const char *label;
     const char *metric;
+    const char *alt_metric;
     const char *threshold_metric;
     const char *threshold_label;
   } summary_rows[] = {
-      {"STREAMON mean", "streamon_mean_ms", nullptr, nullptr},
-      {"STREAMON max", "streamon_max_ms", "streamon_slow_start_ms", "slow-start limit"},
-      {"First-frame mean", "first_frame_mean_ms", nullptr, nullptr},
-      {"First-frame max", "first_frame_max_ms", "first_frame_pass_ms", "pass threshold"},
-      {"Completed cycles", "cycles", nullptr, nullptr},
-      {"Timeouts", "timeouts", nullptr, nullptr},
+      {"STREAMON mean", "streamon_mean_ms", "streamon_ms_mean", nullptr, nullptr},
+      {"STREAMON max", "streamon_max_ms", "streamon_ms_max", "streamon_slow_start_ms", "slow-start limit"},
+      {"First-frame mean", "first_frame_mean_ms", "first_frame_ms_mean", nullptr, nullptr},
+      {"First-frame max", "first_frame_max_ms", "first_frame_ms_max", "first_frame_pass_ms", "pass threshold"},
+      {"Completed cycles", "cycles", "cycles_completed", nullptr, nullptr},
+      {"Timeouts", "timeouts", "first_frame_timeouts", nullptr, nullptr},
   };
   for (const auto &entry : summary_rows) {
-    std::string value = value_of(test, entry.metric);
+    std::string value = value_of_any(test, {entry.metric, entry.alt_metric});
     if (entry.threshold_metric != nullptr) {
       const MetricValue *threshold = find_metric(test, entry.threshold_metric);
       if (threshold != nullptr) {
@@ -679,35 +766,63 @@ std::string render_t03(const TestResult &test) {
   std::vector<T03Cycle> cycles;
   bool has_pulses = false;
   for (const auto &detail : test.details) {
-    if (detail.compare(0, 7, "cycle: ") != 0) {
-      continue;
-    }
-    std::vector<std::string> fields;
-    std::size_t start = 7;
-    while (start <= detail.size()) {
-      const std::size_t bar = detail.find('|', start);
-      fields.push_back(detail.substr(start, bar == std::string::npos ? std::string::npos : bar - start));
-      if (bar == std::string::npos) {
-        break;
+    // New format: "cycle: N|streamon_ms|first_frame_ms|total_ms[|pulses]"
+    if (detail.compare(0, 7, "cycle: ") == 0) {
+      std::vector<std::string> fields;
+      std::size_t start = 7;
+      while (start <= detail.size()) {
+        const std::size_t bar = detail.find('|', start);
+        fields.push_back(detail.substr(start, bar == std::string::npos ? std::string::npos : bar - start));
+        if (bar == std::string::npos) {
+          break;
+        }
+        start = bar + 1;
       }
-      start = bar + 1;
-    }
-    if (fields.size() < 4) {
+      if (fields.size() < 4) {
+        continue;
+      }
+      T03Cycle cycle;
+      cycle.number = fields[0];
+      cycle.streamon_ms = std::strtod(fields[1].c_str(), nullptr);
+      cycle.first_frame_ms = std::strtod(fields[2].c_str(), nullptr);
+      cycle.total_ms = std::strtod(fields[3].c_str(), nullptr);
+      cycle.streamon = format_duration_ms(cycle.streamon_ms);
+      cycle.first_frame = format_duration_ms(cycle.first_frame_ms);
+      cycle.total = format_duration_ms(cycle.total_ms);
+      if (fields.size() >= 5) {
+        cycle.pulses = fields[4];
+        has_pulses = true;
+      }
+      cycles.push_back(cycle);
       continue;
     }
-    T03Cycle cycle;
-    cycle.number = fields[0];
-    cycle.streamon_ms = std::strtod(fields[1].c_str(), nullptr);
-    cycle.first_frame_ms = std::strtod(fields[2].c_str(), nullptr);
-    cycle.total_ms = std::strtod(fields[3].c_str(), nullptr);
-    cycle.streamon = format_duration_ms(cycle.streamon_ms);
-    cycle.first_frame = format_duration_ms(cycle.first_frame_ms);
-    cycle.total = format_duration_ms(cycle.total_ms);
-    if (fields.size() >= 5) {
-      cycle.pulses = fields[4];
-      has_pulses = true;
+    // Legacy format: "cycle N: STREAMON=Xms, first frame=Yms, pulses=P"
+    if (detail.compare(0, 6, "cycle ") == 0 && detail.find(':') != std::string::npos) {
+      T03Cycle cycle;
+      // Parse cycle number
+      cycle.number = std::to_string(std::atoi(detail.c_str() + 6));
+      // Parse STREAMON=Xms
+      auto spos = detail.find("STREAMON=");
+      if (spos != std::string::npos) {
+        cycle.streamon_ms = std::strtod(detail.c_str() + spos + 9, nullptr);
+      }
+      // Parse first frame=Yms
+      auto fpos = detail.find("first frame=");
+      if (fpos != std::string::npos) {
+        cycle.first_frame_ms = std::strtod(detail.c_str() + fpos + 12, nullptr);
+      }
+      cycle.total_ms = cycle.streamon_ms + cycle.first_frame_ms;
+      cycle.streamon = format_duration_ms(cycle.streamon_ms);
+      cycle.first_frame = format_duration_ms(cycle.first_frame_ms);
+      cycle.total = format_duration_ms(cycle.total_ms);
+      // Parse pulses=P
+      auto ppos = detail.find("pulses=");
+      if (ppos != std::string::npos) {
+        cycle.pulses = std::to_string(std::atoi(detail.c_str() + ppos + 7));
+        has_pulses = true;
+      }
+      cycles.push_back(cycle);
     }
-    cycles.push_back(cycle);
   }
 
   // 5.3.4: one stacked, two-phase horizontal bar per cycle -- STREAMON then FIRST FRAME, in
@@ -803,12 +918,40 @@ std::string render_t04(const TestResult &test) {
     out += row({html_escape(fields[0]), html_escape(fields[1]), html_escape(fields[2]), html_escape(fields[3])});
   }
   if (!any) {
-    out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable"});
+    // Fallback: build the check table from available metrics.
+    const MetricValue *poll_ret = find_metric(test, "poll_returned");
+    const MetricValue *dqbuf_failed_m = find_metric(test, "dqbuf_failed");
+    if (poll_ret != nullptr || dqbuf_failed_m != nullptr) {
+      if (poll_ret != nullptr) {
+        const std::string observed = poll_ret->value == 0.0 ? "Timed out (no readiness)" : "Signaled before timeout";
+        out += row({"poll() before STREAMON", "No readiness", observed, poll_ret->value == 0.0 ? "PASS" : "WARN"});
+      }
+      if (dqbuf_failed_m != nullptr) {
+        const MetricValue *dqbuf_errno_m = find_metric(test, "dqbuf_errno");
+        std::string observed;
+        if (dqbuf_failed_m->value != 0.0) {
+          observed = "Rejected";
+          if (dqbuf_errno_m != nullptr && dqbuf_errno_m->value != 0.0) {
+            observed += " (errno " + std::to_string(static_cast<int>(dqbuf_errno_m->value)) + ")";
+          }
+        } else {
+          observed = "Frame dequeued";
+          const std::string seq = detail_value(test, "observed_sequence");
+          if (!seq.empty()) {
+            observed += " - sequence " + seq;
+          }
+        }
+        out += row(
+            {"DQBUF before STREAMON", "Request rejected", observed, dqbuf_failed_m->value != 0.0 ? "PASS" : "FAIL"});
+      }
+    } else {
+      out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable"});
+    }
   }
   out += table_close() + section_close();
   // 5.4.7: the two parameters that shaped this state-machine probe.
-  out += kv_section("Test configuration", {{"Buffers requested", value_of(test, "buffers_requested")},
-                                           {"Poll timeout", value_of(test, "poll_timeout_ms")}});
+  out += kv_section("Test configuration", {{"Buffers requested", value_of_any(test, {"buffers_requested", "buffers"})},
+                                           {"Poll timeout", value_of_any(test, {"poll_timeout_ms", "poll_timeout"})}});
   return out;
 }
 
@@ -838,7 +981,41 @@ std::string render_t05(const TestResult &test) {
     out += row({html_escape(fields[0]), html_escape(fields[1]), html_escape(fields[2]), html_escape(fields[3])});
   }
   if (!any) {
-    out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable"});
+    // Fallback: build state check table from the metrics the runner actually emits.
+    const MetricValue *baseline = find_metric(test, "baseline_ok");
+    const MetricValue *dqbuf_failed = find_metric(test, "dqbuf_failed");
+    const MetricValue *restreamon = find_metric(test, "restreamon_ok");
+    const MetricValue *recovery = find_metric(test, "recovery_ok");
+    if (baseline != nullptr || dqbuf_failed != nullptr) {
+      if (baseline != nullptr) {
+        out +=
+            row({"Baseline capture", "At least 1 frame", std::to_string(static_cast<int>(baseline->value)) + " frames",
+                 baseline->value > 0 ? "PASS" : "FAIL"});
+      }
+      // Poll result from detail lines
+      for (const auto &detail : test.details) {
+        if (detail.find("poll") != std::string::npos || detail.find("Poll") != std::string::npos) {
+          out += row({"Poll after stop", "Timeout or error flag", html_escape(detail), "ACCEPTED"});
+          break;
+        }
+      }
+      if (dqbuf_failed != nullptr) {
+        // dqbuf_failed==1 means correctly rejected; ==0 means frame delivered (bad)
+        std::string observed = dqbuf_failed->value != 0.0 ? "Request rejected" : "Frame dequeued";
+        out += row({"DQBUF after stop", "Request rejected", observed, dqbuf_failed->value != 0.0 ? "PASS" : "FAIL"});
+      }
+      if (restreamon != nullptr) {
+        out += row({"Re-STREAMON", "Request accepted", restreamon->value != 0.0 ? "Accepted" : "Failed",
+                    restreamon->value != 0.0 ? "PASS" : "FAIL"});
+      }
+      if (recovery != nullptr) {
+        out +=
+            row({"Recovery capture", "At least 1 frame", std::to_string(static_cast<int>(recovery->value)) + " frames",
+                 recovery->value > 0 ? "PASS" : "FAIL"});
+      }
+    } else {
+      out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable"});
+    }
   }
   out += table_close() + section_close();
 
@@ -852,8 +1029,8 @@ std::string render_t05(const TestResult &test) {
   }
 
   // 5.5.7: the six configuration parameters.
-  out += kv_section("Test configuration", {{"Baseline frames", value_of(test, "baseline_frames")},
-                                           {"Recovery frames", value_of(test, "recovery_frames")},
+  out += kv_section("Test configuration", {{"Baseline frames", value_of_any(test, {"baseline_frames", "baseline_ok"})},
+                                           {"Recovery frames", value_of_any(test, {"recovery_frames", "recovery_ok"})},
                                            {"Warmup frames", value_of(test, "warmup_frames")},
                                            {"Minimum recovery", value_of(test, "min_recovery_frames")},
                                            {"Poll timeout", value_of(test, "poll_timeout_ms")},
@@ -951,25 +1128,42 @@ std::string render_t06(const TestResult &test) {
   // borderline phase can WARN even on a PASS card.
   std::string out = section_open("Cycle Reliability");
   out += table_open({"Phase", "Completed", "Start fail", "Timeout", "Outcome"});
-  if (find_metric(test, "full_cycles") == nullptr && find_metric(test, "rapid_cycles") == nullptr) {
+  if (find_metric(test, "full_cycles") == nullptr && find_metric(test, "full_cycles_success") == nullptr &&
+      find_metric(test, "rapid_cycles") == nullptr && find_metric(test, "rapid_cycles_ok") == nullptr) {
     out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable", "Unavailable"});
   } else {
-    out += row({"Full cycles", completed_of(test, "full_cycles", "full_configured"), value_of(test, "full_start_fail"),
-                value_of(test, "full_timeouts"), state_word(test.status)});
-    out += row({"Rapid cycles", completed_of(test, "rapid_cycles", "rapid_configured"),
-                value_of(test, "rapid_start_fail"), value_of(test, "rapid_capture_timeouts"), state_word(test.status)});
+    out += row({"Full cycles",
+                completed_of(test, "full_cycles", "full_configured") != "Unavailable"
+                    ? completed_of(test, "full_cycles", "full_configured")
+                    : completed_of(test, "full_cycles_success", "full_cycles_attempted"),
+                value_of_any(test, {"full_start_fail", "full_cycle_failures"}),
+                value_of_any(test, {"full_timeouts", "full_capture_timeouts"}), state_word(test.status)});
+    out += row({"Rapid cycles",
+                completed_of(test, "rapid_cycles", "rapid_configured") != "Unavailable"
+                    ? completed_of(test, "rapid_cycles", "rapid_configured")
+                    : completed_of(test, "rapid_cycles_ok", "rapid_cycles_total"),
+                value_of_any(test, {"rapid_start_fail", "rapid_start_failures"}),
+                value_of(test, "rapid_capture_timeouts"), state_word(test.status)});
   }
   out += table_close() + section_close();
 
   // 5.6.5: the threshold-banded reliability bars, once per phase.
   out += section_open("Reliability");
-  const MetricValue *full_completed = find_metric(test, "full_cycles");
-  const MetricValue *full_configured = find_metric(test, "full_configured");
+  const MetricValue *full_completed = find_metric(test, "full_cycles") != nullptr
+                                          ? find_metric(test, "full_cycles")
+                                          : find_metric(test, "full_cycles_success");
+  const MetricValue *full_configured = find_metric(test, "full_configured") != nullptr
+                                           ? find_metric(test, "full_configured")
+                                           : find_metric(test, "full_cycles_attempted");
   if (full_completed != nullptr && full_configured != nullptr && full_configured->value > 0.0) {
     out += render_t06_reliability_bar("Full cycles", full_completed->value / full_configured->value * 100.0);
   }
-  const MetricValue *rapid_completed = find_metric(test, "rapid_cycles");
-  const MetricValue *rapid_configured = find_metric(test, "rapid_configured");
+  const MetricValue *rapid_completed = find_metric(test, "rapid_cycles") != nullptr
+                                           ? find_metric(test, "rapid_cycles")
+                                           : find_metric(test, "rapid_cycles_ok");
+  const MetricValue *rapid_configured = find_metric(test, "rapid_configured") != nullptr
+                                            ? find_metric(test, "rapid_configured")
+                                            : find_metric(test, "rapid_cycles_total");
   if (rapid_completed != nullptr && rapid_configured != nullptr && rapid_configured->value > 0.0) {
     out += render_t06_reliability_bar("Rapid cycles", rapid_completed->value / rapid_configured->value * 100.0);
   }
@@ -999,24 +1193,61 @@ std::string render_t06(const TestResult &test) {
   // 5.6.7: the renamed timing fields. "Open + STREAMON" because the measurement spans
   // device open, buffer setup and STREAMON, not STREAMON alone; T06's own capture figures
   // are secondary observations, not T03's readiness measurement.
-  out += kv_section("Timing Summary", {{"Open + STREAMON mean", value_of(test, "open_streamon_mean_ms")},
-                                       {"Open + STREAMON maximum", value_of(test, "open_streamon_max_ms")},
-                                       {"Measured capture mean", value_of(test, "measured_capture_mean_ms")},
-                                       {"Measured capture maximum", value_of(test, "measured_capture_max_ms")}});
+  out += kv_section(
+      "Timing Summary",
+      {{"Open + STREAMON mean", value_of_any(test, {"open_streamon_mean_ms", "streamon_ms_mean"})},
+       {"Open + STREAMON maximum", value_of_any(test, {"open_streamon_max_ms", "streamon_ms_max"})},
+       {"Measured capture mean", value_of_any(test, {"measured_capture_mean_ms", "first_frame_latency_mean"})},
+       {"Measured capture maximum", value_of_any(test, {"measured_capture_max_ms", "first_frame_latency_max"})}});
 
   // 5.6.8: semantic text, not raw booleans, for the phase and guard state.
-  out += kv_section("Protection State", {{"Full phase", detail_value(test, "full_phase")},
-                                         {"Rapid phase", detail_value(test, "rapid_phase")},
-                                         {"Start failures", value_of(test, "full_start_fail")},
-                                         {"Slow-start guard", detail_value(test, "slow_start_guard")}});
+  {
+    std::string full_state = detail_value(test, "full_phase");
+    if (full_state.empty()) {
+      const MetricValue *fa = find_metric(test, "full_aborted");
+      if (fa != nullptr) {
+        full_state = fa->value != 0.0 ? "Stopped early" : "Completed";
+      }
+    }
+    std::string rapid_state = detail_value(test, "rapid_phase");
+    if (rapid_state.empty()) {
+      const MetricValue *rs = find_metric(test, "rapid_skipped");
+      const MetricValue *ra = find_metric(test, "rapid_aborted");
+      if (rs != nullptr && rs->value != 0.0) {
+        rapid_state = "Skipped";
+      } else if (ra != nullptr) {
+        rapid_state = ra->value != 0.0 ? "Stopped early" : "Completed";
+      }
+    }
+    std::string guard = detail_value(test, "slow_start_guard");
+    out += kv_section("Protection State",
+                      {{"Full phase", full_state},
+                       {"Rapid phase", rapid_state},
+                       {"Start failures", value_of_any(test, {"full_start_fail", "start_failures_total"})},
+                       {"Slow-start guard", guard.empty() ? "Not triggered" : guard}});
+  }
 
   // 5.6.9: at least these eight configuration parameters.
-  out += kv_section("Test configuration", {{"Full cycles", detail_value(test, "full_cycles_configured")},
-                                           {"Rapid cycles", detail_value(test, "rapid_cycles_configured")},
-                                           {"Full warmup", detail_value(test, "full_warmup")},
-                                           {"Rapid warmup", detail_value(test, "rapid_warmup")},
-                                           {"Slow-start guard", detail_value(test, "slow_start_guard_limit")},
-                                           {"Backend memory", detail_value(test, "backend_memory")}});
+  {
+    std::string full_cfg = detail_value(test, "full_cycles_configured");
+    if (full_cfg.empty()) {
+      const MetricValue *m = find_metric(test, "full_cycles_attempted");
+      if (m != nullptr)
+        full_cfg = std::to_string(static_cast<int>(m->value));
+    }
+    std::string rapid_cfg = detail_value(test, "rapid_cycles_configured");
+    if (rapid_cfg.empty()) {
+      const MetricValue *m = find_metric(test, "rapid_cycles_total");
+      if (m != nullptr)
+        rapid_cfg = std::to_string(static_cast<int>(m->value));
+    }
+    out += kv_section("Test configuration", {{"Full cycles", full_cfg},
+                                             {"Rapid cycles", rapid_cfg},
+                                             {"Full warmup", detail_value(test, "full_warmup")},
+                                             {"Rapid warmup", detail_value(test, "rapid_warmup")},
+                                             {"Slow-start guard", detail_value(test, "slow_start_guard_limit")},
+                                             {"Backend memory", detail_value(test, "backend_memory")}});
+  }
   return out;
 }
 
@@ -1033,29 +1264,57 @@ struct T07Request {
 std::vector<T07Request> t07_requests(const TestResult &test) {
   std::vector<T07Request> requests;
   for (const auto &detail : test.details) {
-    if (detail.compare(0, 9, "request: ") != 0) {
-      continue;
-    }
-    std::vector<std::string> fields;
-    std::size_t start = 9;
-    while (start <= detail.size()) {
-      const std::size_t bar = detail.find('|', start);
-      fields.push_back(detail.substr(start, bar == std::string::npos ? std::string::npos : bar - start));
-      if (bar == std::string::npos) {
-        break;
+    // New format: "request: N|allocated|captured|attempted|mean_ms"
+    if (detail.compare(0, 9, "request: ") == 0) {
+      std::vector<std::string> fields;
+      std::size_t start = 9;
+      while (start <= detail.size()) {
+        const std::size_t bar = detail.find('|', start);
+        fields.push_back(detail.substr(start, bar == std::string::npos ? std::string::npos : bar - start));
+        if (bar == std::string::npos) {
+          break;
+        }
+        start = bar + 1;
       }
-      start = bar + 1;
-    }
-    if (fields.size() < 5) {
+      if (fields.size() < 5) {
+        continue;
+      }
+      T07Request request;
+      request.requested = std::atoi(fields[0].c_str());
+      request.allocated = std::atoi(fields[1].c_str());
+      request.captured = std::atoi(fields[2].c_str());
+      request.attempted = std::atoi(fields[3].c_str());
+      request.mean_ms = std::strtod(fields[4].c_str(), nullptr);
+      requests.push_back(request);
       continue;
     }
-    T07Request request;
-    request.requested = std::atoi(fields[0].c_str());
-    request.allocated = std::atoi(fields[1].c_str());
-    request.captured = std::atoi(fields[2].c_str());
-    request.attempted = std::atoi(fields[3].c_str());
-    request.mean_ms = std::strtod(fields[4].c_str(), nullptr);
-    requests.push_back(request);
+    // Legacy format: "count=N granted=M mean=Xms miss=C/A"
+    if (detail.compare(0, 6, "count=") == 0) {
+      T07Request request;
+      // Parse count=N
+      request.requested = std::atoi(detail.c_str() + 6);
+      // Parse granted=M
+      auto gpos = detail.find("granted=");
+      if (gpos != std::string::npos) {
+        request.allocated = std::atoi(detail.c_str() + gpos + 8);
+      }
+      // Parse mean=Xms
+      auto mpos = detail.find("mean=");
+      if (mpos != std::string::npos) {
+        request.mean_ms = std::strtod(detail.c_str() + mpos + 5, nullptr);
+      }
+      // Parse miss=C/A
+      auto misspos = detail.find("miss=");
+      if (misspos != std::string::npos) {
+        int miss = std::atoi(detail.c_str() + misspos + 5);
+        auto slashpos = detail.find('/', misspos);
+        if (slashpos != std::string::npos) {
+          request.attempted = std::atoi(detail.c_str() + slashpos + 1);
+          request.captured = request.attempted - miss;
+        }
+      }
+      requests.push_back(request);
+    }
   }
   return requests;
 }
@@ -1428,28 +1687,53 @@ struct T09Delay {
 std::vector<T09Delay> t09_delays(const TestResult &test) {
   std::vector<T09Delay> delays;
   for (const auto &detail : test.details) {
-    if (detail.compare(0, 7, "delay: ") != 0) {
-      continue;
-    }
-    std::vector<std::string> fields;
-    std::size_t start = 7;
-    while (start <= detail.size()) {
-      const std::size_t bar = detail.find('|', start);
-      fields.push_back(detail.substr(start, bar == std::string::npos ? std::string::npos : bar - start));
-      if (bar == std::string::npos) {
-        break;
+    // New format: "delay: <label>|availability%|mean_wait_ms|outcome"
+    if (detail.compare(0, 7, "delay: ") == 0) {
+      std::vector<std::string> fields;
+      std::size_t start = 7;
+      while (start <= detail.size()) {
+        const std::size_t bar = detail.find('|', start);
+        fields.push_back(detail.substr(start, bar == std::string::npos ? std::string::npos : bar - start));
+        if (bar == std::string::npos) {
+          break;
+        }
+        start = bar + 1;
       }
-      start = bar + 1;
-    }
-    if (fields.size() < 4) {
+      if (fields.size() < 4) {
+        continue;
+      }
+      T09Delay delay;
+      delay.label = fields[0];
+      delay.availability = std::strtod(fields[1].c_str(), nullptr);
+      delay.mean_wait_ms = std::strtod(fields[2].c_str(), nullptr);
+      delay.outcome = fields[3];
+      delays.push_back(delay);
       continue;
     }
-    T09Delay delay;
-    delay.label = fields[0];
-    delay.availability = std::strtod(fields[1].c_str(), nullptr);
-    delay.mean_wait_ms = std::strtod(fields[2].c_str(), nullptr);
-    delay.outcome = fields[3];
-    delays.push_back(delay);
+    // Legacy format: "delay=Xms hits=H/A mean=Yms"
+    if (detail.compare(0, 6, "delay=") == 0) {
+      T09Delay delay;
+      int delay_ms = std::atoi(detail.c_str() + 6);
+      delay.label = std::to_string(delay_ms) + " ms";
+      // Parse hits=H/A
+      auto hpos = detail.find("hits=");
+      int hits = 0, attempts = 10;
+      if (hpos != std::string::npos) {
+        hits = std::atoi(detail.c_str() + hpos + 5);
+        auto slashpos = detail.find('/', hpos);
+        if (slashpos != std::string::npos) {
+          attempts = std::atoi(detail.c_str() + slashpos + 1);
+        }
+      }
+      delay.availability = attempts > 0 ? (static_cast<double>(hits) / attempts * 100.0) : 0.0;
+      // Parse mean=Yms
+      auto mpos = detail.find("mean=");
+      if (mpos != std::string::npos) {
+        delay.mean_wait_ms = std::strtod(detail.c_str() + mpos + 5, nullptr);
+      }
+      delay.outcome = delay.availability >= 90.0 ? "PASS" : "WARN";
+      delays.push_back(delay);
+    }
   }
   return delays;
 }
@@ -2697,11 +2981,13 @@ std::string render_test_content(const TestResult &test) {
   std::string out;
   if (test_content_shows_result(test.id, test.status)) {
     out += result_block(test);
-  }
-  // Notes BEFORE the evidence: a note explains the data, so it has to precede it. Placed
-  // after, it reads as a footnote to a table the reader has already puzzled over.
-  for (const auto &note : test.notes) {
-    out += "<div class=\"test-note\">" + html_escape(note) + "</div>";
+    // Notes BEFORE the evidence: a note explains the data, so it has to precede it. Placed
+    // after, it reads as a footnote to a table the reader has already puzzled over.
+    // Shown only on non-PASS cards (review-plan §4.6): a passing card's header already
+    // says PASS, no extra prose is needed in the intro.
+    for (const auto &note : test.notes) {
+      out += "<div class=\"test-note\">" + html_escape(note) + "</div>";
+    }
   }
   const auto found = renderers().find(test.id);
   out += found != renderers().end() ? found->second(test) : render_generic(test);

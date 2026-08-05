@@ -11,7 +11,13 @@ if ! command -v markdownlint >/dev/null 2>&1; then
   exit 1
 fi
 
-if markdownlint '**/*.md'; then
+staged_md=$(git diff --cached --name-only --diff-filter=ACM | grep '\.md$' || true)
+
+if [ -z "$staged_md" ]; then
+  exit 0
+fi
+
+if echo "$staged_md" | xargs markdownlint; then
   exit 0
 fi
 

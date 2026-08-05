@@ -1209,6 +1209,19 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
       out["error"] = validation_error;
       return json_to_string(out);
     }
+    // Resolve the trigger profile source file so report_writer can name the
+    // artifacts. run_config_from_json sets trigger_profile_id but not
+    // trigger_profile_file; the latter is required by naming_of() for any
+    // non-free-run result (plan 3.5.2).
+    if (!config.trigger_profile_id.empty()) {
+      ProfileRegistry profiles(options_.config_directory);
+      for (const auto &stored : profiles.stored_configs()) {
+        if (stored.profile_id == config.trigger_profile_id) {
+          config.trigger_profile_file = stored.file;
+          break;
+        }
+      }
+    }
     auto run = create_run(config);
     Json::Value out(Json::objectValue);
     out["id"] = run->id;
