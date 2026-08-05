@@ -11,8 +11,13 @@ if ! command -v shellcheck >/dev/null 2>&1; then
   exit 1
 fi
 
-if find .githooks scripts \( -name "*.sh" -o -path ".githooks/*" \) -type f ! -name "*.sample" -print0 \
-    | xargs -0 shellcheck --shell=sh; then
+staged_sh=$(git diff --cached --name-only --diff-filter=ACM | grep -E '(\.sh$|^\.githooks/)' || true)
+
+if [ -z "$staged_sh" ]; then
+  exit 0
+fi
+
+if echo "$staged_sh" | xargs shellcheck --shell=sh; then
   exit 0
 fi
 

@@ -18,7 +18,13 @@ if [ -z "$cpplint_bin" ]; then
   exit 1
 fi
 
-if "$cpplint_bin" --recursive source/backend/; then
+staged_cpp=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(cpp|hpp)$' || true)
+
+if [ -z "$staged_cpp" ]; then
+  exit 0
+fi
+
+if echo "$staged_cpp" | xargs "$cpplint_bin"; then
   exit 0
 fi
 

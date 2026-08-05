@@ -105,27 +105,32 @@ git config --local core.hooksPath .githooks
 
 After installation, the hooks run automatically during normal Git commands:
 
-- `pre-commit` runs before a commit is created and checks all backend C++
-  sources with the same `clang-format-18` dry-run used by CI
-- `commit-msg` runs while creating a commit and checks the Conventional Commit
-  type, lower-case type, non-empty subject, and 100-character header limit from
-  `commitlint.config.cjs`
-- `pre-push` runs before objects are sent to the remote and repeats the C++
-  formatting check so skipped commit hooks are caught before push
+- `pre-commit` checks **only staged files** with the same tools CI uses:
+  `clang-format-18`, `cpplint`, `markdownlint`, `eslint`, and `shellcheck`.
+  Unstaged changes do not block a commit.
+- `commit-msg` checks the Conventional Commit type, lower-case type, non-empty
+  subject, and 100-character header limit from `commitlint.config.cjs`
+- `pre-push` builds the project with warnings-as-errors and runs the test suite
+  (`cmake --build build-strict && ctest`). This is the last gate before code
+  reaches the remote.
 
-The pre-commit hook intentionally requires the `clang-format-18` command, the
-same binary name CI runs. Install it with:
+The pre-commit hook requires `clang-format-18`, `cpplint`, `markdownlint`,
+`shellcheck`, and (for frontend changes) `npm`/`npx`. Install with:
 
 ```bash
-sudo apt-get install -y clang-format-18
+sudo apt-get install -y clang-format-18 shellcheck
+pip install --user cpplint
+npm install -g markdownlint-cli
 ```
 
 You can run the shared checks manually before committing or pushing:
 
 ```bash
 scripts/dev/check-cpp-format.sh
-.githooks/pre-commit
-.githooks/pre-push
+scripts/dev/check-cpplint.sh
+scripts/dev/check-md-lint.sh
+scripts/dev/check-frontend-lint.sh
+scripts/dev/check-shellcheck.sh
 .githooks/commit-msg .git/COMMIT_EDITMSG
 ```
 

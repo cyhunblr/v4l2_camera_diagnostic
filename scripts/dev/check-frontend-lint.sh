@@ -18,7 +18,17 @@ if [ ! -d node_modules ]; then
   exit 1
 fi
 
-if npm run lint; then
+cd "$repo_root"
+staged_fe=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^source/frontend/src/.*\.(ts|tsx|js|jsx)$' || true)
+
+if [ -z "$staged_fe" ]; then
+  exit 0
+fi
+
+cd "$repo_root/source/frontend"
+fe_files=$(echo "$staged_fe" | sed 's|^source/frontend/||')
+
+if echo "$fe_files" | xargs npx eslint --max-warnings=0; then
   exit 0
 fi
 

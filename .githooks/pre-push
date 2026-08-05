@@ -2,8 +2,19 @@
 set -eu
 
 repo_root=$(git rev-parse --show-toplevel)
-"$repo_root/scripts/dev/check-cpp-format.sh"
-"$repo_root/scripts/dev/check-md-lint.sh"
-"$repo_root/scripts/dev/check-cpplint.sh"
-"$repo_root/scripts/dev/check-frontend-lint.sh"
-"$repo_root/scripts/dev/check-shellcheck.sh"
+cd "$repo_root"
+
+echo "pre-push: building (warnings-as-errors)..."
+cmake -S . -B build-strict -DV4L2DIAG_ENABLE_WARNINGS_AS_ERRORS=ON >/dev/null 2>&1
+cmake --build build-strict -j"$(nproc)" || {
+  echo "" >&2
+  echo "pre-push: build failed. Push aborted." >&2
+  exit 1
+}
+
+echo "pre-push: running tests..."
+(cd build-strict && ctest --output-on-failure) || {
+  echo "" >&2
+  echo "pre-push: tests failed. Push aborted." >&2
+  exit 1
+}

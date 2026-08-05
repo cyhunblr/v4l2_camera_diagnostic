@@ -41,13 +41,16 @@ Git does not enable versioned hooks automatically after clone. The hook-only
 installer sets the local `core.hooksPath` to `.githooks`. After hooks are
 enabled:
 
-- `pre-commit` runs the CI-matching C++ formatting check with `clang-format-18`
+- `pre-commit` checks **only staged files** with `clang-format-18`, `cpplint`,
+  `markdownlint`, `eslint`, and `shellcheck`. Unstaged changes do not block a
+  commit.
 - `commit-msg` checks the Conventional Commit type, non-empty subject,
   lower-case type, and 100-character header limit
-- `pre-push` runs the C++ formatting check again before pushing
+- `pre-push` builds with warnings-as-errors and runs the test suite
+  (`cmake --build build-strict && ctest`) before pushing
 
-If `clang-format-18` is missing, the pre-commit hook fails with install
-instructions instead of letting a formatting mismatch reach GitHub Actions.
+If a required tool is missing, the corresponding hook step fails with install
+instructions instead of letting a violation reach GitHub Actions.
 
 Before opening a pull request, run the build and tests locally, and run the
 same static analysis CI runs (`cpplint`, `clang-format-18 --dry-run --Werror`,
