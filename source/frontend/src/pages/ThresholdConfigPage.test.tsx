@@ -124,4 +124,38 @@ describe("ThresholdConfigPage layer grouping", () => {
     expect(headings()).toEqual([UNKNOWN_TEST_HEADING]);
     expect(screen.queryByText(/^Layer \d/)).not.toBeInTheDocument();
   });
+
+  it("displays migration warning banner when preset needs migration (Faz 4.5)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/api/thresholds/custom")) {
+          return new Response(
+            JSON.stringify({ id: "custom", name: "Custom", values: {}, warning: "Preset requires migration." }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response(
+          JSON.stringify({ configs: [{ id: "custom", name: "Custom", values: {}, params: {} }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      })
+    );
+
+    render(
+      <ThresholdConfigPage
+        selectedThresholdId="custom"
+        onSelectedChange={vi.fn()}
+        selectedTests={[]}
+        tests={registry}
+        onDirtyChange={vi.fn()}
+        onError={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Preset requires migration.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Migrate Config" })).toBeInTheDocument();
+    });
+  });
 });

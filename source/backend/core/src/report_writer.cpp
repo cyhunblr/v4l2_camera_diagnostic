@@ -1701,6 +1701,29 @@ table.overview .status-cell { font-weight: 700; font-size: 12px; text-transform:
 .t07-depth-label { fill: #344054; font-size: 10px; font-weight: 700; }
 .t07-legend-range { background: #386fa4; }
 .t07-legend-mean { background: #386fa4; border-radius: 50%; }
+/* review-plan 5.9.6/5.9.7: availability against a dashed review threshold, and the
+   remaining post-requeue wait. Colours from t09-requeue-delay-preview.html. */
+.t09-availability-line, .t09-wait-line { fill: none; stroke: #386fa4; stroke-width: 2; }
+.t09-availability-point, .t09-wait-point { fill: #386fa4; stroke: #fff; stroke-width: 1.5; }
+.t09-threshold { stroke: #b78420; stroke-width: 1; stroke-dasharray: 4 3; }
+.t09-threshold-label { fill: #b78420; font-size: 9px; font-weight: 700; }
+.t09-point-label { fill: #b54c4c; font-size: 10px; font-weight: 800; }
+.t09-legend-availability { background: #386fa4; }
+.t09-legend-threshold { background: transparent; border-top: 1px dashed #b78420; height: 0; }
+/* review-plan 5.10.6: the flag state carries its own tone. An informational flag that was
+   simply not observed is neutral -- never an error colour, because KEYFRAME=0 on a raw
+   stream is normal rather than a fault. */
+.flag-state { text-align: right; font-weight: 800; font-size: 11px; }
+.flag-state.good { color: var(--pass); }
+.flag-state.active { color: #2563eb; }
+.flag-state.neutral { color: #64717e; }
+/* 5.10.8: the boundary note against T21, quieter than the evidence above it. */
+.boundary-note { margin: 12px 16px 0; color: #64717e; font-size: 11px; font-style: italic; }
+/* review-plan 5.11.4/5.11.7: the full-frame bar is the primary result; the cache-sized
+   ones are visibly a different series so 3x the full-frame figure is not read as camera
+   throughput. */
+.t11-full-bar { background: #2e6fa3; }
+.t11-cache-bar { background: #71879a; }
 /* review-plan 5.8.5/5.8.6: saturation-load bars and queue slots, colours and geometry
    from the approved preview (t08-buffer-saturation-preview.html). */
 .load-row { display: grid; grid-template-columns: 74px 1fr 112px; gap: 10px; align-items: center; margin-top: 14px; font-size: 11px; }

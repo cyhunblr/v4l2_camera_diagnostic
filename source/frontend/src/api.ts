@@ -173,4 +173,10 @@ export function importThreshold(jsonText: string) {
   });
 }
 
+export function migrateThreshold(id: string) {
+  return fetch(`/api/thresholds/${encodeURIComponent(id)}/migrate`, {
+    method: "PUT"
+  });
+}
+
 

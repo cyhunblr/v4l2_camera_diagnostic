@@ -185,8 +185,8 @@ export type LogLine = {
   timestamp_utc: string;
   severity: "info" | "warn" | "error";
   log_type: "section_start" | "progress" | "data" | "summary";
-  camera: string;
-  test: string;
+  camera?: string;
+  test?: string;
   message: string;
 };
 

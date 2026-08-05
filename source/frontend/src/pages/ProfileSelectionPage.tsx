@@ -75,8 +75,8 @@ type Props = {
   profileSchemaVersion: number | null;
   triggerMode: TriggerMode;
   onTriggerModeChange: (mode: TriggerMode) => void;
-  assignmentMode: "single" | "per-camera";
-  onAssignmentModeChange: (mode: "single" | "per-camera") => void;
+  assignmentMode?: "single" | "per-camera";
+  onAssignmentModeChange?: (mode: "single" | "per-camera") => void;
   singleProfileId: string;
   onSingleProfileChange: (id: string) => void;
   /** Cameras selected for the run, each with the role the topology gave it. */
@@ -290,7 +290,7 @@ export function ProfileSelectionPage({
 
   function resetRouting() {
     setDraftBindings([]);
-    onSuccess("Routing cleared.");
+    onSuccess("Draft routing reset.");
   }
 
   // One run, one Trigger Profile: the routing is saved to that profile's
@@ -319,12 +319,12 @@ export function ProfileSelectionPage({
     if (!selectedProfile) return;
     const rate = Number(triggerRateDraft);
     const pulse = Number(pulseWidthDraft);
-    if (!Number.isFinite(rate) || rate <= 0) {
-      onError("Trigger rate must be a number greater than 0.");
+    if (!Number.isFinite(rate) || rate <= 0 || rate > 1000) {
+      onError("Trigger rate must be a number between 1 and 1000 Hz.");
       return;
     }
-    if (!Number.isFinite(pulse) || pulse <= 0) {
-      onError("Pulse width must be a number greater than 0.");
+    if (!Number.isFinite(pulse) || pulse <= 0 || pulse > 100) {
+      onError("Pulse width must be a number between 0.5 and 100 ms.");
       return;
     }
     const updated = { ...selectedProfile, defaults: { ...selectedProfile.defaults, trigger_rate_hz: rate, pulse_width_ms: pulse } };
@@ -465,7 +465,7 @@ export function ProfileSelectionPage({
     const json = await response.json();
     if (!response.ok) throw new Error(json.error ?? "Software trigger test failed.");
     onError(null);
-    onSuccess("Software trigger fired.");
+    onSuccess(`Trigger pulse fired on master camera (${master.path}).`);
   }
 
   async function handleExportProfile() {
@@ -549,9 +549,14 @@ export function ProfileSelectionPage({
       <header className="topbar">
         <div><p className="eyebrow">Configure</p><h2>Trigger Routing</h2></div>
         <div className="toolbar-row">
-          <div className="segmented-control" aria-label="Trigger mode">
+          <div className="segmented-control" role="group" aria-label="Trigger mode">
             {(["hardware", "software", "free-run"] as TriggerMode[]).map((mode) => (
-              <button key={mode} className={triggerMode === mode ? "selected" : ""} onClick={() => onTriggerModeChange(mode)}>
+              <button
+                key={mode}
+                className={triggerMode === mode ? "selected" : ""}
+                onClick={() => onTriggerModeChange(mode)}
+                aria-pressed={triggerMode === mode}
+              >
                 {mode === "free-run" ? "Free-run" : mode[0].toUpperCase() + mode.slice(1)}
               </button>
             ))}
@@ -560,55 +565,51 @@ export function ProfileSelectionPage({
       </header>
 
       <section className="routing-toolbar">
-        <div className="segmented-control" aria-label="Profile assignment mode">
-          <button className={assignmentMode === "single" ? "selected" : ""} onClick={() => onAssignmentModeChange("single")}>Single profile</button>
-          <button className={assignmentMode === "per-camera" ? "selected" : ""} onClick={() => onAssignmentModeChange("per-camera")}>Per camera</button>
-        </div>
         {triggerMode !== "free-run" && (
-          <select
-            className={singleProfileId ? "" : "placeholder-value"}
-            value={singleProfileId}
-            onChange={(event) => handleSelectedProfileChange(event.target.value)}
-          >
-            <option value="">Select profile</option>
-            {visibleProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-          </select>
-        )}
-        {triggerMode !== "free-run" && (
-          <div className="trigger-timing-compact" aria-label="Trigger timing">
-            <span className="timing-label">Timing</span>
-            <label>
-              <input type="number" min="1" max="1000" step="1" value={triggerRateDraft}
-                     disabled={!selectedProfile}
-                     onChange={(e) => setTriggerRateDraft(e.target.value)} />
-              <span>Hz</span>
-            </label>
-            <label>
-              <input type="number" min="1" max="100" step="0.5" value={pulseWidthDraft}
-                     disabled={!selectedProfile}
-                     onChange={(e) => setPulseWidthDraft(e.target.value)} />
-              <span>ms</span>
-            </label>
-            <button className="icon-text-button timing-save"
-                    disabled={!selectedProfile || !timingDirty}
-                    onClick={() => applyTriggerTiming().catch((error: Error) => onError(error.message))}>
-              <Save size={14} /> Apply
+          <>
+            <select
+              className={singleProfileId ? "" : "placeholder-value"}
+              value={singleProfileId}
+              onChange={(event) => handleSelectedProfileChange(event.target.value)}
+            >
+              <option value="">Select profile</option>
+              {visibleProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+            </select>
+            <div className="trigger-timing-compact" aria-label="Trigger timing">
+              <span className="timing-label">Timing</span>
+              <label>
+                <input type="number" min="1" max="1000" step="1" value={triggerRateDraft}
+                       disabled={!selectedProfile}
+                       onChange={(e) => setTriggerRateDraft(e.target.value)} />
+                <span>Hz</span>
+              </label>
+              <label>
+                <input type="number" min="1" max="100" step="0.5" value={pulseWidthDraft}
+                       disabled={!selectedProfile}
+                       onChange={(e) => setPulseWidthDraft(e.target.value)} />
+                <span>ms</span>
+              </label>
+              <button className="icon-text-button timing-save"
+                      disabled={!selectedProfile || !timingDirty}
+                      onClick={() => applyTriggerTiming().catch((error: Error) => onError(error.message))}>
+                <Save size={14} /> Apply
+              </button>
+            </div>
+            <button className="icon-button" title="New profile" onClick={() => setShowCreate(true)}>
+              <Plus size={16} />
             </button>
-          </div>
+            <button className="icon-button" title="Import profile" onClick={() => importFileRef.current?.click()}>
+              <Download size={16} />
+            </button>
+            <button className="icon-button" title="Export selected profile" onClick={() => handleExportProfile().catch((e: Error) => onError(e.message))} disabled={!singleProfileId}>
+              <Upload size={16} />
+            </button>
+            <input ref={importFileRef} type="file" accept=".json" style={{ display: "none" }} onChange={(e) => handleImportProfile(e).catch((err: Error) => onError(err.message))} />
+            <button className="icon-button danger" title="Delete selected profile" onClick={() => setPendingDelete(true)} disabled={!singleProfileId}>
+              <Trash2 size={16} />
+            </button>
+          </>
         )}
-        <button className="icon-button" title="New profile" onClick={() => setShowCreate(true)} disabled={triggerMode === "free-run"}>
-          <Plus size={16} />
-        </button>
-        <button className="icon-button" title="Import profile" onClick={() => importFileRef.current?.click()}>
-          <Download size={16} />
-        </button>
-        <button className="icon-button" title="Export selected profile" onClick={() => handleExportProfile().catch((e: Error) => onError(e.message))} disabled={!singleProfileId}>
-          <Upload size={16} />
-        </button>
-        <input ref={importFileRef} type="file" accept=".json" style={{ display: "none" }} onChange={(e) => handleImportProfile(e).catch((err: Error) => onError(err.message))} />
-        <button className="icon-button danger" title="Delete selected profile" onClick={() => setPendingDelete(true)} disabled={!singleProfileId}>
-          <Trash2 size={16} />
-        </button>
       </section>
 
       {pendingDelete && (

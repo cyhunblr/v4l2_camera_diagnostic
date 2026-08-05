@@ -158,4 +158,10 @@ describe("TestSelectionPage", () => {
     const chips = [...(card?.querySelectorAll(".test-card-badges .chip") ?? [])];
     expect(chips.map((c) => c.textContent)).toEqual(["Stable", "Benchmark"]);
   });
+
+  it("keeps supported test cards enabled even when activeTags is empty (Faz 4.4)", () => {
+    renderPage();
+    const card = screen.getByRole("button", { name: /t01-device-compliance/ });
+    expect(card).not.toHaveAttribute("aria-disabled", "true");
+  });
 });

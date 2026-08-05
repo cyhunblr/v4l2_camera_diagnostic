@@ -1,5 +1,5 @@
 import { RefObject } from "react";
-import { Trash2 } from "lucide-react";
+import { Download, Trash2 } from "lucide-react";
 import { LogLine } from "../types";
 
 function formatLogTimestamp(utcString: string | undefined): string {
@@ -40,7 +40,24 @@ export function LiveOutputPage({
   secSinceLastLog,
   outputRef
 }: Props) {
-  const displayedLogs = visibleLogs;
+  // Buffer windowing: cap displayed logs to last 1000 lines to prevent DOM freezing
+  const displayedLogs = visibleLogs.slice(-1000);
+
+  function handleExportLogs() {
+    if (logs.length === 0) return;
+    const text = logs
+      .map((line) => `${line.timestamp_utc || ""} [${line.severity.toUpperCase()}] ${line.message}`)
+      .join("\n");
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "v4l2-diagnostic-logs.txt";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <div className="output-view">
@@ -81,6 +98,16 @@ export function LiveOutputPage({
             aria-pressed={autoScroll}
           >
             Auto-scroll
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={handleExportLogs}
+            title="Export logs as text"
+            aria-label="Export logs as text"
+            disabled={logs.length === 0}
+          >
+            <Download size={16} />
           </button>
           <button className="icon-button" onClick={onClearLogs} title="Clear logs" aria-label="Clear logs">
             <Trash2 size={16} />

@@ -43,7 +43,7 @@ describe("ResultsTable", () => {
   // test status onto PASS / WARN / FAIL / SKIP (distribution counts keep
   // Passed / Warned / Failed / Skipped), and this expectation changes with it.
   // See plan item 4.0 in docs/web-ui-audit-fix-plan.md.
-  it("maps every backend status value to a label (pre-4.0 wording)", () => {
+  it("maps every backend status value to a canonical status label (PASS / WARN / FAIL / SKIP)", () => {
     render(
       <ResultsTable
         summaries={[
@@ -54,7 +54,7 @@ describe("ResultsTable", () => {
         ]}
       />
     );
-    for (const label of ["Pass", "Fail", "Warn", "Skipped"]) {
+    for (const label of ["PASS", "FAIL", "WARN", "SKIP"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
   });

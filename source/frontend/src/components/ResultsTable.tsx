@@ -7,21 +7,23 @@ type Props = {
 
 function displayStatus(status: string): string {
   switch (status.toLowerCase()) {
-    case "pass": return "Pass";
-    case "fail": return "Fail";
-    case "warn": return "Warn";
-    case "skipped": return "Skipped";
-    case "done": return "Info";
-    default: return status || "Info";
+    case "pass": return "PASS";
+    case "fail": return "FAIL";
+    case "warn": return "WARN";
+    case "skipped":
+    case "skip": return "SKIP";
+    case "done": return "PASS";
+    default: return (status || "INFO").toUpperCase();
   }
 }
 
 function statusColor(status: string): string {
   switch (status.toLowerCase()) {
-    case "pass": return "var(--success)";
+    case "pass":
     case "done": return "var(--success)";
     case "fail": return "var(--error)";
     case "warn": return "var(--warn)";
+    case "skip":
     case "skipped": return "var(--warn)";
     default: return "var(--text-secondary)";
   }

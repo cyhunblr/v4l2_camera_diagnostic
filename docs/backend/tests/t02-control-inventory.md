@@ -36,13 +36,14 @@ No configurable parameters.
 | --- | ---- | ----------- |
 | `control_count` | count | Total number of non-disabled controls enumerated |
 | `writable_count` | count | Number of controls that are not read-only |
+| `out_of_range_count` | count | Number of controls with current values outside [min, max] range |
 
 ## Report Details
 
 Each control produces one detail line in this format:
 
 ```text
-<name> [0x<hex_id>] min=<min> max=<max> step=<step> default=<default> current=<current> [RO]
+<name> [0x<hex_id>] min=<min> max=<max> step=<step> default=<default> current=<current> [RO] [OUT_OF_RANGE]
 ```
 
 Examples:
@@ -50,13 +51,15 @@ Examples:
 ```text
 Brightness [0x00980900] min=0 max=255 step=1 default=128 current=128
 Exposure (Absolute) [0x009a0902] min=1 max=10000 step=1 default=166 current=166 [RO]
+Gamma [0x00980910] min=0 max=100 step=1 default=50 current=150 [OUT_OF_RANGE]
 ```
 
 ## Verdict Logic
 
 | Status | Condition |
 | ------ | --------- |
-| **Pass** | Device was opened and controls were enumerated successfully (always passes if device opens) |
+| **Pass** | Device was opened and all controls reported valid values within declared range |
+| **Warn** | Device was opened, but one or more controls reported current values outside declared range (`out_of_range_count > 0`) |
 | **Fail** | Cannot open device (permission error or invalid path) |
 
 ## Interpretation Guide

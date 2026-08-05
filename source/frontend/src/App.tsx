@@ -51,7 +51,6 @@ export default function App() {
   const [masterPath, setMasterPath] = useState<string | null>(null);
   const [slavePaths, setSlavePaths] = useState<string[]>([]);
   const [triggerMode, setTriggerMode] = useState<TriggerMode>("free-run");
-  const [assignmentMode, setAssignmentMode] = useState<"single" | "per-camera">("single");
   const [singleProfileId, setSingleProfileId] = useState("");
   const [cameraAssignments, setCameraAssignments] = useState<CameraAssignment[]>([]);
   const [backends, setBackends] = useState(["mmap"]);
@@ -95,7 +94,12 @@ export default function App() {
     setToast({ message, tone: "success" });
   }
 
+  const [devicesLoading, setDevicesLoading] = useState(true);
+  const [devicesError, setDevicesError] = useState<string | null>(null);
+
   const loadBasics = useCallback(async () => {
+    setDevicesLoading(true);
+    setDevicesError(null);
     try {
       const [deviceRes, profileRes, testRes] = await Promise.all([
         api.getDevices(),
@@ -103,7 +107,9 @@ export default function App() {
         api.getTests()
       ]);
       if (!deviceRes.ok || !profileRes.ok || !testRes.ok) {
-        showError("Failed to load device metadata from server.");
+        const msg = "Failed to load device metadata from server.";
+        showError(msg);
+        setDevicesError(msg);
         return;
       }
       const deviceJson = await deviceRes.json();
@@ -116,8 +122,13 @@ export default function App() {
       );
       setTests(testJson.tests ?? []);
       showError(null);
+      setDevicesError(null);
     } catch {
-      showError("Cannot connect to diagnostic server. Is it running?");
+      const msg = "Cannot connect to diagnostic server. Is it running?";
+      showError(msg);
+      setDevicesError(msg);
+    } finally {
+      setDevicesLoading(false);
     }
   }, []);
 
@@ -126,10 +137,43 @@ export default function App() {
   }, [loadBasics]);
 
   useEffect(() => {
+    const validCapturePaths = new Set(
+      devices.filter((d) => d.supports_capture).map((d) => d.path)
+    );
+    if (masterPath && !validCapturePaths.has(masterPath)) {
+      setMasterPath(null);
+    }
+    const filteredSlaves = slavePaths.filter((path) => validCapturePaths.has(path));
+    if (filteredSlaves.length !== slavePaths.length) {
+      setSlavePaths(filteredSlaves);
+    }
+  }, [devices, masterPath, slavePaths]);
+
+  // Guard: clear profile selection if the profile was deleted.
+  useEffect(() => {
     if (singleProfileId && !profiles.some((profile) => profile.id === singleProfileId)) {
       setSingleProfileId("");
     }
   }, [profiles, singleProfileId]);
+
+  // Pre-fill trigger mode and backends from profile.defaults when the user
+  // explicitly picks a new profile. Runs only when singleProfileId changes so
+  // a background refresh of the profiles list does not clobber user edits.
+  const prevSingleProfileIdRef = useRef("");
+  useEffect(() => {
+    if (singleProfileId && singleProfileId !== prevSingleProfileIdRef.current) {
+      prevSingleProfileIdRef.current = singleProfileId;
+      const profile = profiles.find((p) => p.id === singleProfileId);
+      if (profile?.defaults) {
+        if (profile.defaults.trigger_mode) setTriggerMode(profile.defaults.trigger_mode);
+        if (profile.defaults.memory_backends && profile.defaults.memory_backends.length > 0) {
+          setBackends(profile.defaults.memory_backends);
+        }
+      }
+    } else if (!singleProfileId) {
+      prevSingleProfileIdRef.current = "";
+    }
+  }, [singleProfileId, profiles]);
 
   const involvedPaths = useMemo(
     () => [masterPath, ...slavePaths].filter((path): path is string => Boolean(path)),
@@ -215,7 +259,7 @@ export default function App() {
     return needed.every((role: string) => profile.role_bindings.some((binding) => binding.role === role));
   }, [involvedPaths, masterPath, profiles, singleProfileId, triggerMode]);
 
-  const testsReady = selectedTests.length > 0 || activeTags.length > 0;
+  const testsReady = selectedTests.length > 0;
   const configReady = Boolean(selectedThresholdId);
   const canStartDiagnostic = setupComplete && Boolean(masterPath) && assignmentsReady && testsReady && configReady;
 
@@ -405,6 +449,8 @@ export default function App() {
         {activePage === "cameras" && (
           <CameraSelectionPage
             devices={devices}
+            loading={devicesLoading}
+            error={devicesError}
             cameraMode={cameraMode}
             onCameraModeChange={setCameraMode}
             masterPath={masterPath}
@@ -422,8 +468,6 @@ export default function App() {
             profileSchemaVersion={profileSchemaVersion}
             triggerMode={triggerMode}
             onTriggerModeChange={setTriggerMode}
-            assignmentMode={assignmentMode}
-            onAssignmentModeChange={setAssignmentMode}
             singleProfileId={singleProfileId}
             onSingleProfileChange={setSingleProfileId}
             assignments={cameraAssignments}

@@ -117,7 +117,7 @@ export function DashboardPage({ onViewRun, onStartNewDiagnostic, isRunning }: Pr
                 <tr>
                   <th>Started</th>
                   <th>Cameras</th>
-                  <th>Profile</th>
+                  <th>Trigger Profile</th>
                   <th>Duration</th>
                   <th>Pass/Fail/Warn/Skip</th>
                   <th className="col-status">Status</th>
@@ -129,7 +129,15 @@ export function DashboardPage({ onViewRun, onStartNewDiagnostic, isRunning }: Pr
                   <tr
                     key={run.id}
                     className={`status-${run.status.toLowerCase()} clickable-row`}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => onViewRun(run.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onViewRun(run.id);
+                      }
+                    }}
                   >
                     <td>{formatUtc(run.started_at_utc)}</td>
                     <td>{run.camera_paths.join(", ") || "—"}</td>

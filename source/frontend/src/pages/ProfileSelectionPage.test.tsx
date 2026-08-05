@@ -48,8 +48,6 @@ function renderPage(triggerMode: TriggerMode = "hardware", profileSchemaVersion:
       profileSchemaVersion={profileSchemaVersion}
       triggerMode={triggerMode}
       onTriggerModeChange={vi.fn()}
-      assignmentMode="single"
-      onAssignmentModeChange={vi.fn()}
       singleProfileId=""
       onSingleProfileChange={vi.fn()}
       assignments={[]}
@@ -370,5 +368,14 @@ describe("ProfileSelectionPage create flow", () => {
     const profile = postedProfile(calls);
     expect(profile.defaults).not.toHaveProperty("report_formats");
     expect(JSON.stringify(profile)).not.toContain("report_formats");
+  });
+
+  it("hides profile action buttons (New, Import, Export, Delete) in free-run mode", () => {
+    renderPage("free-run");
+
+    expect(screen.queryByTitle("New profile")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Import profile")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Export selected profile")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Delete selected profile")).not.toBeInTheDocument();
   });
 });

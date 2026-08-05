@@ -58,9 +58,9 @@ DQBUF unexpectedly succeeded, sequence=0
 
 | Status | Condition |
 | -------- | ----------- |
-| **Pass** | poll returns 0 AND DQBUF fails with EAGAIN or EINVAL |
-| **Warn** | DQBUF correctly fails but poll returned non-zero (driver signals readiness it shouldn't) |
-| **Fail** | DQBUF succeeded without STREAMON — V4L2 state machine violation |
+| **Pass** | poll returns 0 AND DQBUF fails with expected EAGAIN or EINVAL |
+| **Warn** | DQBUF correctly fails with EAGAIN/EINVAL but poll returned non-zero (driver signals readiness it shouldn't) |
+| **Fail** | DQBUF succeeded without STREAMON (V4L2 state machine violation) OR DQBUF failed with unexpected errno |
 
 ## Interpretation Guide
 

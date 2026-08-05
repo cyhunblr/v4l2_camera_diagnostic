@@ -330,6 +330,22 @@ select,
   gap: 10px;
 }
 
+.inline-confirm.warning-confirm {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  border: 1px solid var(--warn);
+  justify-content: space-between;
+}
+
+.warning-confirm-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+}
+
 .segmented-control {
   display: inline-grid;
   grid-auto-flow: column;
@@ -1337,6 +1353,8 @@ summary span {
 .results-table tr.status-pass { background: color-mix(in srgb, var(--success) 3%, transparent); }
 .results-table tr.status-fail { background: color-mix(in srgb, var(--error) 5%, transparent); }
 .results-table tr.status-warn { background: color-mix(in srgb, var(--warn) 4%, transparent); }
+.results-table tr.status-skip,
+.results-table tr.status-skipped { background: color-mix(in srgb, var(--text-secondary) 3%, transparent); }
 
 .results-table tr:hover {
   background: var(--border-subtle);

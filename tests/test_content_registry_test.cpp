@@ -251,9 +251,11 @@ int main() {
     // the approved reliability bars and trend chart directly (see section 15).
     // t07-multi-buffer is deliberately absent here too: its own content renderer draws
     // its two approved charts directly (see section 16).
+    // t09-buffer-recycling is deliberately absent here too: its own content renderer draws
+    // its two approved charts directly (see section 18).
     const char *kChartsApproved[] = {
-        "t09-buffer-recycling",   "t13-poll-timeout-cliff", "t16-gpio-pulse-width", "t23-sustained-capture",
-        "t24-latency-under-load", "t25-multi-camera",       "t26-cold-start",
+        "t13-poll-timeout-cliff", "t16-gpio-pulse-width", "t23-sustained-capture",
+        "t24-latency-under-load", "t25-multi-camera",     "t26-cold-start",
     };
 
     for (const char *id : kChartsApproved) {
@@ -737,6 +739,242 @@ int main() {
          {"Allocated buffers", "Settle time", "Backend memory", "Variant A", "Variant B", "Error threshold"}) {
       ok &= check(contains(html, key), std::string("T08 is missing the ") + key + " configuration row");
     }
+  }
+
+  // --- 18. T09, per review-plan 5.9 ---------------------------------------
+  {
+    v4l2diag::TestResult t09 = test_of("t09-buffer-recycling", v4l2diag::TestStatus::Pass);
+    t09.name = "Buffer Requeue Delay Tolerance";
+    // Twelve tested delays; the 0ms one sits below the 90% availability threshold, which is
+    // the isolated dip the charts have to keep visible.
+    t09.details.push_back("delay: 0ms|80|96|as expected");
+    t09.details.push_back("delay: 1ms|100|98|as expected");
+    t09.details.push_back("delay: 5ms|100|94|as expected");
+    t09.details.push_back("delay: 10ms|100|87|as expected");
+    t09.details.push_back("delay: 20ms|100|82|as expected");
+    t09.details.push_back("delay: 30ms|100|66|as expected");
+    t09.details.push_back("delay: 40ms|100|60|as expected");
+    t09.details.push_back("delay: 48ms|100|51|as expected");
+    t09.details.push_back("delay: 50ms|100|47|as expected");
+    t09.details.push_back("delay: 60ms|100|39|as expected");
+    t09.details.push_back("delay: 80ms|100|16|as expected");
+    t09.details.push_back("delay: 100ms|100|0|as expected");
+    t09.details.push_back("allocated_buffers: 4");
+    t09.details.push_back("repetitions_per_delay: 20");
+    t09.details.push_back("warmup_frames: 3 frames");
+    t09.details.push_back("capture_timeout: 100ms");
+    t09.details.push_back("inter_repetition_interval: 50ms");
+    t09.details.push_back("availability_threshold: 90%");
+    t09.details.push_back("safe_delay_threshold: 48ms");
+    t09.details.push_back("backend_memory: mmap");
+    const std::string html = v4l2diag::render_test_content(t09);
+
+    // 5.9.6: availability per tested delay, with the review threshold drawn AND named --
+    // the exact phrase, because any "90%" substring would also match a table cell.
+    ok &= check(contains(html, "Post-requeue Availability"), "T09 has no availability chart with the approved title");
+    ok &= check(contains(html, "90% review threshold"), "T09's availability chart does not name the review threshold");
+    ok &= check(count_of(html, "t09-availability-point") == 12,
+                "T09's availability chart does not show all twelve tested delays");
+    // 5.9.6 rule 4: the sub-threshold point carries its value, so the dip is readable
+    // without measuring against the axis.
+    ok &= check(contains(html, "t09-point-label"), "T09 does not label the point that falls below the threshold");
+
+    // 5.9.7: the second chart is "Wait After Requeue" / "Mean post-requeue wait", never
+    // "Mean latency" -- 0ms wait at a 100ms delay is not zero camera latency.
+    ok &= check(contains(html, "Wait After Requeue"), "T09 has no chart titled \"Wait After Requeue\"");
+    ok &= check(contains(html, "Mean post-requeue wait"),
+                "T09's second chart is not labelled \"Mean post-requeue wait\"");
+    ok &= check(!contains(html, "Mean latency"), "T09 still labels a chart \"Mean latency\"");
+    ok &= check(count_of(html, "t09-wait-point") == 12,
+                "T09's wait-after-requeue chart does not show all twelve tested delays");
+
+    // 5.9.8: the four approved columns, one row PER DELAY -- not one aggregate row, which
+    // is what the pre-5.9 renderer produced and which hid every individual dip.
+    for (const char *column : {"Delay", "Available", "Mean wait", "Outcome"}) {
+      ok &= check(contains(html, std::string("<th>") + column + "</th>"),
+                  std::string("T09 is missing the ") + column + " column");
+    }
+    ok &= check(contains(html, ">0ms<") && contains(html, ">100ms<"),
+                "T09's Delay Results table is missing the 0ms or 100ms row");
+    ok &= check(count_of(html, "<td>as expected</td>") == 12,
+                "T09's Delay Results table does not carry all twelve delay rows");
+    ok &= check(!contains(html, ">Requeue<"), "T09 still aggregates every delay into one \"Requeue\" row");
+    ok &= check(!contains(html, "class=\"detail-list\""), "T09 still emits the raw repeating detail block");
+
+    // 5.9.9: the eight configuration parameters.
+    for (const char *key :
+         {"Allocated buffers", "Repetitions per delay", "Warmup frames", "Capture timeout", "Inter-repetition interval",
+          "Availability threshold", "Safe-delay threshold", "Backend memory"}) {
+      ok &= check(contains(html, key), std::string("T09 is missing the ") + key + " configuration row");
+    }
+
+    // 5.9.12: sequence-gap evidence is TECHNICAL DETAIL, shown only when the run recorded
+    // one. A section that always appears would imply a gap was looked for and found.
+    ok &= check(!contains(html, "Technical details"),
+                "T09 shows a technical-details section when no sequence gap was recorded");
+    v4l2diag::TestResult t09_gap = t09;
+    t09_gap.details.push_back("sequence_gap: Second frame at 0ms delay|sequence 41 -> 43, one frame missing");
+    const std::string gap_html = v4l2diag::render_test_content(t09_gap);
+    ok &= check(contains(gap_html, "Technical details"), "T09 does not show sequence-gap evidence as technical detail");
+    ok &= check(contains(gap_html, "sequence 41 -&gt; 43") || contains(gap_html, "sequence 41"),
+                "T09's technical detail does not carry the sequence-gap evidence");
+    // It sits BELOW the results table: the reader meets the verdict before the forensics.
+    ok &= check(gap_html.find("Delay Results") < gap_html.find("Technical details"),
+                "T09 puts its technical detail above the Delay Results table");
+  }
+
+  // --- 19. T10, per review-plan 5.10 --------------------------------------
+  {
+    v4l2diag::TestResult t10 = test_of("t10-buffer-flags", v4l2diag::TestStatus::Pass);
+    t10.name = "V4L2 Buffer Flag Analysis";
+    t10.metrics.push_back(mv("captured", 50, ""));
+    t10.metrics.push_back(mv("requested", 50, ""));
+    // 5.10.6: each row is "flag: group|name|count|meaning|state".
+    t10.details.push_back("flag: Frame health|ERROR|0|No frame reported an error flag.|CLEAR");
+    t10.details.push_back("flag: Frame type|KEYFRAME|0|The driver did not mark raw frames as keyframes.|NOT SET");
+    t10.details.push_back(
+        "flag: Clock type|TIMESTAMP_COPY|50|Driver declares copied timestamps for every frame.|ACTIVE");
+    t10.details.push_back("flag: Clock type|TIMESTAMP_MONOTONIC|0|This clock declaration was not observed.|NOT SET");
+    t10.details.push_back("flag: Timestamp point|TSTAMP_SRC_EOF|50|Timestamps represent end of frame.|ACTIVE");
+    t10.details.push_back(
+        "flag: Timestamp point|TSTAMP_SRC_SOE|0|Start-of-exposure timestamps were not reported.|NOT SET");
+    t10.details.push_back("declared_clock_type: TIMESTAMP_COPY");
+    t10.details.push_back("timestamp_point: End of frame");
+    t10.details.push_back("source_consistency: Consistent");
+    t10.details.push_back("combined_mask: MAPPED, TIMESTAMP_COPY|0x00004001");
+    t10.details.push_back("requested_samples: 50");
+    t10.details.push_back("warmup: 5 frames");
+    t10.details.push_back("capture_timeout: 100ms");
+    t10.details.push_back("sample_interval: 100ms");
+    t10.details.push_back("error_threshold: 0");
+    t10.details.push_back("backend_memory: mmap");
+    const std::string html = v4l2diag::render_test_content(t10);
+
+    // 5.10.5: the four-field metadata summary, above the flag table.
+    for (const char *field : {"Capture completeness", "Declared clock type", "Timestamp point", "Source consistency"}) {
+      ok &= check(contains(html, field), std::string("T10 is missing the \"") + field + "\" summary field");
+    }
+    // 5.10.2: capture completeness reads "captured/requested", not "Frames captured: 50".
+    ok &= check(contains(html, "50/50"), "T10 does not show capture completeness as captured/requested");
+    ok &= check(!contains(html, "Frames captured:"), "T10 still writes capture completeness as prose");
+
+    // 5.10.6: the five approved columns, and the four semantic groups.
+    for (const char *column : {"Group", "Flag", "Observed", "Meaning", "State"}) {
+      ok &= check(contains(html, std::string("<th>") + column + "</th>"),
+                  std::string("T10 is missing the ") + column + " column");
+    }
+    for (const char *group : {"Frame health", "Frame type", "Clock type", "Timestamp point"}) {
+      ok &= check(contains(html, group), std::string("T10 is missing the \"") + group + "\" flag group");
+    }
+    // 5.10.6: observed counts are "count/captured", so 0 reads as "none of 50", not "zero".
+    ok &=
+        check(contains(html, "0/50") && contains(html, "50/50"), "T10 does not show flag counts as observed/captured");
+    // 5.10.6: an unobserved INFORMATIONAL flag is NOT SET, never an error colour --
+    // KEYFRAME=0 on a raw stream is normal, not a fault.
+    ok &= check(contains(html, "NOT SET"), "T10 does not use the NOT SET state for unobserved informational flags");
+    ok &= check(contains(html, "CLEAR"), "T10 does not use the CLEAR state for an unobserved error flag");
+    ok &= check(contains(html, "ACTIVE"), "T10 does not use the ACTIVE state for an observed metadata flag");
+    ok &= check(!contains(html, "class=\"detail-list\""), "T10 still emits the raw key-value list");
+
+    // 5.10.7: the combined mask decoded by name, with the raw hex kept on the same row.
+    ok &= check(contains(html, "Combined Flag Evidence"), "T10 has no Combined Flag Evidence section");
+    ok &= check(contains(html, "MAPPED, TIMESTAMP_COPY"), "T10 does not decode the combined mask by name");
+    ok &= check(contains(html, "0x00004001"), "T10 does not preserve the raw combined mask");
+
+    // 5.10.7: bits outside the known masks are surfaced, not silently dropped.
+    v4l2diag::TestResult t10_unknown = t10;
+    t10_unknown.details.push_back("unknown_bits: 0x00010000");
+    const std::string unknown_html = v4l2diag::render_test_content(t10_unknown);
+    ok &= check(contains(unknown_html, "Unknown bits"), "T10 does not report unknown flag bits");
+    ok &= check(contains(unknown_html, "0x00010000"), "T10 does not carry the raw value of unknown bits");
+    ok &= check(!contains(html, "Unknown bits"), "T10 reports unknown bits when the mask was fully decoded");
+
+    // 5.10.8: the T21 boundary note -- declared clock metadata is not proof that timestamp
+    // VALUES never went backwards.
+    ok &= check(contains(html, "Timestamp value") && contains(html, "T21"), "T10 is missing the T21 boundary note");
+
+    // 5.10.9: the six configuration parameters.
+    for (const char *key :
+         {"Requested samples", "Warmup", "Capture timeout", "Sample interval", "Error threshold", "Backend memory"}) {
+      ok &= check(contains(html, key), std::string("T10 is missing the ") + key + " configuration row");
+    }
+
+    // 5.10.10: a passing card carries no RESULT, and T10 draws no chart.
+    ok &= check(!contains(html, "section-label\">Result<"), "a passing T10 card shows a RESULT section");
+    ok &= check(!v4l2diag::test_charts_approved("t10-buffer-flags"), "T10 is allowed to render a chart");
+  }
+
+  // --- 20. T11, per review-plan 5.11 --------------------------------------
+  {
+    v4l2diag::TestResult t11 = test_of("t11-memory-throughput", v4l2diag::TestStatus::Pass);
+    t11.name = "Memory Access Throughput";
+    t11.metrics.push_back(mv("sizeimage_bytes", 4915200, "B"));
+    t11.metrics.push_back(mv("mapped_capacity_bytes", 5439744, "B"));
+    t11.metrics.push_back(mv("full_frame_mib_s", 10250.4, "MiB/s"));
+    // 5.11.4: "copy: label|bytes|MiB/s|class" -- full frame vs cache-sized reads.
+    t11.details.push_back("copy: Full frame|4915200|10250.4|full");
+    t11.details.push_back("copy: 4 KiB sample|4096|28322.6|cache");
+    t11.details.push_back("copy: 64 KiB sample|65536|31593.1|cache");
+    t11.details.push_back("repetitions: 200");
+    t11.details.push_back("warmup_copies: 20");
+    t11.details.push_back("timer: CLOCK_MONOTONIC");
+    t11.details.push_back("backend_memory: mmap");
+    const std::string html = v4l2diag::render_test_content(t11);
+
+    // 5.11.3: three DISTINCT buffer figures. A single "Frame size" cannot tell a reader
+    // whether the extra bytes came from the sensor or from DMA alignment.
+    ok &= check(contains(html, "Active image payload"), "T11 does not name the active image payload");
+    ok &= check(contains(html, "Mapped buffer capacity"), "T11 does not name the mapped buffer capacity");
+    ok &= check(contains(html, "Allocation overhead"), "T11 does not name the allocation overhead");
+    ok &= check(!contains(html, ">Frame size<"), "T11 still shows a single ambiguous \"Frame size\"");
+    // The overhead is the DIFFERENCE, computed rather than restated: 5439744 - 4915200.
+    ok &= check(contains(html, "524,544") || contains(html, "524544"), "T11 does not compute the allocation overhead");
+    // Both byte counts and readable MiB, per the 5.11.3 reference values.
+    ok &= check(contains(html, "4,915,200") || contains(html, "4915200"), "T11 does not show the payload in bytes");
+    ok &= check(contains(html, "4.69 MiB"), "T11 does not show the payload in MiB");
+
+    // 5.11.5: the base is 1,048,576, so the unit is MiB/s -- never MB/s.
+    ok &= check(contains(html, "MiB/s"), "T11 does not use MiB/s");
+    ok &= check(!contains(html, "MB/s"), "T11 still labels throughput MB/s despite a 1,048,576 base");
+
+    // 5.11.5: the derived end-user figures, and NOT named as a capture or sensor frame rate.
+    ok &= check(contains(html, "GiB/s"), "T11 does not derive a readable GiB/s figure");
+    ok &= check(contains(html, "ms/buffer") || contains(html, "ms / buffer"),
+                "T11 does not derive the estimated copy time per buffer");
+    ok &= check(contains(html, "buffers/s"), "T11 does not derive theoretical copies per second");
+    // A thousands separator must not land inside a decimal: "2,186,.75" is what a
+    // digit-grouping helper written for whole byte counts produces when handed a fraction.
+    ok &= check(!contains(html, ",."), "T11 puts a thousands separator immediately before a decimal point");
+    ok &= check(contains(html, "2,187 buffers/s") || contains(html, "2,186 buffers/s"),
+                "T11's theoretical copy capacity is not a readable whole number");
+    ok &= check(!contains(html, "frames/s") && !contains(html, "FPS") && !contains(html, "frame rate"),
+                "T11 names a derived copy figure as a capture or sensor frame rate");
+
+    // 5.11.4: the cache-sized reads are grouped as SECONDARY evidence, so 31,593 MiB/s is
+    // not read as camera throughput.
+    ok &= check(contains(html, "Cache-sized reads"), "T11 does not group the small copies as cache-sized reads");
+    ok &= check(contains(html, "Full frame"), "T11 does not name the full-frame result");
+
+    // 5.11.7: the throughput-by-copy-size chart, one bar per measurement.
+    ok &= check(contains(html, "Throughput by Copy Size") || contains(html, "Throughput by copy size"),
+                "T11 has no throughput-by-copy-size chart");
+    ok &= check(count_of(html, "t11-copy-bar") == 3, "T11's chart does not show all three copy sizes");
+
+    // 5.11.7: the five approved result columns.
+    for (const char *column : {"Mapping", "Copy region", "Bytes/copy", "Throughput", "Relative to full"}) {
+      ok &= check(contains(html, std::string("<th>") + column + "</th>"),
+                  std::string("T11 is missing the ") + column + " column");
+    }
+    ok &= check(contains(html, "1.00x"), "T11 does not show the full-frame result as the 1.00x reference");
+    ok &= check(!contains(html, "class=\"detail-list\""), "T11 still emits the raw detail block");
+
+    // 5.11.6: the measurement evidence a reader needs to trust the number at all.
+    ok &= check(contains(html, "CLOCK_MONOTONIC"), "T11 does not state which timer it measured with");
+    ok &= check(contains(html, "Warm-up") || contains(html, "Warmup"), "T11 does not state its warm-up");
+
+    // 5.11.2: PASS confirms a valid benchmark ran; no platform threshold was applied, so
+    // there is no RESULT block on a passing card.
+    ok &= check(!contains(html, "section-label\">Result<"), "a passing T11 card shows a RESULT section");
   }
 
   if (ok) {

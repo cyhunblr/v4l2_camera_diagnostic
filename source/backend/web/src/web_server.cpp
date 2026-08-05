@@ -541,7 +541,12 @@ struct WebServer::RunState {
   mutable std::mutex mutex;
 };
 
-WebServer::WebServer(WebServerOptions options) : options_(std::move(options)) {}
+WebServer::WebServer(WebServerOptions options) : options_(std::move(options)) {
+  static std::once_flag srand_once;
+  std::call_once(srand_once, []() {
+    std::srand(static_cast<unsigned int>(std::time(nullptr) ^ (static_cast<unsigned int>(getpid()) << 16)));
+  });
+}
 
 WebServer::~WebServer() {
   stop();
@@ -964,7 +969,9 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
   // --- Threshold configuration endpoints ---
 
   if (method == "GET" && path == "/api/thresholds") {
-    ThresholdRegistry registry(default_threshold_directory());
+    const std::string threshold_dir =
+        options_.config_directory.empty() ? default_threshold_directory() : options_.config_directory;
+    ThresholdRegistry registry(threshold_dir);
     Json::Value out(Json::objectValue);
     out["configs"] = Json::Value(Json::arrayValue);
     for (const auto &stored : registry.list_configs()) {
@@ -987,7 +994,9 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
   if (method == "GET" && path.rfind("/api/thresholds/", 0) == 0 && path.find("/export") != std::string::npos) {
     const std::string tail = path.substr(std::string("/api/thresholds/").size());
     const std::string id = tail.substr(0, tail.find('/'));
-    ThresholdRegistry registry(default_threshold_directory());
+    const std::string threshold_dir =
+        options_.config_directory.empty() ? default_threshold_directory() : options_.config_directory;
+    ThresholdRegistry registry(threshold_dir);
     std::string json_text;
     if (!registry.export_config(id, &json_text)) {
       *status_code = MHD_HTTP_NOT_FOUND;
@@ -1001,7 +1010,9 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
 
   if (method == "GET" && path.rfind("/api/thresholds/", 0) == 0) {
     const std::string id = path.substr(std::string("/api/thresholds/").size());
-    ThresholdRegistry registry(default_threshold_directory());
+    const std::string threshold_dir =
+        options_.config_directory.empty() ? default_threshold_directory() : options_.config_directory;
+    ThresholdRegistry registry(threshold_dir);
     ThresholdConfig config;
     if (!registry.get_config(id, &config)) {
       *status_code = MHD_HTTP_NOT_FOUND;
@@ -1022,7 +1033,9 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
   }
 
   if (method == "POST" && path == "/api/thresholds/import") {
-    ThresholdRegistry registry(default_threshold_directory());
+    const std::string threshold_dir =
+        options_.config_directory.empty() ? default_threshold_directory() : options_.config_directory;
+    ThresholdRegistry registry(threshold_dir);
     std::string error;
     if (!registry.import_config(body, &error)) {
       *status_code = MHD_HTTP_BAD_REQUEST;
@@ -1050,7 +1063,9 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
     config.description = body_json.get("description", "").asString();
     json_to_test_key_map(body_json["values"], &config.values);
     json_to_test_key_map(body_json["params"], &config.params);
-    ThresholdRegistry registry(default_threshold_directory());
+    const std::string threshold_dir =
+        options_.config_directory.empty() ? default_threshold_directory() : options_.config_directory;
+    ThresholdRegistry registry(threshold_dir);
     std::string error;
     if (!registry.add_or_update_config(config, &error)) {
       *status_code = MHD_HTTP_BAD_REQUEST;
@@ -1080,7 +1095,9 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
     config.description = body_json.get("description", "").asString();
     json_to_test_key_map(body_json["values"], &config.values);
     json_to_test_key_map(body_json["params"], &config.params);
-    ThresholdRegistry registry(default_threshold_directory());
+    const std::string threshold_dir =
+        options_.config_directory.empty() ? default_threshold_directory() : options_.config_directory;
+    ThresholdRegistry registry(threshold_dir);
     std::string error;
     if (!registry.add_or_update_config(config, &error)) {
       *status_code = MHD_HTTP_BAD_REQUEST;
@@ -1096,7 +1113,9 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
 
   if (method == "DELETE" && path.rfind("/api/thresholds/", 0) == 0) {
     const std::string id = path.substr(std::string("/api/thresholds/").size());
-    ThresholdRegistry registry(default_threshold_directory());
+    const std::string threshold_dir =
+        options_.config_directory.empty() ? default_threshold_directory() : options_.config_directory;
+    ThresholdRegistry registry(threshold_dir);
     std::string error;
     if (!registry.remove_config(id, &error)) {
       *status_code = MHD_HTTP_BAD_REQUEST;
@@ -1495,8 +1514,18 @@ void WebServer::persist_run_summary(const Json::Value &summary) {
   document["schema_version"] = kRunsIndexSchemaVersion;
   document["runs"] = array;
   ensure_directory(options_.report_root);
-  std::ofstream out(options_.report_root + "/runs-index.json", std::ios::trunc);
-  out << json_to_string(document);
+  const std::string final_path = options_.report_root + "/runs-index.json";
+  const std::string temp_path = final_path + ".tmp-" + std::to_string(getpid());
+  std::ofstream out(temp_path);
+  if (!out) {
+    return;
+  }
+  out << json_to_string(document) << "\n";
+  out.close();
+  if (!out || rename(temp_path.c_str(), final_path.c_str()) != 0) {
+    unlink(temp_path.c_str());
+    return;
+  }
 }
 
 std::shared_ptr<WebServer::RunState> WebServer::find_run(const std::string &id) const {
@@ -1689,6 +1718,16 @@ std::shared_ptr<WebServer::RunState> WebServer::create_run(const RunConfig &conf
   {
     std::lock_guard<std::mutex> lock(runs_mutex_);
     runs_.push_back(run);
+    while (runs_.size() > kMaxHistoryEntries) {
+      auto it = std::find_if(runs_.begin(), runs_.end(), [](const std::shared_ptr<RunState> &r) {
+        std::lock_guard<std::mutex> st_lock(r->mutex);
+        return r->status != "running" && r->status != "queued";
+      });
+      if (it == runs_.end()) {
+        break;
+      }
+      runs_.erase(it);
+    }
   }
   append_log(run, "info", "Diagnostic run queued.");
   run->worker = std::thread([this, run]() {

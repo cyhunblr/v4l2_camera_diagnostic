@@ -55,43 +55,25 @@ export function TestSelectionPage({
     return isTrig && isBack;
   }
 
-  // When a tag pill is clicked: toggle the tag, then auto-select tests matching any active tag
+  // When a tag pill is clicked: toggle the tag filter
   function handleTagClick(tagId: string) {
     const newActiveTags = activeTags.includes(tagId)
       ? activeTags.filter((t) => t !== tagId)
       : [...activeTags, tagId];
-
     setActiveTags(newActiveTags);
-
-    // Auto-select tests that have at least one active tag
-    if (newActiveTags.length > 0) {
-      const matchingIds = allTests
-        .filter((t) => isSupportedTest(t) && t.tags?.some((tag) => newActiveTags.includes(tag)))
-        .map((t) => t.id);
-      setSelectedTests(matchingIds);
-      setActiveAction("reset-stable"); // reset to neutral when tags change manually
-    } else {
-      // No tags active → clear all
-      setSelectedTests([]);
-    }
   }
 
   function handleSelectAll() {
-    // All tags active, all supported tests selected
-    setActiveTags(TAG_DEFINITIONS.map((td) => td.id));
     setSelectedTests(allTests.filter(isSupportedTest).map((t) => t.id));
     setActiveAction("select-all");
   }
 
   function handleClearAll() {
-    // No tags active, no tests selected
-    setActiveTags([]);
     setSelectedTests([]);
     setActiveAction("clear-all");
   }
 
   function handleResetStable() {
-    // Only stable tag active, only stable-tagged supported tests selected
     setActiveTags(["stable"]);
     const stableIds = allTests
       .filter((t) => isSupportedTest(t) && t.tags?.includes("stable"))
@@ -207,13 +189,7 @@ export function TestSelectionPage({
                   const isBackendSupported = !test.requires_dmabuf || backends.includes("dmabuf");
                   const isSupported = isTriggerSupported && isBackendSupported;
 
-                  // A test is "dimmed" (deactivated) if it has no active tag match AND is not selected
-                  const hasActiveTag =
-                    activeTags.length === 0
-                      ? false
-                      : test.tags?.some((tag) => activeTags.includes(tag));
                   const isSelected = isTestSelected(test);
-                  const isDimmed = !isSelected && !hasActiveTag;
 
                   let subtitleText = test.name;
                   if (!isTriggerSupported) {
@@ -227,7 +203,7 @@ export function TestSelectionPage({
                       key={test.id}
                       selected={isSelected}
                       onToggle={() => isSupported && onToggleTest(test.id)}
-                      disabled={!isSupported || isDimmed}
+                      disabled={!isSupported}
                       title={test.id}
                       subtitle={subtitleText}
                       badges={

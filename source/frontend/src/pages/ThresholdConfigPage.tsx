@@ -59,6 +59,8 @@ export function ThresholdConfigPage({
   const [showNew, setShowNew] = useState(false);
   const [inputErrors, setInputErrors] = useState<Record<string, string>>({});
   const [rawInputs, setRawInputs] = useState<Record<string, string>>({});
+  const [migrationWarning, setMigrationWarning] = useState<string | null>(null);
+  const [migrating, setMigrating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const setDirty = useCallback(
@@ -93,10 +95,59 @@ export function ThresholdConfigPage({
       setDirty(false);
       setInputErrors({});
       setRawInputs({});
+      api.getThreshold(selectedThresholdId).then(async (res) => {
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json.warning || json.migration_required) {
+          setMigrationWarning(json.warning || "This threshold config requires migration to match current tests.");
+        } else {
+          setMigrationWarning(null);
+        }
+      }).catch(() => setMigrationWarning(null));
     } else if (configs.length > 0) {
       onSelectedChange(configs[0].id);
     }
   }, [selectedThresholdId, configs, onSelectedChange, setDirty]);
+
+  async function handleMigrate() {
+    if (!editing) return;
+    setMigrating(true);
+    try {
+      const res = await api.migrateThreshold(editing.id);
+      if (!res.ok) {
+        const json = await res.json();
+        onError(json.error || "Failed to migrate threshold config.");
+      } else {
+        setMigrationWarning(null);
+        await loadConfigs();
+      }
+    } catch {
+      onError("Network error migrating threshold config.");
+    } finally {
+      setMigrating(false);
+    }
+  }
+
+  async function handleResetPresetFromServer() {
+    try {
+      const res = await api.getThreshold("default");
+      if (res.ok) {
+        const serverDefault = await res.json();
+        if (editing) {
+          setEditing({
+            ...editing,
+            values: structuredClone(serverDefault.values ?? {}),
+            params: structuredClone(serverDefault.params ?? {})
+          });
+          setDirty(true);
+          setRawInputs({});
+          setInputErrors({});
+        }
+      }
+    } catch {
+      onError("Failed to reset preset from server.");
+    }
+  }
 
   /** Inline dynamic validator for input changes. */
   function validateAndUpdate(
@@ -383,6 +434,36 @@ export function ThresholdConfigPage({
             />
             <button className="primary-btn" onClick={handleCreate}>Create</button>
             <button className="secondary-btn" onClick={() => setShowNew(false)}>Cancel</button>
+          </div>
+        )}
+
+        {!isDefault && (
+          <div className="toolbar-secondary-actions" style={{ marginTop: "8px", display: "flex", gap: "8px" }}>
+            <button
+              type="button"
+              className="icon-text-button"
+              onClick={handleResetPresetFromServer}
+              title="Reset all thresholds in this preset to server defaults"
+            >
+              <RotateCcw size={14} /> Reset Preset to Server Defaults
+            </button>
+          </div>
+        )}
+
+        {migrationWarning && (
+          <div className="inline-confirm warning-confirm" role="alertdialog" aria-label="Configuration migration warning">
+            <div className="warning-confirm-message">
+              <AlertTriangle size={18} />
+              <span>{migrationWarning}</span>
+            </div>
+            <button
+              type="button"
+              className="primary-btn"
+              disabled={migrating}
+              onClick={handleMigrate}
+            >
+              {migrating ? "Migrating..." : "Migrate Config"}
+            </button>
           </div>
         )}
 

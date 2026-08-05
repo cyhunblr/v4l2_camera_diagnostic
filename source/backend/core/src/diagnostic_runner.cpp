@@ -381,9 +381,11 @@ void run_no_streamon(const std::string &camera_path, MemoryBackend backend, Test
   struct v4l2_buffer buf;
   memset(&buf, 0, sizeof(buf));
   buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  buf.memory = V4L2_MEMORY_MMAP;
+  buf.memory = (backend == MemoryBackend::UserPtr)  ? V4L2_MEMORY_USERPTR
+               : (backend == MemoryBackend::Dmabuf) ? V4L2_MEMORY_DMABUF
+                                                    : V4L2_MEMORY_MMAP;
   const int dq_ret = ioctl(s.fd(), VIDIOC_DQBUF, &buf);
-  const int dq_errno = errno;
+  const int dq_errno = (dq_ret < 0) ? errno : 0;
 
   r.metrics.push_back(
       metric("poll_returned", "count", static_cast<double>(poll_ret),
@@ -393,23 +395,31 @@ void run_no_streamon(const std::string &camera_path, MemoryBackend backend, Test
   r.metrics.push_back(metric("dqbuf_errno", "errno", static_cast<double>(dq_errno),
                              "errno from DQBUF without STREAMON; expected EAGAIN(11) or EINVAL(22)."));
 
-  r.details.push_back("poll(" + std::to_string(poll_timeout_ms) + "ms) returned " + std::to_string(poll_ret) +
-                      " (expected 0)");
+  if (poll_ret < 0) {
+    r.details.push_back("poll(" + std::to_string(poll_timeout_ms) + "ms) system error: " + strerror(errno));
+  } else {
+    r.details.push_back("poll(" + std::to_string(poll_timeout_ms) + "ms) returned " + std::to_string(poll_ret) +
+                        " (expected 0)");
+  }
   if (dq_ret < 0) {
     r.details.push_back("DQBUF returned -1, errno=" + std::to_string(dq_errno) + " (" + strerror(dq_errno) + ")");
   } else {
     r.details.push_back("DQBUF unexpectedly succeeded, sequence=" + std::to_string(buf.sequence));
+    r.details.push_back("observed_sequence: " + std::to_string(buf.sequence));
   }
 
   const bool poll_ok = (poll_ret == 0);
-  const bool dq_ok = (dq_ret < 0) && (dq_errno == EAGAIN || dq_errno == EINVAL);
+  const bool dq_expected_err = (dq_ret < 0) && (dq_errno == EAGAIN || dq_errno == EINVAL);
 
-  if (poll_ok && dq_ok) {
+  if (poll_ok && dq_expected_err) {
     r.status = TestStatus::Pass;
     r.summary = "No frames delivered before VIDIOC_STREAMON. V4L2 state machine correct.";
-  } else if (!dq_ok && dq_ret >= 0) {
+  } else if (dq_ret >= 0) {
     r.status = TestStatus::Fail;
     r.summary = "Frame delivered without VIDIOC_STREAMON — V4L2 state machine violation.";
+  } else if (!dq_expected_err) {
+    r.status = TestStatus::Fail;
+    r.summary = "Unexpected DQBUF errno (" + std::to_string(dq_errno) + ") without STREAMON.";
   } else {
     r.status = TestStatus::Warn;
     r.summary = "DQBUF correctly fails, but poll returned non-zero without STREAMON.";
@@ -1292,7 +1302,9 @@ void run_multi_buffer(const std::string &camera_path, MemoryBackend backend, Tri
     memset(&req, 0, sizeof(req));
     req.count = static_cast<unsigned>(bc);
     req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    req.memory = V4L2_MEMORY_MMAP;
+    req.memory = (backend == MemoryBackend::UserPtr)  ? V4L2_MEMORY_USERPTR
+                 : (backend == MemoryBackend::Dmabuf) ? V4L2_MEMORY_DMABUF
+                                                      : V4L2_MEMORY_MMAP;
     if (ioctl(s.fd(), VIDIOC_REQBUFS, &req) < 0) {
       r.details.push_back("count=" + std::to_string(bc) + ": REQBUFS failed");
       continue;
@@ -1630,6 +1642,8 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
   r.metrics.push_back(
       metric("full_cycle_failures", "count", static_cast<double>(full_failures), "Full cycle failures."));
   r.metrics.push_back(metric("rapid_cycles_ok", "count", static_cast<double>(rapid_ok), "Rapid cycles with frame."));
+  r.metrics.push_back(metric("rapid_capture_timeouts", "count", static_cast<double>(rapid_capture_timeouts),
+                             "Rapid capture timeouts."));
   r.metrics.push_back(metric("rapid_cycles_total", "count", static_cast<double>(RAPID), "Total rapid cycles."));
   r.metrics.push_back(
       metric("rapid_cycles_attempted", "count", static_cast<double>(rapid_attempted), "Rapid cycles actually run."));
@@ -1732,6 +1746,8 @@ void run_buffer_flags(const std::string &camera_path, MemoryBackend backend, Tri
     V4lSession::sleep_ms(SAMPLE_INTERVAL_MS);
   }
 
+  r.metrics.push_back(metric("requested", "count", static_cast<double>(NUM), "Requested sample count."));
+  r.metrics.push_back(metric("captured", "count", static_cast<double>(captured), "Captured sample count."));
   r.metrics.push_back(metric("frames_captured", "count", static_cast<double>(captured), "Frames captured."));
   r.metrics.push_back(metric("flag_error", "count", static_cast<double>(flag_error), "V4L2_BUF_FLAG_ERROR."));
   r.metrics.push_back(metric("flag_keyframe", "count", static_cast<double>(flag_keyframe), "KEYFRAME."));
@@ -1742,16 +1758,59 @@ void run_buffer_flags(const std::string &camera_path, MemoryBackend backend, Tri
 
   char hex[16];
   snprintf(hex, sizeof(hex), "0x%08x", all_or);
+  r.details.push_back("combined_mask: " + std::string(hex));
   r.details.push_back("Combined flags OR: " + std::string(hex));
   const bool ts_ok = (flag_ts_mono == captured || flag_ts_copy == captured || (flag_ts_mono == 0 && flag_ts_copy == 0));
-  r.details.push_back(std::string("Timestamp source consistent: ") + (ts_ok ? "yes" : "no"));
+  const std::string declared_clock =
+      flag_ts_mono > 0 ? "V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC (CLOCK_MONOTONIC)"
+                       : (flag_ts_copy > 0 ? "V4L2_BUF_FLAG_TIMESTAMP_COPY (CLOCK_MONOTONIC or CLOCK_REALTIME)"
+                                           : "Default / Unspecified");
+  const std::string ts_point =
+      flag_soe > 0 ? "V4L2_BUF_FLAG_TSTAMP_SRC_SOE (Start of Exposure)" : "V4L2_BUF_FLAG_TSTAMP_SRC_EOF (End of Frame)";
+  const std::string consistency =
+      ts_ok ? "Consistent across all captured frames" : "Inconsistent timestamp source flags";
 
-  if (flag_error > static_cast<int>(thv(th, "t10-buffer-flags", "max_error_flags"))) {
+  r.details.push_back("declared_clock_type: " + declared_clock);
+  r.details.push_back("timestamp_point: " + ts_point);
+  r.details.push_back("source_consistency: " + consistency);
+  r.details.push_back("Timestamp source consistent: " + std::string(ts_ok ? "yes" : "no"));
+
+  r.details.push_back("requested_samples: " + std::to_string(NUM));
+  r.details.push_back("warmup: " + std::to_string(WARMUP_COUNT));
+  r.details.push_back("backend_memory: " + std::string(to_string(backend)));
+  r.details.push_back("capture_timeout: " + std::to_string(CAPTURE_TIMEOUT_MS) + " ms");
+  r.details.push_back("sample_interval: " + std::to_string(SAMPLE_INTERVAL_MS) + " ms");
+  r.details.push_back("error_threshold: " +
+                      std::to_string(static_cast<int>(thv(th, "t10-buffer-flags", "max_error_flags"))));
+
+  r.details.push_back("flag: Data Integrity|V4L2_BUF_FLAG_ERROR|" + std::to_string(flag_error) +
+                      "|Hardware or transmission error|" + (flag_error > 0 ? "ACTIVE" : "CLEAR"));
+  r.details.push_back("flag: Frame Type|V4L2_BUF_FLAG_KEYFRAME|" + std::to_string(flag_keyframe) +
+                      "|Keyframe / IDR frame|" + (flag_keyframe > 0 ? "ACTIVE" : "NOT SET"));
+  r.details.push_back("flag: Timestamp Clock|V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC|" + std::to_string(flag_ts_mono) +
+                      "|Monotonic clock type|" + (flag_ts_mono > 0 ? "ACTIVE" : "NOT SET"));
+  r.details.push_back("flag: Timestamp Clock|V4L2_BUF_FLAG_TIMESTAMP_COPY|" + std::to_string(flag_ts_copy) +
+                      "|Timestamp copy mode|" + (flag_ts_copy > 0 ? "ACTIVE" : "NOT SET"));
+  r.details.push_back("flag: Timestamp Source|V4L2_BUF_FLAG_TSTAMP_SRC_SOE|" + std::to_string(flag_soe) +
+                      "|Start of exposure timestamp|" + (flag_soe > 0 ? "ACTIVE" : "NOT SET"));
+  r.details.push_back("flag: Timestamp Source|V4L2_BUF_FLAG_TSTAMP_SRC_EOF|" + std::to_string(flag_eof) +
+                      "|End of frame timestamp|" + (flag_eof > 0 ? "ACTIVE" : "NOT SET"));
+
+  if (captured == 0) {
+    r.status = TestStatus::Fail;
+    r.summary = "No frames captured.";
+  } else if (flag_error > static_cast<int>(thv(th, "t10-buffer-flags", "max_error_flags"))) {
     r.status = TestStatus::Warn;
     r.summary = std::to_string(flag_error) + " frames with V4L2_BUF_FLAG_ERROR.";
+  } else if (!ts_ok) {
+    r.status = TestStatus::Warn;
+    r.summary = "Timestamp source flags inconsistent across captured frames.";
+  } else if (captured < NUM) {
+    r.status = TestStatus::Warn;
+    r.summary = "Incomplete capture (" + std::to_string(captured) + "/" + std::to_string(NUM) + " frames).";
   } else {
     r.status = TestStatus::Pass;
-    r.summary = "No error flags. Timestamp source " + std::string(ts_ok ? "consistent." : "inconsistent.");
+    r.summary = "No error flags. Timestamp source consistent across " + std::to_string(captured) + " frames.";
   }
 }
 
@@ -1854,8 +1913,25 @@ void run_memory_throughput(const std::string &camera_path, MemoryBackend backend
   std::vector<uint8_t> dst(frame_sz);
   const int REPS = static_cast<int>(tpv(tp, "t11-memory-throughput", "benchmark_reps"));
 
+  size_t sizeimage = frame_sz;
+  if (s.fd() >= 0) {
+    struct v4l2_format fmt {};
+    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(s.fd(), VIDIOC_G_FMT, &fmt) == 0 && fmt.fmt.pix.sizeimage > 0) {
+      sizeimage = fmt.fmt.pix.sizeimage;
+    }
+  }
+
   r.details.push_back("Buffer size: " + std::to_string(frame_sz) + " bytes");
+  r.details.push_back("repetitions: " + std::to_string(REPS));
+  r.details.push_back("warmup_copies: 10");
+  r.details.push_back("timer: CLOCK_REALTIME");
+  r.details.push_back("backend_memory: " + std::string(to_string(backend)));
+
   r.metrics.push_back(metric("frame_size_bytes", "bytes", static_cast<double>(frame_sz), "Device buffer size."));
+  r.metrics.push_back(metric("sizeimage_bytes", "bytes", static_cast<double>(sizeimage), "Active image payload size."));
+  r.metrics.push_back(
+      metric("mapped_capacity_bytes", "bytes", static_cast<double>(frame_sz), "Mapped buffer capacity."));
 
   const auto bench = [&](const std::string &label, const void *src, size_t sz) {
     if (!src || sz == 0)
@@ -1868,6 +1944,8 @@ void run_memory_throughput(const std::string &camera_path, MemoryBackend backend
     const double mbps = (static_cast<double>(sz) * REPS / 1048576.0) / (V4lSession::ts_diff_ms(t1, t0) / 1000.0);
     r.metrics.push_back(metric(label + "_mbps", "MB/s", mbps, label + " memcpy throughput."));
     r.details.push_back(label + ": " + std::to_string(static_cast<int>(mbps)) + " MB/s");
+    r.details.push_back("copy: " + label + "|" + std::to_string(sz) + "|" + std::to_string(mbps) + "|" +
+                        (sz <= 65536 ? "cache" : "full"));
   };
 
   // Dmabuf negotiates its buffers as plain mmap first (see V4lSession),
@@ -2063,6 +2141,12 @@ void run_dmabuf_cache_sync(const std::string &camera_path, TriggerSource &trigge
   r.metrics.push_back(metric("match_with_sync", "count", static_cast<double>(match_sync), "Matches with sync."));
   r.metrics.push_back(
       metric("sync_required", "bool", (match_nosync < tested && match_sync == tested) ? 1.0 : 0.0, "Sync required."));
+
+  r.details.push_back("requested_samples: " + std::to_string(NUM) + " frames");
+  r.details.push_back("compare_bytes: Full bytesused (" + std::to_string(CMP) + " bytes)");
+  r.details.push_back("warmup: " + std::to_string(WARMUP_COUNT) + " frames");
+  r.details.push_back("capture_timeout: " + std::to_string(CAPTURE_TIMEOUT_MS) + " ms");
+  r.details.push_back("buffer_count: 2");
 
   if (tested == 0) {
     r.status = TestStatus::Fail;
@@ -2571,7 +2655,7 @@ void run_control_inventory(const std::string &camera_path, TestResult &r, const 
     return;
   }
 
-  int count = 0, writable = 0;
+  int count = 0, writable = 0, out_of_range = 0;
   struct v4l2_queryctrl qc;
   memset(&qc, 0, sizeof(qc));
   qc.id = V4L2_CTRL_FLAG_NEXT_CTRL;
@@ -2582,14 +2666,23 @@ void run_control_inventory(const std::string &camera_path, TestResult &r, const 
       if (!ro)
         writable++;
       struct v4l2_control cur;
+      memset(&cur, 0, sizeof(cur));
       cur.id = qc.id;
-      ioctl(fd, VIDIOC_G_CTRL, &cur);
+      const int g_res = ioctl(fd, VIDIOC_G_CTRL, &cur);
+      const int val = (g_res == 0) ? cur.value : qc.default_value;
+      bool is_out = false;
+      if (qc.type == V4L2_CTRL_TYPE_INTEGER || qc.type == V4L2_CTRL_TYPE_BOOLEAN || qc.type == V4L2_CTRL_TYPE_MENU) {
+        if (val < qc.minimum || val > qc.maximum) {
+          is_out = true;
+          out_of_range++;
+        }
+      }
       char hex[9];
       snprintf(hex, sizeof(hex), "%08x", qc.id);
       r.details.push_back(std::string(reinterpret_cast<char *>(qc.name)) + " [0x" + hex + "]" +
                           " min=" + std::to_string(qc.minimum) + " max=" + std::to_string(qc.maximum) +
                           " step=" + std::to_string(qc.step) + " default=" + std::to_string(qc.default_value) +
-                          " current=" + std::to_string(cur.value) + (ro ? " [RO]" : ""));
+                          " current=" + std::to_string(val) + (ro ? " [RO]" : "") + (is_out ? " [OUT_OF_RANGE]" : ""));
     }
     qc.id |= V4L2_CTRL_FLAG_NEXT_CTRL;
   }
@@ -2597,8 +2690,16 @@ void run_control_inventory(const std::string &camera_path, TestResult &r, const 
 
   r.metrics.push_back(metric("control_count", "count", static_cast<double>(count), "Total controls."));
   r.metrics.push_back(metric("writable_count", "count", static_cast<double>(writable), "Writable controls."));
-  r.status = TestStatus::Pass;
-  r.summary = "Enumerated " + std::to_string(count) + " controls (" + std::to_string(writable) + " writable).";
+  r.metrics.push_back(
+      metric("out_of_range_count", "count", static_cast<double>(out_of_range), "Out-of-range controls."));
+  if (out_of_range > 0) {
+    r.status = TestStatus::Warn;
+    r.summary =
+        "Enumerated " + std::to_string(count) + " controls (" + std::to_string(out_of_range) + " out of range).";
+  } else {
+    r.status = TestStatus::Pass;
+    r.summary = "Enumerated " + std::to_string(count) + " controls (" + std::to_string(writable) + " writable).";
+  }
 }
 
 // Docs: docs/backend/tests/t19-resolution-sweep.md
