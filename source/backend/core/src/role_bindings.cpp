@@ -68,9 +68,14 @@ RoleResolution resolve_role_bindings(const std::vector<RoleBinding> &bindings,
         out.duplicate_roles.push_back(binding.role);
       }
     } else if (expected_set.count(binding.role) == 0) {
-      // Not a role this run has a camera for. Free-text names land here too: the
-      // role set is closed, so an unrecognised name is a mistake, not a new role.
-      out.unexpected_roles.push_back(binding.role);
+      if (!is_canonical_role(binding.role)) {
+        // Non-canonical name: a typo or free-text role that no topology can
+        // produce. Always an error.
+        out.unexpected_roles.push_back(binding.role);
+      }
+      // else: canonical slave role beyond the current camera count -- surplus,
+      // not wrong. A multi-camera profile used with fewer cameras is valid:
+      // the unused bindings are silently skipped.
     }
     if (known_channels.count(binding.trigger_channel_id) == 0) {
       out.unknown_channels.push_back(binding.trigger_channel_id);

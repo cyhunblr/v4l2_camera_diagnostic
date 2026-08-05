@@ -105,25 +105,26 @@ int main() {
     const RoleResolution res =
         v4l2diag::resolve_role_bindings({role_to("master", "gpio-0"), role_to("master", "gpio-1")}, channels, 0);
     ok &= check(!res.ok(), "a duplicate role was accepted");
-    ok &= check(has(res.duplicate_roles, "master"), "the duplicate role was not reported: " + join(res.duplicate_roles));
+    ok &=
+        check(has(res.duplicate_roles, "master"), "the duplicate role was not reported: " + join(res.duplicate_roles));
   }
 
-  // --- 5. Extra roles are refused as a camera-count mismatch --------------
+  // --- 5. Canonical surplus slave bindings are silently skipped -----------
   {
-    // The profile binds slave-1, but this run has no slaves.
+    // The profile binds slave-1 but this run has no slaves. A multi-camera
+    // profile used with fewer cameras: the unused canonical binding is surplus,
+    // not wrong. The run resolves with master only.
     const RoleResolution res =
         v4l2diag::resolve_role_bindings({role_to("master", "gpio-0"), role_to("slave-1", "gpio-1")}, channels, 0);
-    ok &= check(!res.ok(), "a binding for a role the run has no camera for was accepted");
-    ok &= check(has(res.unexpected_roles, "slave-1"),
-                "the extra role was not reported: " + join(res.unexpected_roles));
-    ok &= check(v4l2diag::describe_role_resolution(res).find("camera count") != std::string::npos,
-                "an extra role is not described as a camera-count mismatch: " +
-                    v4l2diag::describe_role_resolution(res));
+    ok &= check(res.ok(), "a surplus canonical slave binding rejected a single-camera run: " +
+                              v4l2diag::describe_role_resolution(res));
+    ok &= check(res.resolved.size() == 1, "the surplus binding appeared in the resolved output");
+    ok &= check(res.unexpected_roles.empty(), "the surplus canonical slave was reported as unexpected");
   }
 
   {
-    // Free text is not a role: an unrecognised name is an extra role, not a new
-    // one to accept.
+    // Free text is not a role: a non-canonical name is always unexpected, even
+    // when the run has no slave to conflict with it.
     const RoleResolution res =
         v4l2diag::resolve_role_bindings({role_to("master", "gpio-0"), role_to("primary", "gpio-1")}, channels, 0);
     ok &= check(!res.ok(), "a free-text role name was accepted");
@@ -144,8 +145,7 @@ int main() {
     // explicitly allowed -- unlike a duplicate role.
     const RoleResolution res = v4l2diag::resolve_role_bindings(
         {role_to("master", "gpio-0"), role_to("slave-1", "gpio-0"), role_to("slave-2", "gpio-0")}, channels, 2);
-    ok &= check(res.ok(), "one channel serving several roles was rejected: " +
-                              v4l2diag::describe_role_resolution(res));
+    ok &= check(res.ok(), "one channel serving several roles was rejected: " + v4l2diag::describe_role_resolution(res));
     ok &= check(res.resolved.size() == 3, "the shared-channel routing lost a role");
     for (const auto &binding : res.resolved) {
       ok &= check(binding.trigger_channel_id == "gpio-0", "a shared-channel binding resolved elsewhere");
@@ -189,13 +189,14 @@ int main() {
   // --- 9. Every failure kind is reported at once -------------------------
   {
     // A caller fixing one problem at a time would otherwise need one round trip
-    // per mistake.
+    // per mistake. Uses a non-canonical role ("primary") to cover unexpected_roles,
+    // since canonical surplus slave bindings are now silently skipped.
     const RoleResolution res = v4l2diag::resolve_role_bindings(
-        {role_to("master", "nope"), role_to("master", "gpio-0"), role_to("slave-2", "gpio-1")}, channels, 1);
+        {role_to("master", "nope"), role_to("master", "gpio-0"), role_to("primary", "gpio-1")}, channels, 1);
     ok &= check(!res.ok(), "a routing with four distinct faults was accepted");
     ok &= check(has(res.duplicate_roles, "master"), "the duplicate role went unreported");
     ok &= check(has(res.unknown_channels, "nope"), "the unknown channel went unreported");
-    ok &= check(has(res.unexpected_roles, "slave-2"), "the extra role went unreported");
+    ok &= check(has(res.unexpected_roles, "primary"), "the non-canonical role went unreported");
     ok &= check(has(res.missing_roles, "slave-1"), "the missing role went unreported");
   }
 
