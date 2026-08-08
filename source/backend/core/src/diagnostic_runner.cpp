@@ -2905,6 +2905,7 @@ void run_cold_start(const std::string &camera_path, MemoryBackend backend, Trigg
   emit(log, camera_path, "t26", "Cold-start analysis: " + std::to_string(CYCLES) + " fresh cycles...");
 
   std::vector<int> warmup_counts;
+  int censored_cycles = 0;
 
   for (int cycle = 0; cycle < CYCLES; cycle++) {
     V4lSession s;
@@ -2930,54 +2931,76 @@ void run_cold_start(const std::string &camera_path, MemoryBackend backend, Trigg
       V4lSession::sleep_ms(INTER_FRAME_INTERVAL_MS);
     }
 
-    // Find warmup point: first frame N where all subsequent frames up to end
-    // are within STABILITY_THRESHOLD_PCT of their mean
-    int warmup_frame = MAX_FRAMES_PER_CYCLE;  // default: never stabilized
-    if (latencies.size() >= 5) {
-      // Compute mean of last 5 frames as "steady state" reference
-      double tail_sum = 0.0;
-      int tail_count = 0;
-      for (int i = static_cast<int>(latencies.size()) - 5; i < static_cast<int>(latencies.size()); i++) {
+    // The steady-state reference comes from the SUSTAINED tail of this cycle, but a
+    // cycle whose tail is still noisy yields no reference at all rather than a bad one.
+    // Deriving the reference from the same window it judges is what used to make "never
+    // settled" and "settled, but the tail was noisy" indistinguishable.
+    double steady_reference = 0.0;
+    {
+      std::vector<double> tail;
+      for (std::size_t i = latencies.size() >= 5 ? latencies.size() - 5 : 0; i < latencies.size(); i++) {
         if (latencies[i] > 0) {
-          tail_sum += latencies[i];
-          tail_count++;
+          tail.push_back(latencies[i]);
         }
       }
-      if (tail_count > 0) {
-        double steady_mean = tail_sum / tail_count;
-        double threshold = steady_mean * (STABILITY_THRESHOLD_PCT / 100.0);
-        // Walk forward to find first frame within threshold of steady_mean
-        // where all subsequent good frames also stay within threshold
-        for (int start = 0; start < static_cast<int>(latencies.size()) - 2; start++) {
-          if (latencies[start] <= 0)
-            continue;
-          bool all_stable = true;
-          for (int j = start; j < static_cast<int>(latencies.size()); j++) {
-            if (latencies[j] <= 0)
-              continue;
-            if (std::abs(latencies[j] - steady_mean) > threshold) {
-              all_stable = false;
-              break;
-            }
-          }
-          if (all_stable) {
-            warmup_frame = start;
-            break;
-          }
+      if (tail.size() >= 3) {
+        const Stats tail_stats = compute_stats(tail);
+        // A tail that is itself unstable cannot define "steady": judging against it would
+        // report a warm-up length derived from noise.
+        if (tail_stats.mean > 0.0 && tail_stats.stddev <= tail_stats.mean * (STABILITY_THRESHOLD_PCT / 100.0)) {
+          steady_reference = tail_stats.mean;
         }
       }
     }
-    warmup_counts.push_back(warmup_frame);
 
-    char line[80];
-    snprintf(line, sizeof(line), "  cycle %2d: warmup=%d frames", cycle + 1, warmup_frame);
+    const WarmupResult warmup = find_warmup_frame(latencies, steady_reference, STABILITY_THRESHOLD_PCT);
+    // A censored cycle contributes NO number. It used to contribute
+    // max_frames_per_cycle, which pulled the mean toward the parameter and let the
+    // verdict be decided by a value nobody measured.
+    const char *censor_reason = "";
+    if (warmup.stabilized) {
+      warmup_counts.push_back(warmup.frame);
+    } else {
+      ++censored_cycles;
+      switch (warmup.censor) {
+        case WarmupResult::Censor::NeverSettled:
+          censor_reason = "latency still unstable at the end of the window";
+          break;
+        case WarmupResult::Censor::NoReference:
+          censor_reason = "steady-state reference was itself unstable";
+          break;
+        case WarmupResult::Censor::TooFewFrames:
+          censor_reason = "too few captured frames to judge";
+          break;
+        case WarmupResult::Censor::None:
+          break;
+      }
+    }
+
+    char line[120];
+    if (warmup.stabilized) {
+      snprintf(line, sizeof(line), "  cycle %2d: warmup=%d frames", cycle + 1, warmup.frame);
+      r.details.push_back("cycle " + std::to_string(cycle + 1) + ": warmup=" + std::to_string(warmup.frame) +
+                          " frames");
+    } else {
+      snprintf(line, sizeof(line), "  cycle %2d: not measured (%s)", cycle + 1, censor_reason);
+      r.details.push_back("cycle " + std::to_string(cycle + 1) + ": not measured — " + censor_reason);
+    }
     emit(log, camera_path, "t26", std::string(line));
-    r.details.push_back("cycle " + std::to_string(cycle + 1) + ": warmup=" + std::to_string(warmup_frame) + " frames");
   }
 
   if (warmup_counts.empty()) {
-    r.status = TestStatus::Fail;
-    r.summary = "All cycles failed to open a session.";
+    // Either no session opened, or no cycle settled inside the window. These are
+    // different failures and the report says which: a warm-up length that was never
+    // measured must not be reported as a number.
+    r.metrics.push_back(metric("censored_cycles", "count", static_cast<double>(censored_cycles),
+                               "Cycles with no warm-up measurement."));
+    r.metrics.push_back(metric("cycles_completed", "count", 0.0, "Successful cycles."));
+    r.status = censored_cycles > 0 ? TestStatus::Warn : TestStatus::Fail;
+    r.summary = censored_cycles > 0
+                    ? "No cycle settled within " + std::to_string(MAX_FRAMES_PER_CYCLE) +
+                          " frames, so warm-up was not measured. The real value is larger than the window."
+                    : std::string("All cycles failed to open a session.");
     return;
   }
 
@@ -2990,11 +3013,14 @@ void run_cold_start(const std::string &camera_path, MemoryBackend backend, Trigg
   }
   double mean_warmup = sum / warmup_counts.size();
 
-  r.metrics.push_back(metric("warmup_mean_frames", "count", mean_warmup, "Mean frames to reach steady-state latency."));
+  r.metrics.push_back(metric("warmup_mean_frames", "count", mean_warmup,
+                             "Mean frames to reach steady-state latency, over MEASURED cycles only."));
   r.metrics.push_back(
-      metric("warmup_max_frames", "count", static_cast<double>(max_warmup), "Worst-case warmup frames."));
+      metric("warmup_max_frames", "count", static_cast<double>(max_warmup), "Worst-case measured warmup frames."));
   r.metrics.push_back(
-      metric("cycles_completed", "count", static_cast<double>(warmup_counts.size()), "Successful cycles."));
+      metric("cycles_completed", "count", static_cast<double>(warmup_counts.size()), "Cycles that yielded a value."));
+  r.metrics.push_back(
+      metric("censored_cycles", "count", static_cast<double>(censored_cycles), "Cycles with no warm-up measurement."));
 
   if (mean_warmup <= 3.0) {
     r.status = TestStatus::Pass;
@@ -3008,6 +3034,19 @@ void run_cold_start(const std::string &camera_path, MemoryBackend backend, Trigg
     r.status = TestStatus::Warn;
     r.summary = "Slow warm-up: mean=" + std::to_string(static_cast<int>(mean_warmup)) +
                 " frames, max=" + std::to_string(max_warmup) + " — consider longer warm-up in other tests.";
+  }
+
+  // A censored cycle means the worst case is at least this large, not exactly this
+  // large. Reporting the measured maximum as if it were the true one would understate
+  // the requirement, so the verdict is capped at WARN and says why.
+  if (censored_cycles > 0) {
+    if (r.status == TestStatus::Pass) {
+      r.status = TestStatus::Warn;
+    }
+    r.summary += " " + std::to_string(censored_cycles) + " of " +
+                 std::to_string(warmup_counts.size() + static_cast<std::size_t>(censored_cycles)) +
+                 " cycles did not settle within " + std::to_string(MAX_FRAMES_PER_CYCLE) +
+                 " frames, so max is a LOWER BOUND.";
   }
 }
 

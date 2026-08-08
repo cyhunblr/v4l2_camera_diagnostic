@@ -563,13 +563,6 @@ button:disabled {
   font-size: 12px;
 }
 
-.channel-id-label {
-  font-family: monospace;
-  font-size: 11px;
-  color: var(--text-secondary);
-  opacity: 0.7;
-}
-
 .react-flow__handle {
   width: 14px;
   height: 14px;
@@ -863,14 +856,6 @@ summary span {
   color: var(--success);
 }
 
-.inline-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-}
-
 /* Info popover on Test Selection cards */
 .info-popover {
   position: relative;
@@ -1022,9 +1007,10 @@ summary span {
   cursor: pointer;
 }
 
-.clickable-row:hover {
-  background: var(--bg-inset);
-}
+/* No :hover rule here. The one that used to follow set a different background and never
+   won: at (0,1,0) it loses to .results-table tr:hover (0,1,1), which is the only context
+   this class appears in. A rule that cannot apply reads as a decision that was made and
+   is silently not in effect (implementation-plan 5.4). */
 
 .report-link-pill {
   display: inline-block;
@@ -1036,15 +1022,6 @@ summary span {
   font-size: 11px;
   font-weight: 700;
   text-decoration: none;
-}
-
-.output-controls {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-secondary);
-  font-size: 13px;
 }
 
 .output-header-actions {
@@ -1286,42 +1263,6 @@ summary span {
   z-index: 10;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
 }
-
-.results-table td {
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border-subtle);
-  vertical-align: top;
-  color: var(--text-primary);
-}
-
-.results-table .col-status {
-  width: 88px;
-}
-
-.results-table .col-test {
-  width: 200px;
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-.results-table .col-summary {
-  color: var(--text-secondary);
-}
-
-.results-table .status-label {
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: 11px;
-}
-
-.results-table tr.status-pass { background: color-mix(in srgb, var(--success) 3%, transparent); }
-.results-table tr.status-fail { background: color-mix(in srgb, var(--error) 5%, transparent); }
-.results-table tr.status-warn { background: color-mix(in srgb, var(--warn) 4%, transparent); }
-
-.results-table tr:hover {
-  background: var(--border-subtle);
-}
-
 
 .results-table td {
   padding: 10px 14px;
@@ -2083,55 +2024,14 @@ summary span {
   white-space: nowrap;
 }
 
-.filter-toggles {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.toggle-switch-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--border-strong);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
 .toggle-switch-pill.active {
   border-color: var(--accent);
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated));
 }
 
-.switch-track {
-  width: 24px;
-  height: 14px;
-  border-radius: 999px;
-  background: var(--border-strong);
-  position: relative;
-  transition: background 0.15s ease;
-}
-
 .toggle-switch-pill.active .switch-track {
   background: var(--accent);
-}
-
-.switch-thumb {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #ffffff;
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  transition: transform 0.15s ease;
 }
 
 .toggle-switch-pill.active .switch-thumb {
@@ -2181,16 +2081,6 @@ summary span {
   border-radius: 4px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-}
-
-.chip-core {
-  background: color-mix(in srgb, var(--info) 18%, transparent);
-  color: var(--info);
-}
-
-.chip-exp {
-  background: color-mix(in srgb, var(--warn) 18%, transparent);
-  color: var(--warn);
 }
 
 .chip-long {

@@ -76,14 +76,16 @@ to trigger channels rather than matching physical cameras.
 The embedded web server is based on `libmicrohttpd`. It serves static frontend
 assets, generated reports, and JSON endpoints:
 
-- `GET /api/health`
+- `GET /api/health` — for an external probe (monitoring, systemd, a load
+  balancer). The application never calls it; "nothing in this repository calls
+  it" is not evidence that it is unused.
 - `GET /api/devices`
 - `GET /api/control-devices`
-- `GET /api/profiles`
-- `POST /api/profiles`
-- `POST /api/profiles/validate`
-- `PUT /api/profiles/{id}`
-- `DELETE /api/profiles/{id}`
+- `GET /api/profiles`, `POST /api/profiles`, `POST /api/profiles/import`
+- `GET|PUT|DELETE /api/profiles/{id}`
+- `PUT /api/profiles/configs/{id}`
+- `GET /api/thresholds`, `POST /api/thresholds`, `POST /api/thresholds/import`
+- `GET|PUT|DELETE /api/thresholds/{id}`
 - `POST /api/triggers/test`
 - `GET /api/tests`
 - `POST /api/runs`
@@ -92,6 +94,11 @@ assets, generated reports, and JSON endpoints:
 - `GET /api/runs/{id}/logs?after=<offset>`
 - `GET /api/runs/{id}/reports`
 - `POST /api/runs/{id}/stop`
+
+Removed 2026-08-08 (implementation-plan §5.4): `GET /api/dmesg` — DMESG became
+a produced artifact, so nothing called it; `POST /api/profiles/validate` —
+implemented, never called, and `POST /api/profiles` validates through the same
+code path.
 
 Run execution happens asynchronously. The server stores per-run status, log
 offsets, report artifacts, and a `runs-index.json` history under the report

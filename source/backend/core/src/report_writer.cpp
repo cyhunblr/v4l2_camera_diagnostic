@@ -696,6 +696,13 @@ void render_status_distribution(std::ostream &out, int pass_count, int fail_coun
 
 // Axis chrome. The caption names the quantity itself; the old "X: " / "Y: "
 // prefixes added noise without saying anything.
+// The canonical chart width (design-spec S8). The viewBox MUST equal the width the chart
+// actually renders at: with a narrower viewBox the browser scales every SVG unit, so a
+// declared font-size: 8px lands on screen at 8 * renderWidth / viewBoxWidth. At the old
+// 460-unit box that was a 1.97x magnification -- the label sizes in the source said one
+// thing and the rendered page showed another.
+constexpr double kChartWidth = 906.0;
+
 void render_axis_line(std::ostream &out, double x1, double y1, double x2, double y2) {
   out << "<line class=\"chart-axis\" x1=\"" << x1 << "\" y1=\"" << y1 << "\" x2=\"" << x2 << "\" y2=\"" << y2
       << "\"></line>";
@@ -737,7 +744,7 @@ void render_statistic_dot_chart(std::ostream &out, const std::vector<MetricValue
     longest_label = std::max(longest_label, statistic_label(metrics[index].name, group.label_prefix).size());
   }
 
-  const double width = group.wide ? 780.0 : 460.0;
+  const double width = kChartWidth;
   const double left = std::min(180.0, 30.0 + static_cast<double>(longest_label) * 6.2);
   constexpr double right = 48.0;
   constexpr double top = 16.0;
@@ -863,7 +870,7 @@ void render_vertical_bar_chart(std::ostream &out, const std::vector<MetricValue>
   // need a deeper bottom margin or the axis title lands on top of them.
   // A wide chart takes the whole row, so it needs a wider coordinate system too:
   // stretching the 520-unit box across ~950px scaled every label up by 1.8x.
-  const double width = group.wide ? 780.0 : 460.0;
+  const double width = kChartWidth;
   const double left = value_axis_margin(ticks);
   constexpr double right = 14.0;
   constexpr double top = 16.0;
@@ -970,7 +977,7 @@ void render_horizontal_chart(std::ostream &out, const std::vector<MetricValue> &
     longest_category = std::max(longest_category, category.size());
   }
 
-  const double width = group.wide ? 780.0 : 460.0;
+  const double width = kChartWidth;
   const double left = std::min(240.0, 22.0 + static_cast<double>(longest_category) * 6.2);
   constexpr double right = 44.0;
   constexpr double top = 26.0;
@@ -1099,7 +1106,7 @@ void render_t13_distribution_chart(std::ostream &out, const std::vector<TimeoutP
   if (points.size() < 2) {
     return;
   }
-  constexpr double width = 780.0;
+  constexpr double width = kChartWidth;
   constexpr double height = 250.0;
   constexpr double left = 44.0;
   constexpr double right = 18.0;
@@ -1114,7 +1121,7 @@ void render_t13_distribution_chart(std::ostream &out, const std::vector<TimeoutP
 
   out << "<div class=\"metric-chart metric-xy-chart t13-distribution-chart metric-chart--wide\">"
          "<div class=\"metric-chart-title\">Timeout hit distribution <span>%</span></div>"
-         "<svg viewBox=\"0 0 780 250\" role=\"img\" aria-label=\"Hit ratio by poll timeout\">";
+         "<svg viewBox=\"0 0 906 250\" role=\"img\" aria-label=\"Hit ratio by poll timeout\">";
   out << "<rect class=\"hit-zone hit-zone-high\" x=\"" << left << "\" y=\"" << top << "\" width=\""
       << (width - left - right) << "\" height=\"" << (plot_height * 0.25) << "\"></rect>";
   out << "<rect class=\"hit-zone hit-zone-mid\" x=\"" << left << "\" y=\"" << (top + plot_height * 0.25)
@@ -1208,7 +1215,7 @@ bool render_t13_threshold_chart(std::ostream &out, const std::vector<MetricValue
   min_value = ticks.min;
   const double span = std::max(1.0, ticks.max - ticks.min);
 
-  constexpr double width = 780.0;
+  constexpr double width = kChartWidth;
   constexpr double left = 120.0;
   constexpr double right = 24.0;
   constexpr double top = 16.0;
@@ -1543,53 +1550,33 @@ ReportNaming naming_of(const RunResult &result) {
 
 // Export DMESG (plan 3.4).
 //
-// The same HTML is read two ways -- served by the diagnostic server, and opened straight
-// off disk over file:// after the folder is archived -- and which one it is cannot be known
-// when the file is written. So both states are rendered and the choice is made at load
-// time by the small script below: a real <button disabled> for the archived case, because
-// only the disabled attribute makes a control unfocusable and unclickable, and a link to
-// /api/dmesg for the served case.
+// The DMESG control, as a plain relative link to a file this run wrote.
 //
-// The link carries the RUN ID and no filename. The server generates the
-// Content-Disposition name from that run's own metadata; a filename travelling in the URL
-// would end up in a response header, where a CR/LF is header injection.
-std::string render_dmesg_action(const RunResult &result) {
-  std::ostringstream out;
-  // Disabled is the default state, so a browser with scripting off gets the honest
-  // answer rather than a link that cannot work.
-  out << "<button type=\"button\" class=\"export-pdf-btn\" id=\"export-dmesg\" disabled "
-      << "data-run-id=\"" << html_escape(result.run_id) << "\">Export DMESG</button>";
-  return out.str();
-}
-
-// The note that explains the disabled control, and the script that resolves which state
-// the page is actually in.
+// The earlier model rendered a disabled button plus a script that asked, at load time,
+// whether a server was there -- because the same HTML is read both served and straight
+// off disk over file://. Producing the log as an artifact removes the question: the file
+// travels with the report, so the link works in both cases and the script is gone.
 //
-// Rendered AFTER the export row so the note sits under the buttons, matching the approved
-// preview. Both live outside .export-actions: the note is prose, not an action.
-std::string render_dmesg_note_and_script(const RunResult &result) {
-  std::ostringstream out;
-  // Visible by default, because disabled is the default. A note that started hidden would
-  // leave an archived report showing a dead button and no explanation.
-  out << "<p class=\"export-note\" id=\"export-dmesg-note\">DMESG export requires the diagnostic server.</p>";
-  if (result.run_id.empty()) {
-    // A CLI run has no server to ask, so there is no state to resolve: the button stays
-    // disabled and the note stays up. Emitting the script anyway would be dead code.
-    return out.str();
+// The client still names nothing. The filename comes from the run's own metadata through
+// the same canonical naming the writer used, which is what keeps a client-supplied name
+// out of any response header.
+std::string render_dmesg_action(const RunResult &result, bool dmesg_log_present) {
+  // DMESG is produced with the other artifacts when the run finishes, so this is a plain
+  // relative link to a file that already exists -- the same shape as JSON and Markdown.
+  //
+  // That removes the whole live-resolution mechanism: no disabled state to explain, no
+  // script to decide whether a server is there, and no run id in a URL. The client never
+  // names the file; the name comes from the run's own metadata, which is what keeps a
+  // client-supplied filename out of the response.
+  // Rendered only when the file is really there. write_reports() writes the HTML last,
+  // so by this point the kernel log either exists beside it or could not be produced --
+  // and a control that cannot work is not shown at all rather than shown broken.
+  const std::string name = dmesg_log_filename(naming_of(result));
+  if (!dmesg_log_present) {
+    return std::string();
   }
-  out << "<script>(function(){"
-      << "var b=document.getElementById('export-dmesg');"
-      << "var n=document.getElementById('export-dmesg-note');"
-      << "if(!b||location.protocol==='file:'||!b.dataset.runId){return;}"
-      // Served by the server: turn the placeholder into the live download and drop the
-      // note, which would otherwise contradict a working button. Built with
-      // encodeURIComponent so an id can never break out of the query string.
-      << "b.disabled=false;"
-      << "if(n){n.hidden=true;}"
-      << "b.addEventListener('click',function(){"
-      << "location.href='/api/dmesg?download=1&run='+encodeURIComponent(b.dataset.runId);"
-      << "});"
-      << "})();</script>";
+  std::ostringstream out;
+  out << "<a class=\"export-pdf-btn\" href=\"" << html_escape(name) << "\" download>Export DMESG</a>";
   return out.str();
 }
 
@@ -1599,7 +1586,7 @@ std::string render_dmesg_note_and_script(const RunResult &result) {
 // wrote, so an archived folder opened over file:// still works. Nothing is serialised in
 // the browser and no name is derived a second time -- the hrefs come from the same
 // canonical naming the writer used, which is the only way a link and a file cannot drift.
-std::string render_export_toolbar(const RunResult &result) {
+std::string render_export_toolbar(const RunResult &result, bool dmesg_log_present) {
   const ReportNaming naming = naming_of(result);
   std::ostringstream out;
   out << "<div class=\"export-row\"><div class=\"export-actions\">";
@@ -1608,14 +1595,14 @@ std::string render_export_toolbar(const RunResult &result) {
       << "\" download>Export JSON</a>";
   out << "<a class=\"export-pdf-btn\" href=\"" << html_escape(report_artifact_filename(naming, ReportFormat::Markdown))
       << "\" download>Export Markdown</a>";
-  out << render_dmesg_action(result);
+  out << render_dmesg_action(result, dmesg_log_present);
   out << "</div></div>";
   return out.str();
 }
 
 // to and including close(). Silently returning void here is what let a full disk or
 // an unwritable directory look like a successful run.
-bool write_html(const RunResult &result, const std::string &path) {
+bool write_html(const RunResult &result, const std::string &path, bool dmesg_log_present) {
   std::ofstream out(path);
   if (!out) {
     return false;
@@ -1744,9 +1731,39 @@ table.overview .status-cell { font-weight: 700; font-size: 12px; text-transform:
 .evidence-row:last-child { border-bottom: 0; }
 .evidence-row .raw { text-align: right; color: #64717e; font-family: 'JetBrains Mono', ui-monospace, monospace; }
 /* review-plan 5.7: two charts side by side, per the approved preview's ".charts" rule. */
-.section.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
-.section.charts > .chart-frame { padding: 16px; }
-@media (max-width: 700px) { .section.charts { grid-template-columns: 1fr; } }
+/* One chart per row (design-spec: no side-by-side panels). Two charts sharing a row
+   render the SAME viewBox at half the width, so one SVG unit stops being one CSS pixel
+   and every declared font-size scales by the panel ratio. */
+.section.charts { display: grid; grid-template-columns: 1fr; gap: 28px; }
+/* Every chart renders its SVG at the SAME width, so one viewBox fits them all and the
+   scale stays 1.0. Two things broke that: containers with different padding, and charts
+   nested one section inside another -- each level added its own 16px and produced 868,
+   886, 900 and 902px boxes for a single 906-unit viewBox.
+   The fix is to give the chart box NO horizontal padding of its own and let the section
+   that holds it be the only one that indents. */
+.chart-frame { padding: 0; }
+.section .section { padding: 0; border-bottom: 0; }
+.metric-chart { padding: 14px 0; }
+/* The SVG renders at its viewBox width and is NOT stretched: with width:100% the box is
+   whatever the container happens to be (measured: 852, 870, 886, 934, 938) and every
+   declared font-size is multiplied by that ratio. Fixing the rendered width to the
+   viewBox width makes one SVG unit exactly one CSS pixel, so an 8px label is 8px.
+   A narrow viewport still scales the whole chart down together via max-width. */
+.chart-frame svg, .metric-chart svg { display: block; width: 906px; min-width: 906px; height: auto; overflow: visible; }
+/* Below ~1000px the fixed-width chart no longer fits. It SCROLLS inside its own box
+   rather than being squeezed: shrinking it would scale every label with it, which is the
+   defect the fixed width exists to prevent. The page itself never scrolls sideways. */
+.chart-frame, .metric-chart { overflow-x: auto; max-width: 100%; }
+/* Charts render at a FIXED 906px rather than filling whatever their container gives
+   them. Chasing the container width does not converge: the staircase indent, the nested
+   section and .metric-chart's own padding each subtract a different amount, and the
+   measured widths walked 870 / 886 / 938 / 838 as each was "fixed" in turn.
+   Pinning the rendered width to the viewBox width makes one SVG unit exactly one CSS
+   pixel everywhere, which is the property S8 actually asks for. The card body gives the
+   chart 968px, so a 906px chart fits without a scrollbar -- measured, not assumed. */
+.metric-chart { padding: 14px 0; }
+.section .section { padding: 0; border-bottom: 0; }
+
 /* review-plan 5.3.4: T03's stacked two-phase timing bar, colours from the approved
    preview (docs/assets/previews/t03-unified-preview.html). */
 .t03-phase-streamon { fill: #386fa4; }
@@ -1797,11 +1814,15 @@ table.overview .summary-text { color: #475569; }
 .backend-note { margin-left: auto; color: #52606d; font-size: 11px; font-weight: 600; text-transform: none; }
 .backend-gap { height: 16px; }
 /* Status colours in one place. Without a modifier a card reads as PASS. */
-.test-card { --status: #23834e; --status-text: #17643a; }
-.test-card.pass { --status: #23834e; --status-text: #17643a; }
-.test-card.warn { --status: #b37a00; --status-text: #8a5a00; }
-.test-card.fail { --status: #b54141; --status-text: #a73737; }
-.test-card.skip { --status: #697886; --status-text: #536171; }
+/* One status colour for the whole report (design-spec §4). Test Results Overview is the
+   reference, so the card header and the verdict cell read the same custom properties it
+   does. Three literal palettes used to live here and in the verdict cells, which made the
+   same PASS render as three different greens depending on the section. */
+.test-card { --status: var(--pass); --status-text: var(--pass); }
+.test-card.pass { --status: var(--pass); --status-text: var(--pass); }
+.test-card.warn { --status: var(--warn); --status-text: var(--warn); }
+.test-card.fail { --status: var(--fail); --status-text: var(--fail); }
+.test-card.skip { --status: var(--skip); --status-text: var(--skip); }
 .test-card { display: block; margin: 14px 0 44px 28px; border: 1px solid #cbd3dc; border-left: 5px solid var(--status); border-radius: 6px; overflow: hidden; background: #fff; }
 .test-header { display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; align-items: center; min-height: 56px; padding: 11px 16px; border-bottom: 1px solid #d6dde5; background: #f8fafb; }
 .test-header .status { color: var(--status-text); font-size: 13px; font-weight: 800; }
@@ -1812,16 +1833,52 @@ table.overview .summary-text { color: #475569; }
 .test-card .section:last-child { border-bottom: 0; }
 .test-card .section p { margin: 0; color: #354352; font-size: 12px; }
 .test-body { padding: 16px; }
+/* Grid tables (design-spec S1). Header and rows share one grid-template, so the
+   columns line up exactly; the horizontal padding sits on the ROW, not on each cell,
+   which is what keeps the columns from creeping inward. Columns are equal 1fr: a
+   fixed px width makes the gaps between columns visibly unequal. */
+.grid-head, .grid-row { display: grid; gap: 0; padding: 6px 16px; }
+.grid-head { color: #52606d; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .3px; border-bottom: 1px solid #aeb9c5; }
+.grid-row { color: #2d3a47; font-size: 9px; border-bottom: 1px solid #f0f2f5; }
+.grid-row:last-child { border-bottom: 0; }
+.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.cols-5 { grid-template-columns: repeat(5, 1fr); }
+.cols-6 { grid-template-columns: repeat(6, 1fr); }
+.cols-7 { grid-template-columns: repeat(7, 1fr); }
+.cols-8 { grid-template-columns: repeat(8, 1fr); }
+.cols-9 { grid-template-columns: repeat(9, 1fr); }
+.cols-10 { grid-template-columns: repeat(10, 1fr); }
+/* Only a verdict cell carries colour and weight; every other cell stays plain, so a
+   coloured number can never be misread as a status (design-spec). */
+.grid-row .verdict { font-weight: 800; letter-spacing: .3px; }
+.grid-row .verdict.pass { color: var(--pass); }
+.grid-row .verdict.warn { color: var(--warn); }
+.grid-row .verdict.fail { color: var(--fail); }
+.grid-row .verdict.skip { color: var(--skip); }
+/* Item subheading under Measurement (S2): names the chart or table that follows. */
+.item-label { margin: 0 0 8px; padding: 0 16px 5px 32px; color: #596776; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .3px; border-bottom: 1px solid #dfe5eb; }
+.grid-row + .item-label { margin-top: 14px; }
+/* Staircase (S3): section label at 21px, item label at 53px, item content at 69px.
+   Scoped by has-items so a section without subheadings keeps its own indent. */
+.has-items .grid-head, .has-items .grid-row, .has-items .chart-legend { padding-left: 48px; }
+/* The chart box keeps the staircase alignment WITHOUT the indent eating into the 906px
+   the SVG needs: 968 available - 48 indent = 920, which overflowed by 14px. Pulling the
+   box out by the section padding restores the room while the left edge still lines up. */
+.has-items .chart-frame { padding-left: 48px; margin-right: -20px; }
+.metric-chart { margin: 0 -14px; }
+.chart-legend { display: flex; gap: 16px; margin: 0 0 8px; padding-left: 16px; color: #52606d; font-size: 9px; }
+.legend-dot { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border-radius: 2px; vertical-align: middle; }
 /* Charts use a ~520-unit viewBox so one SVG unit renders at roughly one CSS
    pixel: with the old 760-unit box inside a 360px column every label was scaled
    down to about 7px. Wide charts (many categories, or horizontal rows) take the
    full row instead of being squeezed into a column. */
-.metric-visuals { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 12px; margin-bottom: 12px; }
+.metric-visuals { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 12px; }
 .metric-chart { border: 1px solid #dbe4ee; border-radius: 6px; background: #fff; padding: 14px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
 .metric-chart--wide { grid-column: 1 / -1; }
 .metric-chart-title { color: #1e293b; font-size: 13px; font-weight: 750; margin-bottom: 8px; }
 .metric-chart-title span { color: #94a3b8; font-size: 10px; font-weight: 600; margin-left: 4px; }
-.metric-chart svg { display: block; width: 100%; max-width: 100%; height: auto; overflow: visible; }
 .metric-xy-chart svg { min-width: 0; }
 .chart-grid { stroke: #eef2f7; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .chart-axis { stroke: #cbd5e1; stroke-width: 1; vector-effect: non-scaling-stroke; }
@@ -1984,7 +2041,7 @@ table.overview .summary-text { color: #475569; }
                /* A printed column is narrower than a screen row, so a narrow chart
                   would be blown up while a wide one shrank. Cap the narrow ones and
                   let the wide ones use the full text width. */
-               .metric-chart:not(.metric-chart--wide) svg { max-width: 500px; }
+
                /* Page geometry is declared once, above this block. */ }
 </style></head><body>
 <div class="container">
@@ -1998,8 +2055,7 @@ table.overview .summary-text { color: #475569; }
   // The four-button export toolbar, transferred from the layout approved in plan 1.7:
   // its own row inside the header, BELOW the title. An earlier attempt put it above the
   // H1, which made the export actions read as the report's primary content.
-  out << render_export_toolbar(result);
-  out << render_dmesg_note_and_script(result);
+  out << render_export_toolbar(result, dmesg_log_present);
   out << "<div class=\"meta-groups\">";
 
   out << "<div class=\"meta-group\"><div class=\"group-title\">Run</div>";
@@ -2252,6 +2308,44 @@ std::string artifact_path(const RunResult &result, const std::string &output_dir
 
 }  // namespace
 
+// Reads the current boot's kernel log. A FIXED command string: nothing from a request or
+// from the run reaches a shell, and no privileged path is introduced -- journalctl reads
+// the journal through group membership ("adm" / "systemd-journal") alone, where dmesg(1)
+// would need CAP_SYSLOG wherever kernel.dmesg_restrict=1.
+//
+// Returns false when the log cannot be read at all. The caller then writes no file and
+// the report links to none: an href to a file that was never written is a 404 the reader
+// only discovers by clicking.
+bool read_kernel_log(std::string *output) {
+  FILE *pipe = popen("journalctl -k -b --no-pager 2>/dev/null", "r");
+  if (pipe == nullptr) {
+    return false;
+  }
+  char buffer[4096];
+  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+    *output += buffer;
+  }
+  return pclose(pipe) == 0 && !output->empty();
+}
+
+// Writes the kernel log beside the other artifacts, under the run's canonical name.
+// Returns false when there was nothing to write -- which is not a run failure: a machine
+// without journal access still produces a complete report, just without this file.
+bool write_dmesg_log(const RunResult &result, const std::string &output_directory) {
+  std::string log;
+  if (!read_kernel_log(&log)) {
+    return false;
+  }
+  const std::string path = output_directory + "/" + dmesg_log_filename(naming_of(result));
+  std::ofstream out(path);
+  if (!out) {
+    return false;
+  }
+  out << log;
+  out.close();
+  return out.good();
+}
+
 std::vector<ReportArtifact> write_reports(const RunResult &result, const std::string &output_directory) {
   // Name everything BEFORE creating anything. A run that cannot be named honestly -- a
   // triggered run whose Trigger Profile source file was never resolved -- must fail here
@@ -2268,6 +2362,11 @@ std::vector<ReportArtifact> write_reports(const RunResult &result, const std::st
     throw ReportWriteError("could not create the report output directory \"" + output_directory + "\"");
   }
 
+  // The kernel log is written FIRST, because the HTML has to know whether to render a
+  // link to it. It is not a mandatory artifact: a machine whose user is not in "adm"
+  // still produces a complete report, just without this file and without the control.
+  const bool dmesg_log_present = write_dmesg_log(result, output_directory);
+
   std::vector<ReportArtifact> artifacts;
   for (ReportFormat format : mandatory_formats()) {
     const std::string path = artifact_path(result, output_directory, format);
@@ -2280,7 +2379,7 @@ std::vector<ReportArtifact> write_reports(const RunResult &result, const std::st
         written = write_markdown(result, path);
         break;
       case ReportFormat::Html:
-        written = write_html(result, path);
+        written = write_html(result, path, dmesg_log_present);
         break;
     }
     if (!written) {
@@ -2293,6 +2392,7 @@ std::vector<ReportArtifact> write_reports(const RunResult &result, const std::st
     // in the returned list names a file that really exists.
     artifacts.push_back({format, path});
   }
+
   return artifacts;
 }
 

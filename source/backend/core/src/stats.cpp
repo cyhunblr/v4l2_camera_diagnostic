@@ -70,4 +70,56 @@ Stats compute_stats(const std::vector<double> &data) {
   return s;
 }
 
+WarmupResult find_warmup_frame(const std::vector<double> &latencies, double steady_reference_ms,
+                               double stability_threshold_pct) {
+  WarmupResult result;
+
+  // Judging against a reference of zero is judging against nothing. Saying so is the
+  // whole point: the alternative is a frame number that reads like a measurement.
+  if (!(steady_reference_ms > 0.0)) {
+    result.censor = WarmupResult::Censor::NoReference;
+    return result;
+  }
+
+  std::size_t good = 0;
+  for (double latency : latencies) {
+    if (latency > 0.0) {
+      ++good;
+    }
+  }
+  // Three good frames is the minimum that can show a trend rather than a pair of points.
+  if (good < 3) {
+    result.censor = WarmupResult::Censor::TooFewFrames;
+    return result;
+  }
+
+  const double tolerance = steady_reference_ms * (stability_threshold_pct / 100.0);
+  for (std::size_t start = 0; start < latencies.size(); ++start) {
+    if (latencies[start] <= 0.0) {
+      continue;  // a missed frame cannot be the moment latency settled
+    }
+    bool settled = true;
+    for (std::size_t at = start; at < latencies.size(); ++at) {
+      if (latencies[at] <= 0.0) {
+        continue;
+      }
+      if (std::abs(latencies[at] - steady_reference_ms) > tolerance) {
+        settled = false;
+        break;
+      }
+    }
+    if (settled) {
+      result.stabilized = true;
+      result.frame = static_cast<int>(start);
+      result.censor = WarmupResult::Censor::None;
+      return result;
+    }
+  }
+
+  // Latency was still moving when the window ended. There is no warm-up length to
+  // report -- the observation window was too short, and how much too short is unknown.
+  result.censor = WarmupResult::Censor::NeverSettled;
+  return result;
+}
+
 }  // namespace v4l2diag

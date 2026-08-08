@@ -69,7 +69,7 @@ struct MultiBufferOutcome {
   int samples_captured = 0;
 };
 
-// t07 verdict, per report-ui-review-plan.md §5.7.3:
+// t07 verdict, per report-ui-design-spec.md §5.7.3:
 //   FAIL  no configuration reached a usable session (or the sweep is empty)
 //   WARN  some configuration failed, or frames were missed, but at least one
 //         configuration is usable
@@ -85,7 +85,7 @@ struct PulseWidthOutcome {
   int samples_captured = 0;
 };
 
-// t16 verdict, per report-ui-review-plan.md §5.16.8:
+// t16 verdict, per report-ui-design-spec.md §5.16.8:
 //   FAIL  no width produced a frame (session failures are handled earlier)
 //   WARN  the sweep ran but a width had partial hits, or the edge evidence
 //         was inconclusive

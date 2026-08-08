@@ -1,4 +1,4 @@
-// PDF is no longer a report format (report-ui-review-plan.md §6.2): the product
+// PDF is no longer a report format (report-ui-design-spec.md §6.2): the product
 // generates HTML and the user prints it. These checks lock the removal and that
 // legacy *web run requests* still holding "pdf" degrade gracefully instead of
 // breaking a run.
@@ -132,7 +132,7 @@ int main() {
     // The HTML report keeps its Export button, and it must be a plain
     // browser-print trigger -- same behaviour as Ctrl+P.
     //
-    // The label is now the final one: "Export PDF" (report-ui-review-plan.md 1.3).
+    // The label is now the final one: "Export PDF" (report-ui-design-spec.md 1.3).
     // Plan item 3.3 renamed the source and this assertion together; the previous
     // "Export as PDF" was a leftover from 2.2 and is asserted gone below.
     v4l2diag::ReportNaming naming;

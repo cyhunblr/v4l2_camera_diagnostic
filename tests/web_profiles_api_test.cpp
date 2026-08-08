@@ -66,14 +66,6 @@ struct Response {
   std::string headers;
 };
 
-std::size_t count_of(const std::string &haystack, const std::string &needle) {
-  std::size_t count = 0;
-  for (std::size_t at = haystack.find(needle); at != std::string::npos; at = haystack.find(needle, at + 1)) {
-    ++count;
-  }
-  return count;
-}
-
 // The value of a response header, or an empty string. Case-insensitive on the name, as
 // HTTP is.
 std::string header_value(const Response &response, const std::string &name) {
@@ -956,6 +948,38 @@ int main() {
                 "the refusal does not mention the missing trigger profile: " + res.body);
   }
 
+  // --- The dmesg endpoint is GONE (plan 5.4) -------------------------------
+  {
+    // DMESG became a produced artifact (3.4), so nothing calls this endpoint any more:
+    // measured 2026-08-08, zero references in the frontend and in the report HTML. An
+    // endpoint nobody calls is still reachable, so the surface it exposed -- running
+    // journalctl, resolving a run id, writing a Content-Disposition header -- is removed
+    // rather than left guarded.
+    //
+    // The ten security assertions that used to live here went with it. They protected a
+    // path that no longer exists; keeping them would have tested a handler the server
+    // does not have.
+    for (const char *dmesg_path :
+         {"/api/dmesg", "/api/dmesg?download=1&run=web-run-7", "/api/dmesg?download=1&run=../../etc/passwd"}) {
+      const Response response = request(port, "GET", dmesg_path);
+      ok &= check(response.status == 404, std::string("the removed dmesg endpoint still answers (status ") +
+                                              std::to_string(response.status) + "): " + dmesg_path);
+      // Nothing leaks through the 404 either: no kernel log, no download header.
+      ok &= check(response.body.find("kernel:") == std::string::npos &&
+                      response.body.find("Linux version") == std::string::npos,
+                  std::string("a 404 still returned kernel log content: ") + dmesg_path);
+      ok &= check(header_value(response, "Content-Disposition").empty(),
+                  std::string("a 404 still produced a download header: ") + dmesg_path);
+    }
+
+    // /api/profiles/validate goes with it (plan 5.4): implemented, never called by the
+    // frontend, and covered by no test. POST /api/profiles still validates -- it shares
+    // the same code path -- so nothing that was checked stops being checked.
+    const Response validate = request(port, "POST", "/api/profiles/validate", v4_profile("probe"));
+    ok &= check(validate.status == 404,
+                "the removed validate endpoint still answers (status " + std::to_string(validate.status) + ")");
+  }
+
   server.stop();
 
   // --- Restart fallback: the structured result survives a restart ----------
@@ -1433,200 +1457,6 @@ int main() {
     }
     ok &= check(read_file(index) == before,
                 "an unsupported runs-index.json (" + pair.first + ") was modified on shutdown");
-    unlink(index.c_str());
-    rmdir(dir.c_str());
-  }
-
-  // --- Export DMESG: the server names the file, not the client (plan 3.4) --
-  {
-    // The download name is a Content-Disposition header. If the client could supply it, a
-    // CR/LF in that string would be header injection, and a name that does not match the
-    // run it claims to describe could not be detected. So the request carries a run id and
-    // the server derives the name from that run's own index record.
-    const std::string dir = make_temp_dir("dmesg-name");
-    const std::string index = dir + "/runs-index.json";
-    write_file(index,
-               R"({"schema_version": 1, "runs": [{
-                    "id": "web-run-7",
-                    "status": "completed",
-                    "started_at_utc": "2026-07-30T12:02:38Z",
-                    "finished_at_utc": "2026-07-30T12:09:11Z",
-                    "trigger_mode": "hardware",
-                    "trigger_profile_file": "anvil.json",
-                    "threshold_config_file": "stress-test.json",
-                    "reports": []
-                  }]})");
-
-    v4l2diag::WebServerOptions opts = options;
-    opts.report_root = dir;
-    opts.port = 18890;
-    opts.max_port = 18910;
-    v4l2diag::WebServer dmesg_server(opts);
-    std::string dmesg_error;
-    if (check(dmesg_server.start(&dmesg_error), "the dmesg server did not start: " + dmesg_error)) {
-      const unsigned short port = dmesg_server.port();
-
-      // The canonical name for this run, from the one generation point (plan 3.5.1).
-      v4l2diag::ReportNaming naming;
-      naming.started_at_utc = "2026-07-30T12:02:38Z";
-      naming.trigger_mode = v4l2diag::TriggerMode::Hardware;
-      naming.trigger_profile_file = "anvil.json";
-      naming.test_configuration_file = "stress-test.json";
-      const std::string expected = v4l2diag::dmesg_log_filename(naming);
-      ok &= check(expected == "2026-07-30_12-02-38_hardware-trigger_anvil_stress-test_dmesg.log",
-                  "the expected dmesg name is not the canonical one: " + expected);
-
-      {
-        const Response response = request(port, "GET", "/api/dmesg?download=1&run=web-run-7");
-        const std::string disposition = header_value(response, "Content-Disposition");
-        if (response.status == 200) {
-          ok &= check(disposition == "attachment; filename=\"" + expected + "\"",
-                      "the download name is not the run's canonical name: \"" + disposition + "\"");
-          // The fixed pre-3.4 name is gone.
-          ok &= check(disposition.find("dmesg.txt") == std::string::npos, "the fixed dmesg.txt name survived");
-        } else {
-          // journalctl is unavailable in this environment (no 'adm' membership, or no
-          // journal at all). A failed read must not offer a download at all -- a browser
-          // would otherwise save the error text under a .log name.
-          ok &= check(disposition.empty(),
-                      "a failed kernel-log read still set a download header: \"" + disposition + "\"");
-        }
-      }
-
-      // An unknown run is REFUSED, not merely left unnamed. Checking only for a missing
-      // header would pass while the server still ran journalctl and returned the kernel
-      // log with a 200 -- the refusal has to be the response itself.
-      //
-      // "web-run" and "web-run-7x" are the prefix and suffix cases: a lookup that matched
-      // loosely would serve one run's log under another run's name.
-      for (const char *unknown : {"web-run-nope", "../../etc/passwd", "web-run-7x", "web-run", "WEB-RUN-7"}) {
-        const std::string path = std::string("/api/dmesg?download=1&run=") + unknown;
-        const Response response = request(port, "GET", path);
-        ok &= check(response.status == 404, std::string("an unknown run id was not refused (status ") +
-                                                std::to_string(response.status) + "): " + unknown);
-        ok &= check(response.body.find("No such run") != std::string::npos,
-                    std::string("the refusal does not say why: ") + unknown + " -> " + response.body);
-        // The kernel log must not be in the body of a refusal.
-        ok &= check(response.body.find("kernel:") == std::string::npos &&
-                        response.body.find("Linux version") == std::string::npos,
-                    std::string("a refused request still returned kernel log content: ") + unknown);
-        ok &= check(header_value(response, "Content-Disposition").empty(),
-                    std::string("an unknown run id produced a download header: ") + unknown);
-      }
-
-      // A download with no run at all is a bad request, not a silent full-log download.
-      {
-        const Response response = request(port, "GET", "/api/dmesg?download=1");
-        ok &= check(response.status == 400,
-                    "a download without a run id was not refused (status " + std::to_string(response.status) + ")");
-        ok &= check(header_value(response, "Content-Disposition").empty(),
-                    "a download without a run id produced a download header");
-      }
-
-      // A client-supplied filename is ignored outright. The header must never echo it,
-      // and a CRLF in it must never reach the response.
-      {
-        const Response response = request(port, "GET", "/api/dmesg?download=1&run=web-run-7&filename=evil.sh");
-        const std::string disposition = header_value(response, "Content-Disposition");
-        ok &= check(disposition.find("evil.sh") == std::string::npos,
-                    "a client-supplied filename reached the header: \"" + disposition + "\"");
-        // Whatever came back, the header holds one line: no injected header can appear.
-        ok &= check(disposition.find('\r') == std::string::npos && disposition.find('\n') == std::string::npos,
-                    "the disposition header spans more than one line");
-        ok &= check(count_of(response.headers, "Content-Disposition") <= 1,
-                    "more than one Content-Disposition header was emitted");
-      }
-
-      // Without download=1 there is no attachment header at all: the endpoint still
-      // serves the log as text for the live view.
-      {
-        const Response response = request(port, "GET", "/api/dmesg?run=web-run-7");
-        ok &= check(header_value(response, "Content-Disposition").empty(),
-                    "a non-download request produced an attachment header");
-      }
-
-      dmesg_server.stop();
-    }
-
-    unlink(index.c_str());
-    rmdir(dir.c_str());
-  }
-
-  // --- The kernel log is not READ at all for a refused request ------------
-  {
-    // The assertions above prove the RESPONSE is a refusal. This proves the refusal
-    // happens before anything executes: a guard that ran journalctl and then discarded
-    // the output would satisfy every check above while still spawning a process for any
-    // unauthenticated caller who can reach the port.
-    const std::string dir = make_temp_dir("dmesg-seam");
-    const std::string index = dir + "/runs-index.json";
-    write_file(index,
-               R"({"schema_version": 1, "runs": [{
-                    "id": "web-run-9",
-                    "status": "completed",
-                    "started_at_utc": "2026-07-30T12:02:38Z",
-                    "trigger_mode": "free-run",
-                    "threshold_config_file": "",
-                    "reports": []
-                  }]})");
-
-    int reads = 0;
-    v4l2diag::WebServerOptions opts = options;
-    opts.report_root = dir;
-    opts.port = 18915;
-    opts.max_port = 18935;
-    opts.kernel_log_reader = [&reads](std::string *output) {
-      ++reads;
-      *output = "kernel: a fake log line\n";
-      return true;
-    };
-    v4l2diag::WebServer seam_server(opts);
-    std::string seam_error;
-    if (check(seam_server.start(&seam_error), "the seam server did not start: " + seam_error)) {
-      const unsigned short port = seam_server.port();
-
-      for (const char *unknown : {"web-run-nope", "../../etc/passwd", "web-run", "web-run-9x"}) {
-        const int before = reads;
-        const Response response = request(port, "GET", std::string("/api/dmesg?download=1&run=") + unknown);
-        ok &= check(response.status == 404, std::string("a refused run id did not 404: ") + unknown);
-        ok &= check(reads == before, std::string("the kernel log was read for a refused run id: ") + unknown);
-      }
-      {
-        const int before = reads;
-        const Response response = request(port, "GET", "/api/dmesg?download=1");
-        ok &= check(response.status == 400, "a download with no run id did not 400");
-        ok &= check(reads == before, "the kernel log was read for a download with no run id");
-      }
-
-      // Positive control: a known run DOES read the log. Without it the counter could sit
-      // at zero because the reader is never wired up at all, and every check above would
-      // pass for the wrong reason.
-      {
-        const int before = reads;
-        const Response response = request(port, "GET", "/api/dmesg?download=1&run=web-run-9");
-        ok &= check(response.status == 200, "a known run's download was refused");
-        ok &= check(reads == before + 1, "a known run's download did not read the kernel log");
-        ok &= check(response.body.find("a fake log line") != std::string::npos,
-                    "the injected reader's output did not reach the response");
-        ok &= check(header_value(response, "Content-Disposition") ==
-                        "attachment; filename=\"2026-07-30_12-02-38_free-run_default_dmesg.log\"",
-                    "the download name is wrong: \"" + header_value(response, "Content-Disposition") + "\"");
-      }
-
-      // The live view needs no run and still reads the log: refusing it would break the
-      // page that shows the current boot's kernel log.
-      {
-        const int before = reads;
-        const Response response = request(port, "GET", "/api/dmesg");
-        ok &= check(response.status == 200, "the live kernel-log view was refused");
-        ok &= check(reads == before + 1, "the live view did not read the kernel log");
-        ok &=
-            check(header_value(response, "Content-Disposition").empty(), "the live view produced an attachment header");
-      }
-
-      seam_server.stop();
-    }
-
     unlink(index.c_str());
     rmdir(dir.c_str());
   }

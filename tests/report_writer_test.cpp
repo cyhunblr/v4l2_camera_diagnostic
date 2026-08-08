@@ -335,7 +335,7 @@ int main() {
       // The fixed pre-3.5 name must be gone, not merely accompanied.
       !require(!exists(dir + "/diagnostic-report.html"), "the fixed pre-3.5 name is still written") ||
       // The product writes no PDF: the HTML report's Export button calls
-      // window.print() instead (report-ui-review-plan.md §6.2).
+      // window.print() instead (report-ui-design-spec.md §6.2).
       !require(!exists(dir + "/diagnostic-report.pdf"), "a PDF report was written")) {
     return 1;
   }
@@ -359,7 +359,16 @@ int main() {
   html_ok &= require(html.find("metric-card") == std::string::npos, "legacy metric cards remain");
   html_ok &= require(html.find("Latency Snapshot") == std::string::npos, "unexpected latency snapshot");
   html_ok &= require(html.find("Test Duration") == std::string::npos, "unexpected test duration chart");
-  html_ok &= require(html.find("overflow-x: auto") == std::string::npos, "chart horizontal scrollbar CSS remains");
+  // A chart MAY scroll inside its own box -- that is how a 906px chart survives a 390px
+  // viewport without rescaling its labels (design-spec 6.10, measured across four
+  // viewports). What must never scroll sideways is the DOCUMENT: a report the reader has
+  // to pan horizontally to read is the defect this assertion was written for.
+  const std::size_t body_rule = html.find("body {");
+  html_ok &=
+      require(body_rule == std::string::npos || html.find("overflow-x: auto", body_rule) > html.find("}", body_rule),
+              "the document itself scrolls horizontally");
+  html_ok &= require(html.find(".chart-frame, .metric-chart { overflow-x: auto") != std::string::npos,
+                     "charts no longer scroll inside their own box");
   html_ok &= require(html.find("min-width: 620px") == std::string::npos, "chart minimum width still forces scrolling");
   html_ok &= require(html.find("metric-dot-chart") != std::string::npos, "missing statistic dot-range chart");
   html_ok &= require(html.find("metric-vertical-bars") != std::string::npos, "missing vertical sweep chart");
@@ -418,8 +427,8 @@ int main() {
                      "the Supporting values strip survived");
   // What replaced it: a per-test table. This fixture's tests are registered, so each must
   // have one.
-  html_ok &=
-      require(html.find("<table class=\"evidence\">") != std::string::npos, "no per-test evidence table was rendered");
+  html_ok &= require(html.find("class=\"grid-head cols-") != std::string::npos,
+                     "no per-test evidence table was rendered (design-spec S1: div+grid, not <table>)");
   // review-plan 5.1.5/5.1.6 renamed T01's visible presentation: the bool capability is a
   // labelled row with SUPPORTED beside it, and the format total is the section count.
   html_ok &=
@@ -431,8 +440,11 @@ int main() {
   html_ok &= require(occurrence_count(html, "data-metric=\"hits_1ms\"") == 1, "charted sweep metric is duplicated");
   html_ok &= require(occurrence_count(html, "data-metric=\"latency_stddev\"") == 0,
                      "latency stddev should not compress the primary latency chart");
-  html_ok &=
-      require(html.find("Latency stddev") != std::string::npos, "latency stddev is missing from the test's table");
+  // The row is named "Standard deviation" now -- the approved T14 Variability table
+  // spells the statistic out rather than prefixing it with the quantity, which the
+  // Metric column already carries.
+  html_ok &= require(html.find("Standard deviation") != std::string::npos,
+                     "the latency standard deviation is missing from the test's table");
   // t17's formats are still named -- in its table, which is what the approved preview has.
   html_ok &= require(html.find("UYVY") != std::string::npos, "UYVY is missing from the format comparison table");
   html_ok &= require(html.find("NV16") != std::string::npos, "NV16 is missing from the format comparison table");
@@ -487,31 +499,34 @@ int main() {
   html_ok &= require(html.find("data-metric=\"production_timeout_ms\"") != std::string::npos,
                      "missing inferred production timeout marker");
   html_ok &= require(occurrence_count(html, "data-metric=\"cliff_ms\"") == 1, "t13 cliff metric is duplicated");
-  // A recorded metric now appears in its own test's section, once. T01's fixture records
-  // cliff_ms, so it shows under "Recorded values" with its sentinel rendered as N/A.
-  html_ok &= require(occurrence_count(html, "<dt>Cliff ms</dt>") == 1,
+  // The "Recorded values" dump that used to carry every metric under a generic heading is
+  // gone (design-spec bans it), so a metric is presented by the test that owns it -- the
+  // cliff belongs to t13 and is charted there, exactly once.
+  html_ok &= require(occurrence_count(html, "data-metric=\"cliff_ms\"") == 1,
                      "the recorded cliff metric is not presented exactly once");
   html_ok &= require(html.find("data-metric=\"delta_mean_ms\"") != std::string::npos,
                      "negative non-sentinel delta was not charted");
-  // Sentinel metrics still read "N/A" -- the contract survived the move from the <dl> to
-  // the per-test tables. A sentinel rendered as a number would put "-500 ms" in a report.
-  html_ok &= require(html.find(">N/A<") != std::string::npos, "sentinel metrics were not rendered as N/A");
+  // The sentinel guard is what matters, and it is checked by its effect: -500 is a
+  // sentinel, and no rendering path may put it in the document as a number. The former
+  // ">N/A<" assertion read the generic dump, which no longer exists -- keeping it would
+  // have measured a display path instead of the guard.
   html_ok &= require(html.find("-500") == std::string::npos, "a sentinel metric was rendered as a raw number");
   html_ok &= require(html.find("Failed</span><strong>0</strong>") != std::string::npos,
                      "zero-count status is missing from the legend");
   html_ok &= require(html.find("fetch(\"/api/dmesg\")") == std::string::npos, "dmesg export still uses fetch");
-  // Plan 3.4: the fixed "dmesg.txt" is gone and the client no longer names the file at
-  // all. The control is a real disabled button that only enables when the page is being
-  // served, and the download URL carries the run id -- the SERVER generates the filename
-  // from that run's metadata, because a name arriving from the client would land in a
-  // Content-Disposition header where a CR/LF is header injection.
+  // Plan 3.4 (decision 2026-08-08): DMESG is a produced artifact, linked like JSON and
+  // Markdown. The fixed "dmesg.txt" is gone, the client still names nothing, and the
+  // disabled-button-plus-script model is gone with it.
+  //
+  // This fixture writes into a temporary directory on a machine that may or may not
+  // grant journal access, so the control is CONDITIONAL: it appears only when the log
+  // was really written. What is unconditional is that the old mechanism is absent.
   html_ok &= require(html.find("dmesg.txt") == std::string::npos, "the fixed dmesg.txt name survived");
-  html_ok &= require(html.find("download=\"") == std::string::npos,
-                     "the report still sets a download filename on an export control");
-  html_ok &= require(html.find("id=\"export-dmesg\"") != std::string::npos, "the dmesg export control is missing");
-  html_ok &= require(
-      html.find("<button type=\"button\" class=\"export-pdf-btn\" id=\"export-dmesg\" disabled") != std::string::npos,
-      "the dmesg control is not a real disabled button");
+  html_ok &=
+      require(html.find("id=\"export-dmesg\" disabled") == std::string::npos, "the disabled dmesg button came back");
+  html_ok &= require(html.find("export-dmesg-note") == std::string::npos, "the archived-dmesg note came back");
+  html_ok &= require(html.find("/api/dmesg?download=1") == std::string::npos,
+                     "the report still builds a live dmesg download URL");
 
   // Notes render as their own callout, not as another monospace detail line.
   html_ok &=

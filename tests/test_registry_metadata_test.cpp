@@ -1,5 +1,5 @@
 // The full protected contract of all 26 registered tests: canonical display
-// name (authority: docs/web-ui-audit-fix-plan.md §0.5), user-facing layer, and
+// name (authority: docs/implementation-plan.md §0.5), user-facing layer, and
 // the technical category and tags.
 //
 // The technical keys are stated exactly, not just checked for non-emptiness:
@@ -47,30 +47,49 @@ struct Expected {
 const std::map<std::string, Expected> kCanonical = {
     {"t01-device-compliance", {"V4L2 Device Compliance", v4l2diag::TestLayer::Discovery, "discovery", {"stable"}}},
     {"t02-control-inventory", {"V4L2 Control Inventory", v4l2diag::TestLayer::Discovery, "discovery", {"stable"}}},
-    {"t03-pipeline-ready", {"Pipeline Readiness after STREAMON", v4l2diag::TestLayer::StateMachine, "stream-state", {"stable"}}},
-    {"t04-no-streamon", {"Frame Capture without STREAMON", v4l2diag::TestLayer::StateMachine, "stream-state", {"stable"}}},
-    {"t05-pollerr-handling", {"STREAMOFF Error Handling and Recovery", v4l2diag::TestLayer::StateMachine, "stream-state", {"stress"}}},
-    {"t06-stream-cycles", {"STREAMON/STREAMOFF Cycle Reliability", v4l2diag::TestLayer::StateMachine, "stream-state", {"stress"}}},
+    {"t03-pipeline-ready",
+     {"Pipeline Readiness after STREAMON", v4l2diag::TestLayer::StateMachine, "stream-state", {"stable"}}},
+    {"t04-no-streamon",
+     {"Frame Capture without STREAMON", v4l2diag::TestLayer::StateMachine, "stream-state", {"stable"}}},
+    {"t05-pollerr-handling",
+     {"STREAMOFF Error Handling and Recovery", v4l2diag::TestLayer::StateMachine, "stream-state", {"stress"}}},
+    {"t06-stream-cycles",
+     {"STREAMON/STREAMOFF Cycle Reliability", v4l2diag::TestLayer::StateMachine, "stream-state", {"stress"}}},
     {"t07-multi-buffer", {"Multi-buffer Configurations", v4l2diag::TestLayer::BufferMemory, "buffering", {"stable"}}},
-    {"t08-buffer-overwrite", {"Buffer Saturation Behavior", v4l2diag::TestLayer::BufferMemory, "buffering", {"stress"}}},
-    {"t09-buffer-recycling", {"Buffer Requeue Delay Tolerance", v4l2diag::TestLayer::BufferMemory, "buffering", {"stable"}}},
+    {"t08-buffer-overwrite",
+     {"Buffer Saturation Behavior", v4l2diag::TestLayer::BufferMemory, "buffering", {"stress"}}},
+    {"t09-buffer-recycling",
+     {"Buffer Requeue Delay Tolerance", v4l2diag::TestLayer::BufferMemory, "buffering", {"stable"}}},
     {"t10-buffer-flags", {"V4L2 Buffer Flag Analysis", v4l2diag::TestLayer::BufferMemory, "metadata", {"stable"}}},
     {"t11-memory-throughput", {"Memory Access Throughput", v4l2diag::TestLayer::BufferMemory, "memory", {"benchmark"}}},
-    {"t12-dmabuf-cache-sync", {"DMABUF CPU Read Synchronization", v4l2diag::TestLayer::BufferMemory, "dmabuf", {"device-specific"}}},
-    {"t13-poll-timeout-cliff", {"Poll Timeout Reliability Boundary", v4l2diag::TestLayer::PollingTimeout, "polling", {"stable"}}},
-    {"t14-trigger-latency", {"Trigger-to-Frame Delivery Latency", v4l2diag::TestLayer::Latency, "latency", {"benchmark"}}},
-    {"t15-nonblock-vs-block", {"Non-blocking Spin vs Blocking DQBUF", v4l2diag::TestLayer::Latency, "io-mode", {"device-specific"}}},
-    {"t16-gpio-pulse-width", {"Trigger Pulse Width and Edge Detection", v4l2diag::TestLayer::Latency, "trigger", {"device-specific"}}},
-    {"t17-format-comparison", {"Pixel Format Performance Comparison", v4l2diag::TestLayer::Latency, "format", {"benchmark"}}},
-    {"t18-control-sweep", {"V4L2 Control Value Impact Analysis", v4l2diag::TestLayer::Latency, "controls", {"stress", "benchmark"}}},
-    {"t19-resolution-sweep", {"Resolution Capability and Performance", v4l2diag::TestLayer::Latency, "format", {"benchmark"}}},
+    {"t12-dmabuf-cache-sync",
+     {"DMABUF CPU Read Synchronization", v4l2diag::TestLayer::BufferMemory, "dmabuf", {"device-specific"}}},
+    {"t13-poll-timeout-cliff",
+     {"Poll Timeout Reliability Boundary", v4l2diag::TestLayer::PollingTimeout, "polling", {"stable"}}},
+    {"t14-trigger-latency",
+     {"Trigger-to-Frame Delivery Latency", v4l2diag::TestLayer::Latency, "latency", {"benchmark"}}},
+    {"t15-nonblock-vs-block",
+     {"Non-blocking Spin vs Blocking DQBUF", v4l2diag::TestLayer::Latency, "io-mode", {"device-specific"}}},
+    {"t16-gpio-pulse-width",
+     {"Trigger Pulse Width and Edge Detection", v4l2diag::TestLayer::Latency, "trigger", {"device-specific"}}},
+    {"t17-format-comparison",
+     {"Pixel Format Performance Comparison", v4l2diag::TestLayer::Latency, "format", {"benchmark"}}},
+    {"t18-control-sweep",
+     {"V4L2 Control Value Impact Analysis", v4l2diag::TestLayer::Latency, "controls", {"stress", "benchmark"}}},
+    {"t19-resolution-sweep",
+     {"Resolution Capability and Performance", v4l2diag::TestLayer::Latency, "format", {"benchmark"}}},
     {"t20-sequence-continuity", {"Frame Sequence Continuity", v4l2diag::TestLayer::Integrity, "sequence", {"stable"}}},
-    {"t21-timestamp-monotonicity", {"Buffer Timestamp Monotonicity", v4l2diag::TestLayer::Integrity, "metadata", {"stable"}}},
+    {"t21-timestamp-monotonicity",
+     {"Buffer Timestamp Monotonicity", v4l2diag::TestLayer::Integrity, "metadata", {"stable"}}},
     {"t22-stuck-frame", {"Consecutive Frame Content Stability", v4l2diag::TestLayer::Integrity, "quality", {"stable"}}},
-    {"t23-sustained-capture", {"Sustained Capture Stability", v4l2diag::TestLayer::Stability, "stability", {"long-running"}}},
-    {"t24-latency-under-load", {"CPU Load Impact on Capture Latency", v4l2diag::TestLayer::Stability, "stability", {"benchmark"}}},
-    {"t25-multi-camera", {"Multi-camera Capture and Synchronization", v4l2diag::TestLayer::Stability, "stability", {"long-running"}}},
-    {"t26-cold-start", {"Post-STREAMON Latency Stabilization", v4l2diag::TestLayer::Stability, "stability", {"stable"}}},
+    {"t23-sustained-capture",
+     {"Sustained Capture Stability", v4l2diag::TestLayer::Stability, "stability", {"long-running"}}},
+    {"t24-latency-under-load",
+     {"CPU Load Impact on Capture Latency", v4l2diag::TestLayer::Stability, "stability", {"benchmark"}}},
+    {"t25-multi-camera",
+     {"Multi-camera Capture and Synchronization", v4l2diag::TestLayer::Stability, "stability", {"long-running"}}},
+    {"t26-cold-start",
+     {"Post-STREAMON Latency Stabilization", v4l2diag::TestLayer::Stability, "stability", {"stable"}}},
 };
 
 }  // namespace
@@ -80,9 +99,8 @@ int main() {
   bool ok = true;
   const auto tests = v4l2diag::built_in_tests();
 
-  ok &= check(tests.size() == kCanonical.size(),
-              "the registry holds " + std::to_string(tests.size()) + " tests, expected " +
-                  std::to_string(kCanonical.size()));
+  ok &= check(tests.size() == kCanonical.size(), "the registry holds " + std::to_string(tests.size()) +
+                                                     " tests, expected " + std::to_string(kCanonical.size()));
 
   // Every registered test matches the canonical table, and nothing is missing.
   std::set<std::string> seen;
@@ -95,9 +113,9 @@ int main() {
     seen.insert(test.id);
     ok &= check(test.name == it->second.name,
                 test.id + " name is \"" + test.name + "\", expected \"" + it->second.name + "\"");
-    ok &= check(test.layer == it->second.layer,
-                test.id + " layer is " + std::to_string(v4l2diag::layer_number(test.layer)) + ", expected " +
-                    std::to_string(v4l2diag::layer_number(it->second.layer)));
+    ok &= check(test.layer == it->second.layer, test.id + " layer is " +
+                                                    std::to_string(v4l2diag::layer_number(test.layer)) + ", expected " +
+                                                    std::to_string(v4l2diag::layer_number(it->second.layer)));
     // Technical identity must survive a rename, exactly. These feed selector
     // resolution and the "stable" default set.
     ok &= check(test.category == it->second.category,
@@ -132,8 +150,7 @@ int main() {
     };
     int n = 1;
     for (const auto &entry : expected) {
-      ok &= check(v4l2diag::layer_number(entry.first) == n,
-                  std::string("layer_number is wrong for ") + entry.second);
+      ok &= check(v4l2diag::layer_number(entry.first) == n, std::string("layer_number is wrong for ") + entry.second);
       ok &= check(std::string(v4l2diag::layer_name(entry.first)) == entry.second,
                   std::string("layer_name is \"") + v4l2diag::layer_name(entry.first) + "\", expected \"" +
                       entry.second + "\"");
@@ -176,8 +193,8 @@ int main() {
                   test.id + " serialises the wrong layer number");
       ok &= check(json["layer_name"].asString() == v4l2diag::layer_name(test.layer),
                   test.id + " serialises the wrong layer name");
-      ok &= check(json["layer"].asInt() >= 1 && json["layer"].asInt() <= 7,
-                  test.id + " serialises a layer outside 1-7");
+      ok &=
+          check(json["layer"].asInt() >= 1 && json["layer"].asInt() <= 7, test.id + " serialises a layer outside 1-7");
 
       // The rename must reach the wire, and the technical keys must not move.
       ok &= check(json["name"].asString() == test.name, test.id + " serialises a stale display name");
@@ -219,9 +236,9 @@ int main() {
     }
     std::sort(actual_stable.begin(), actual_stable.end());
     std::sort(expected_stable.begin(), expected_stable.end());
-    ok &= check(actual_stable == expected_stable,
-                "the \"stable\" tag resolves to " + std::to_string(actual_stable.size()) + " tests, the table says " +
-                    std::to_string(expected_stable.size()));
+    ok &= check(actual_stable == expected_stable, "the \"stable\" tag resolves to " +
+                                                      std::to_string(actual_stable.size()) + " tests, the table says " +
+                                                      std::to_string(expected_stable.size()));
 
     // An empty selector list means the stable set, so the two must agree.
     std::vector<std::string> defaulted;

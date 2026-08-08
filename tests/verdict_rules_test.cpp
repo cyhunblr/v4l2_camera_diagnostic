@@ -40,9 +40,9 @@ v4l2diag::MultiBufferOutcome broken_cfg(int requested) {
 }  // namespace
 
 int main() {
+  using v4l2diag::multi_buffer_verdict;
   using v4l2diag::MultiBufferOutcome;
   using v4l2diag::TestStatus;
-  using v4l2diag::multi_buffer_verdict;
   bool ok = true;
 
   // Every configuration allocated, started and captured everything it asked for.
@@ -62,8 +62,7 @@ int main() {
   {
     MultiBufferOutcome missed = ok_cfg(2, 20);
     missed.samples_captured = 18;
-    ok &= check(multi_buffer_verdict({ok_cfg(1, 20), missed}) == TestStatus::Warn,
-                "a capture miss must WARN");
+    ok &= check(multi_buffer_verdict({ok_cfg(1, 20), missed}) == TestStatus::Warn, "a capture miss must WARN");
   }
 
   // Requested != allocated is normal driver behaviour and must not, on its own,
@@ -104,8 +103,7 @@ int main() {
   // FreeRunTrigger, so capture is always attempted there.
   {
     MultiBufferOutcome probe_only = ok_cfg(3, 0);
-    ok &= check(multi_buffer_verdict({probe_only}) == TestStatus::Fail,
-                "an allocation-only probe must not PASS");
+    ok &= check(multi_buffer_verdict({probe_only}) == TestStatus::Fail, "an allocation-only probe must not PASS");
   }
 
   // The SKIP above depends on t07 declaring that it uses a trigger. Lock that,
@@ -122,10 +120,10 @@ int main() {
     ok &= check(found, "t07-multi-buffer is missing from the registry");
   }
 
-  // --- t16 pulse width sweep (report-ui-review-plan.md §5.16.8) -----------
+  // --- t16 pulse width sweep (report-ui-design-spec.md §5.16.8) -----------
   {
-    using v4l2diag::PulseWidthOutcome;
     using v4l2diag::pulse_width_verdict;
+    using v4l2diag::PulseWidthOutcome;
 
     auto width = [](int ms, int requested, int captured) {
       PulseWidthOutcome o;

@@ -9,6 +9,7 @@
 // hrefs, so if the writer names a file one way and the toolbar links another, an archived
 // report opened over file:// has two dead buttons and nothing says so.
 
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <cstdlib>
@@ -228,78 +229,98 @@ int main() {
     remove_artifacts(directory, run);
   }
 
-  // --- 5. The archived DMESG state: disabled button + the approved note ---
+  // --- 5. DMESG is a produced artifact, linked like JSON and Markdown ------
+  {
+    // The disabled-button model is GONE (implementation-plan 3.4, decision 2026-08-08).
+    // DMESG is written alongside the other artifacts when the tests finish, so the report
+    // links to a file that already exists instead of asking a server for it at click time.
+    const v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::Hardware, "anvil.json", "stress-test.json");
+    const std::string directory = make_temp_dir();
+    const std::string html = write_and_read(run, directory, &ok);
+
+    v4l2diag::ReportNaming naming;
+    naming.started_at_utc = run.started_at_utc;
+    naming.trigger_mode = run.trigger_mode;
+    naming.trigger_profile_file = run.trigger_profile_file;
+    naming.test_configuration_file = run.threshold_config_file;
+    const std::string dmesg_name = v4l2diag::dmesg_log_filename(naming);
+
+    // Observed: an anchor whose href is the canonical dmesg filename, in the same shape
+    // the JSON and Markdown links use.
+    ok &= check(contains(html, "href=\"" + dmesg_name + "\""),
+                "the DMESG control does not link to the produced artifact (" + dmesg_name + ")");
+    ok &= check(!contains(html, "id=\"export-dmesg\" disabled"), "the disabled DMESG button came back");
+
+    // The whole live-resolution mechanism goes with it: no note explaining a control that
+    // cannot work, and no script deciding whether it can.
+    ok &= check(!contains(html, "DMESG export requires the diagnostic server."),
+                "the archived-DMESG note survived, but the link always works now");
+    ok &= check(!contains(html, "export-dmesg-note"), "the note element survived");
+    ok &= check(!contains(html, "location.protocol==='file:'"), "the file:// state-resolving script survived");
+
+    // The client never names the file: the name comes from the run's own metadata, which
+    // is what keeps a client-supplied filename out of the response.
+    ok &= check(!contains(html, "encodeURIComponent"), "the run id is still interpolated into a URL");
+
+    // The link must resolve. A relative href to a file the run never wrote is a 404 the
+    // reader only discovers by clicking -- worse than the disabled button it replaced,
+    // which at least said so.
+    {
+      std::ifstream produced(directory + "/" + dmesg_name);
+      ok &= check(produced.good(), "the DMESG link points at a file the run never wrote: " + dmesg_name);
+    }
+
+    remove_artifacts(directory, run);
+  }
+
+  // --- 5a. No kernel log means no control, not a broken one ---------------
+  {
+    // Measured by putting a failing journalctl first on PATH: the run must still produce
+    // its three mandatory artifacts, and the report must offer no DMESG control at all.
+    // The alternative -- rendering the link anyway -- is a 404 the reader finds by
+    // clicking, which is exactly what the disabled button used to prevent.
+    const std::string saved_path = getenv("PATH") == nullptr ? std::string() : getenv("PATH");
+    const std::string stub_dir = make_temp_dir();
+    {
+      std::ofstream stub(stub_dir + "/journalctl");
+      stub << "#!/bin/sh\nexit 1\n";
+    }
+    chmod((stub_dir + "/journalctl").c_str(), 0755);
+    setenv("PATH", (stub_dir + ":" + saved_path).c_str(), 1);
+
+    const v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::FreeRun, "", "");
+    const std::string directory = make_temp_dir();
+    const std::string html = write_and_read(run, directory, &ok);
+
+    setenv("PATH", saved_path.c_str(), 1);
+    unlink((stub_dir + "/journalctl").c_str());
+    rmdir(stub_dir.c_str());
+
+    ok &= check(!contains(html, "Export DMESG"),
+                "the DMESG control is rendered even though no kernel log could be written");
+    ok &= check(!contains(html, "_dmesg.log"), "the report links to a kernel log that was never written");
+    // The three mandatory artifacts are unaffected: a missing kernel log is not a run
+    // failure.
+    ok &= check(contains(html, "Export JSON") && contains(html, "Export Markdown"),
+                "a missing kernel log took the other export controls with it");
+
+    remove_artifacts(directory, run);
+  }
+
+  // --- 5b. Print hides the export row -------------------------------------
   {
     const v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::Hardware, "anvil.json", "stress-test.json");
     const std::string directory = make_temp_dir();
     const std::string html = write_and_read(run, directory, &ok);
 
-    // The approved wording, verbatim (report-ui-review-plan 1.3). A shortened or
-    // reworded version is a different approved design.
-    ok &= check(contains(html, "DMESG export requires the diagnostic server."),
-                "the approved archived-DMESG note is missing from the report");
-    ok &= check(contains(html, "class=\"export-note\""), "the note does not use the approved element");
-
-    // A REAL disabled control: only the disabled attribute makes a button unfocusable and
-    // unclickable. An ARIA-only placeholder still takes focus and still fires clicks.
-    ok &= check(contains(html, "<button type=\"button\" class=\"export-pdf-btn\" id=\"export-dmesg\" disabled"),
-                "the archived DMESG control is not a real disabled button");
-    ok &= check(!contains(html, "aria-disabled=\"true\""), "an aria-disabled placeholder survived");
-
-    // Disabled and the note visible are the DEFAULT state, so a report opened over
-    // file:// -- or with scripting off -- shows the honest answer rather than a link that
-    // cannot work.
-    // The note is plain markup, not something a script adds: no script runs over file://
-    // with scripting off, and the explanation still has to be there.
-    ok &= check(contains(html, "<p class=\"export-note\" id=\"export-dmesg-note\">"),
-                "the note is not part of the default markup");
-    ok &= check(!contains(html, "class=\"export-note\" hidden") &&
-                    !contains(html, "class=\"export-note\" style=\"display:none"),
-                "the note starts hidden, so the archived case shows nothing");
-
-    // A CLI run has no server to ask, so there is no state to resolve: no script at all,
-    // and the button stays disabled with the note up.
-    ok &= check(run.run_id.empty(), "this fixture is meant to be a CLI run");
-    ok &= check(!contains(html, "<script>"), "a CLI report carries a state-resolving script it cannot use");
-
-    remove_artifacts(directory, run);
-  }
-
-  // --- 5b. A web run resolves the state at load time ---------------------
-  {
-    v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::Hardware, "anvil.json", "stress-test.json");
-    // Only a web run can offer the download, because only it has a run the server can
-    // resolve (plan 3.4).
-    run.run_id = "web-run-7";
-    const std::string directory = make_temp_dir();
-    const std::string html = write_and_read(run, directory, &ok);
-
-    // Still disabled and still explained by default: the same file may be archived and
-    // reopened over file:// later, and it must degrade to the honest state then.
-    ok &= check(contains(html, "id=\"export-dmesg\" disabled"), "a web run's button does not start disabled");
-    ok &= check(contains(html, "DMESG export requires the diagnostic server."),
-                "a web run's report has no archived-state note");
-
-    // Served: the script enables the button AND hides the note. Leaving the note up next
-    // to a working button would contradict it.
-    ok &= check(contains(html, "b.disabled=false"), "the script does not enable the button when served");
-    ok &= check(contains(html, "n.hidden=true"), "the script does not hide the note when served");
-    ok &= check(contains(html, "location.protocol==='file:'"), "the script does not distinguish the file:// case");
-
-    // The run id travels in the URL; the filename does not. The server derives the name.
-    ok &= check(contains(html, "data-run-id=\"web-run-7\""), "the run id is not on the control");
-    ok &= check(contains(html, "encodeURIComponent(b.dataset.runId)"),
-                "the run id is interpolated into the URL without encoding");
-    ok &= check(!contains(html, "download=\""), "the report sets a download filename on the DMESG control");
-
-    // Print hides both. A printed page has no clickable control and no server.
     const std::size_t print_at = html.find("@media print");
     ok &= check(print_at != std::string::npos, "there is no print stylesheet");
     // The whole print block, not a fixed-size window: the block grows as print rules are
     // added, and a 900-character slice silently stopped covering this rule.
     const std::string print_block = html.substr(print_at);
-    ok &= check(print_block.find(".export-row, .export-note { display: none") != std::string::npos,
-                "print does not hide the export row and the note");
+    ok &= check(
+        print_block.find(".export-row") != std::string::npos && print_block.find("display: none") != std::string::npos,
+        "print does not hide the export row");
 
     remove_artifacts(directory, run);
   }

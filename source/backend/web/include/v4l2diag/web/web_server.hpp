@@ -26,19 +26,6 @@ struct WebServerOptions {
   std::string report_root;  // empty = resolved to a stable, absolute default in WebServer::start()
   std::string config_directory;
   bool open_browser = true;
-
-  // How the kernel log is read. Injectable ONLY so a test can prove the command is not
-  // run at all for a request that must be refused (plan 3.4): the guard has to reject an
-  // unknown run BEFORE any command executes, and a test that only inspects the response
-  // cannot tell "refused early" from "ran and then failed".
-  //
-  // Not a configuration surface -- nothing parses this from a request or a file, and the
-  // production value is fixed in start(). The seam takes no argument for the same reason:
-  // there is no user input to pass, so none can be reached.
-  //
-  // Returns false when the log could not be read; `output` then carries whatever the
-  // reader said, which is handed back verbatim.
-  std::function<bool(std::string *output)> kernel_log_reader;
 };
 
 #if MHD_VERSION >= 0x00097000
@@ -104,20 +91,6 @@ class WebServer {
   // a path: the entry the server itself wrote carries the artifact filenames, so a
   // client-supplied id can only ever select an entry or select nothing.
   Json::Value find_history_entry(const std::string &id) const;
-
-  // The canonical `_dmesg.log` name for a run, generated HERE from the run/index
-  // metadata (plan 3.4). Empty for an unknown run.
-  //
-  // The client cannot supply it. A filename arriving in a request would end up in a
-  // Content-Disposition header, where a CR/LF turns into header injection; and a name the
-  // client chose would not have to match the run it claims to describe. So the id selects
-  // a record by exact match and the name is derived from that record's own metadata.
-  std::string dmesg_download_filename(const std::string &id) const;
-
-  // Reads the current boot's kernel log. Uses options_.kernel_log_reader when a test has
-  // injected one; otherwise runs the fixed journalctl command. Returns false on failure,
-  // leaving whatever was read in *output.
-  bool read_kernel_log(std::string *output) const;
 
   // Reads the canonical JSON artifact named by a history entry.
   //

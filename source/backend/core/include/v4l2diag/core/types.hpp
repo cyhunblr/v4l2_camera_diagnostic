@@ -19,7 +19,7 @@ enum class MemoryBackend {
 
 // No Pdf member. The product does not generate PDFs; the HTML report carries an
 // "Export as PDF" button that calls window.print(), i.e. exactly what Ctrl+P
-// does. See docs/report-ui-review-plan.md §6.2.
+// does. See docs/report-ui-design-spec.md §6.2.
 enum class ReportFormat {
   Json,
   Markdown,

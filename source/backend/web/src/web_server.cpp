@@ -644,56 +644,6 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
     return json_to_string(out);
   }
 
-  if (method == "GET" && path == "/api/dmesg") {
-    *content_type = "text/plain; charset=utf-8";
-
-    // A download must name a real run, and it is checked BEFORE anything is executed
-    // (plan 3.4). Rejecting only the Content-Disposition header would still run
-    // journalctl and hand back the kernel log with a 200 -- the refusal has to be the
-    // response, not a missing header on an otherwise successful one.
-    //
-    // The live view (no download=1) needs no run: it is the current boot's log, not a
-    // particular run's artifact.
-    if (query_value(query, "download") == "1") {
-      const std::string run_id = query_value(query, "run");
-      if (run_id.empty()) {
-        *status_code = MHD_HTTP_BAD_REQUEST;
-        return "A kernel-log download must name a run: /api/dmesg?download=1&run=<run-id>.\n";
-      }
-      // Exact match against a live run or a history record. A prefix, a suffix or a
-      // traversal attempt selects nothing and is refused here, before any command runs.
-      if (!find_run(run_id) && !find_history_entry(run_id).isObject()) {
-        *status_code = MHD_HTTP_NOT_FOUND;
-        return "No such run: a kernel-log download is only served for a run this server knows.\n";
-      }
-    }
-
-    // journalctl rather than dmesg: reading it needs only membership in "adm"
-    // (or systemd-journal), which the journal directories grant by ACL, so the
-    // server stays unprivileged. dmesg would additionally need CAP_SYSLOG or
-    // root wherever kernel.dmesg_restrict=1. -b limits output to the current
-    // boot — without it journalctl -k spans every retained boot.
-    //
-    // Fixed command, no user input: the request contributes a run id, which is used to
-    // look up a record and to name the download, and never reaches a shell.
-    std::string output;
-    if (read_kernel_log(&output)) {
-      return output;
-    }
-    // Hand back what journalctl actually said. A generic "permission denied?"
-    // leaves the reader guessing between a missing group, a disabled journal
-    // and journalctl not being installed at all.
-    *status_code = MHD_HTTP_INTERNAL_SERVER_ERROR;
-    std::string message = "Cannot read the kernel log via 'journalctl -k -b'.\n";
-    if (!output.empty()) {
-      message += "\n" + output + "\n";
-    }
-    message += "This needs membership in the 'adm' group. Add it with:\n";
-    message += "  sudo usermod -aG adm $(id -un)\n";
-    message += "then log out and back in.\n";
-    return message;
-  }
-
   if (method == "GET" && path == "/api/devices") {
     Json::Value out(Json::objectValue);
     out["devices"] = Json::Value(Json::arrayValue);
@@ -798,7 +748,7 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
     return json_to_string(profile_to_json(profile));
   }
 
-  if (method == "POST" && (path == "/api/profiles" || path == "/api/profiles/validate")) {
+  if (method == "POST" && path == "/api/profiles") {
     const Json::Value body_json = parse_json_body(body);
     if (body_json.isMember("parse_error")) {
       *status_code = MHD_HTTP_BAD_REQUEST;
@@ -816,11 +766,6 @@ std::string WebServer::handle_api(const std::string &method, const std::string &
       *status_code = MHD_HTTP_BAD_REQUEST;
       Json::Value out(Json::objectValue);
       out["error"] = error;
-      return json_to_string(out);
-    }
-    if (path == "/api/profiles/validate") {
-      Json::Value out(Json::objectValue);
-      out["valid"] = true;
       return json_to_string(out);
     }
     ProfileRegistry registry(options_.config_directory);
@@ -1565,61 +1510,6 @@ Json::Value WebServer::find_history_entry(const std::string &id) const {
   return Json::Value();
 }
 
-bool WebServer::read_kernel_log(std::string *output) const {
-  if (options_.kernel_log_reader) {
-    // Only a test injects this (see WebServerOptions::kernel_log_reader).
-    return options_.kernel_log_reader(output);
-  }
-  // A fixed command string. Nothing from the request is interpolated, so there is no
-  // shell injection surface, and no privileged path is introduced: journalctl reads the
-  // journal through group membership alone.
-  FILE *pipe = popen("journalctl -k -b --no-pager 2>&1", "r");
-  if (pipe == nullptr) {
-    return false;
-  }
-  char buffer[4096];
-  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-    *output += buffer;
-  }
-  return pclose(pipe) == 0 && !output->empty();
-}
-
-std::string WebServer::dmesg_download_filename(const std::string &id) const {
-  // The live run first, then the index -- the same order every other lookup uses.
-  ReportNaming naming;
-  if (auto run = find_run(id)) {
-    std::lock_guard<std::mutex> lock(run->mutex);
-    naming.started_at_utc = run->result.started_at_utc;
-    naming.trigger_mode = run->config.trigger_mode;
-    naming.trigger_profile_file = run->config.trigger_profile_file;
-    naming.test_configuration_file = run->config.threshold_config_file;
-    return dmesg_log_filename(naming);
-  }
-
-  const Json::Value entry = find_history_entry(id);
-  if (!entry.isObject() || !entry["started_at_utc"].isString()) {
-    // Not a run this server knows about. No name is invented for it: a caller that
-    // cannot name a real run has nothing to download.
-    return std::string();
-  }
-  naming.started_at_utc = entry["started_at_utc"].asString();
-  if (entry["trigger_mode"].isString()) {
-    // An unparseable mode keeps the free-run default rather than guessing; free-run
-    // simply omits the profile part of the name.
-    TriggerMode mode = TriggerMode::FreeRun;
-    if (parse_trigger_mode(entry["trigger_mode"].asString(), &mode)) {
-      naming.trigger_mode = mode;
-    }
-  }
-  if (entry["trigger_profile_file"].isString()) {
-    naming.trigger_profile_file = entry["trigger_profile_file"].asString();
-  }
-  if (entry["threshold_config_file"].isString()) {
-    naming.test_configuration_file = entry["threshold_config_file"].asString();
-  }
-  return dmesg_log_filename(naming);
-}
-
 std::vector<std::string> WebServer::declared_artifact_filenames(const std::string &id) const {
   std::vector<std::string> names;
   // The live run is the primary source here too.
@@ -1993,24 +1883,10 @@ MhdRequestResult WebServer::handle_request_static(void *cls, MHD_Connection *con
   if (after_value && *after_value) {
     query = "after=" + std::string(after_value);
   }
-  const char *download_value = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "download");
-  if (download_value && *download_value) {
-    if (!query.empty()) {
-      query += "&";
-    }
-    query += "download=" + std::string(download_value);
-  }
-  // MHD strips the query string from `url`, so each parameter the handlers use has to be
-  // read back explicitly. `run` selects which run's kernel-log download is being named
-  // (plan 3.4) -- without it here, /api/dmesg?download=1&run=... arrives with no run at
-  // all and the response silently carries no filename.
-  const char *run_value = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "run");
-  if (run_value && *run_value) {
-    if (!query.empty()) {
-      query += "&";
-    }
-    query += "run=" + std::string(run_value);
-  }
+  // `download` and `run` were read back here for /api/dmesg. That endpoint is gone
+  // (plan 5.4), and no other handler reads either parameter -- MHD strips the query
+  // string from `url`, so a parameter nobody reads back is simply not available, which
+  // is the honest state for one that no longer exists.
 
   int status_code = MHD_HTTP_OK;
   std::string content_type;
@@ -2022,20 +1898,6 @@ MhdRequestResult WebServer::handle_request_static(void *cls, MHD_Connection *con
   MHD_add_response_header(response, "Content-Type", content_type.c_str());
   MHD_add_response_header(response, "Access-Control-Allow-Origin", "http://127.0.0.1");
   MHD_add_response_header(response, "Cache-Control", "no-store");
-  if (path == "/api/dmesg" && query_value(query, "download") == "1" && status_code == MHD_HTTP_OK) {
-    // The name is GENERATED here from the run's own metadata (plan 3.4); the fixed
-    // "dmesg.txt" is gone. The client sends a run id and nothing else -- a filename
-    // arriving in a request would land in this header, where a CR/LF is header injection,
-    // and would not have to match the run it claims to describe.
-    //
-    // Reaching a 200 already means the handler resolved the run, so this lookup cannot
-    // name a run the response does not belong to.
-    const std::string filename = server->dmesg_download_filename(query_value(query, "run"));
-    if (!filename.empty()) {
-      const std::string disposition = "attachment; filename=\"" + filename + "\"";
-      MHD_add_response_header(response, "Content-Disposition", disposition.c_str());
-    }
-  }
   const MhdRequestResult ret = MHD_queue_response(connection, status_code, response);
   MHD_destroy_response(response);
   delete buffer;

@@ -317,9 +317,14 @@ int main() {
       // The shared duration formatter reached the report.
       ok &= check(contains(html, ">1m 27s<"), "the shared duration format is not in the report");
 
-      // RESULT on WARN, FAIL and SKIP -- three of the four cards.
-      ok &= check(count_of(html, "section-label\">Result<") == 3,
-                  "expected 3 RESULT sections, got " + std::to_string(count_of(html, "section-label\">Result<")));
+      // The result line on WARN, FAIL and SKIP -- three of the four cards; PASS shows
+      // none. It is no longer a section: it sits above them and carries the card's own
+      // status class, so one generic class can never colour a WARN card neutral grey.
+      const std::size_t result_lines = count_of(html, "class=\"result-warn\"") +
+                                       count_of(html, "class=\"result-fail\"") +
+                                       count_of(html, "class=\"result-skip\"");
+      ok &= check(result_lines == 3, "expected 3 result lines, got " + std::to_string(result_lines));
+      ok &= check(count_of(html, "section-label\">Result<") == 0, "the Result section survived as a section");
 
       // The old shell must be gone, not merely unused: leaving it would let a later
       // change quietly render the pre-3.1 markup again.
@@ -546,7 +551,8 @@ int main() {
       const std::string html =
           read_file(directory + "/" + v4l2diag::report_artifact_filename(naming_of(run), v4l2diag::ReportFormat::Html));
       // The test's own approved table is present...
-      ok &= check(contains(html, "<th>Window</th>"), "the per-test table is missing from the rendered report");
+      ok &= check(contains(html, "<span>Window</span>"),
+                  "the per-test table is missing from the rendered report (columns are grid cells now)");
       // ...and the generic strip that duplicated it is not. Checked as MARKUP, not as a
       // CSS class name, because the stylesheet legitimately still defines the rule.
       ok &= check(!contains(html, "<dl class=\"metric-kv-list\">"),

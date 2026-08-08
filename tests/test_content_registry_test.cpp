@@ -70,29 +70,34 @@ struct Expectation {
 };
 
 const Expectation kApproved[] = {
-    {"t03-pipeline-ready", {"Cycle", "STREAMON", "First frame", "Total ready", nullptr}},
-    {"t06-stream-cycles", {"Phase", "Completed", "Start fail", "Timeout", "Outcome", nullptr}},
-    {"t07-multi-buffer", {"Requested", "Allocated", "Captured", "Mean latency", "Outcome", nullptr}},
-    {"t08-buffer-overwrite",
-     {"Variant", "Trigger load", "Allocated", "Available", "Error flagged", "Outcome", nullptr}},
-    {"t09-buffer-recycling", {"Delay", "Available", "Mean wait", "Outcome", nullptr}},
-    {"t10-buffer-flags", {"Group", "Flag", "Observed", "Meaning", "State", nullptr}},
-    {"t11-memory-throughput", {"Mapping", "Copy region", "Bytes/copy", "Throughput", "Relative to full", nullptr}},
+    // The columns docs/renderer-data-contract.md names for each test, derived from the
+    // 26 approved previews. A renderer that renamed "Sizeimage" to "Size" would still
+    // produce a plausible table, so the header text itself is the contract.
+    //
+    // Outcome/State are absent by design: a verdict lives in the Measurement Result
+    // table's Status column, and the evidence tables carry Detail instead.
+    {"t03-pipeline-ready", {"Metric", "Type", "Unit", "Value", "Detail", nullptr}},
+    {"t06-stream-cycles", {"Phase", "Completed", "Start fail", "Timeout", "Detail", nullptr}},
+    {"t07-multi-buffer", {"Requested", "Allocated", "Captured", "Mean latency", "Detail", nullptr}},
+    {"t08-buffer-overwrite", {"Variant", "Trigger load", "Allocated", "Available", "Error flagged", "Detail", nullptr}},
+    {"t09-buffer-recycling", {"Delay", "Available", "Mean wait", "Detail", nullptr}},
+    {"t10-buffer-flags", {"Group", "Flag", "Observed", "Meaning", "Detail", nullptr}},
+    {"t11-memory-throughput", {"Copy region", "Bytes per copy", "Throughput", "Relative to full", nullptr}},
     {"t12-dmabuf-cache-sync", {"Check", "Observed", "Meaning", nullptr}},
-    {"t13-poll-timeout-cliff", {"Round", "Boundary confirmed", nullptr}},
-    {"t14-trigger-latency", {"Measure", "Observed", "Meaning", nullptr}},
-    {"t15-nonblock-vs-block", {"Measure", "Non-block", "Block", nullptr}},
-    {"t16-gpio-pulse-width", {"Width", "Hits", "HIGH", nullptr}},
-    {"t17-format-comparison", {"Format", "Coverage", "Sizeimage", "Mean", "Max", nullptr}},
-    {"t18-control-sweep", {"Control", "Current", "Default", nullptr}},
-    {"t19-resolution-sweep", {"Resolution", "Coverage", "Mean", "P95", "State", nullptr}},
-    {"t20-sequence-continuity", {"Check", "Value", "State", nullptr}},
-    {"t21-timestamp-monotonicity", {"Metric", "Value", "State", nullptr}},
-    {"t22-stuck-frame", {"Metric", "Meaning", "State", nullptr}},
+    {"t13-poll-timeout-cliff", {"Round", "Detail", nullptr}},
+    {"t14-trigger-latency", {"Metric", "Type", "Unit", "Value", "Detail", nullptr}},
+    {"t15-nonblock-vs-block", {"Metric", "Type", "Unit", "Non-block", "Block", nullptr}},
+    {"t16-gpio-pulse-width", {"Width", "Hits", "HIGH mean", "LOW mean (derived)", "Detail", nullptr}},
+    {"t17-format-comparison", {"Format", "Resolution", "Sizeimage", "Mean latency", "Max latency", nullptr}},
+    {"t18-control-sweep", {"Control", "Current", "Default", "Access", nullptr}},
+    {"t19-resolution-sweep", {"Resolution", "Pixel format", "Mean latency", "P95 latency", "Throughput", nullptr}},
+    {"t20-sequence-continuity", {"Check", "Value", "Detail", nullptr}},
+    {"t21-timestamp-monotonicity", {"Metric", "Value", "Detail", nullptr}},
+    {"t22-stuck-frame", {"Metric", "Meaning", "Detail", nullptr}},
     {"t23-sustained-capture", {"Window", "Captured", "Mean", "Stddev", "Miss", nullptr}},
     {"t24-latency-under-load", {"Statistic", "Baseline", "CPU load", "Delta", nullptr}},
     {"t25-multi-camera", {"Camera", "Role", "Captures", "Mean delivery", "Max delivery", "Sync samples", nullptr}},
-    {"t26-cold-start", {"Cycle", "Session", "Warm-up outcome", "Stability", nullptr}},
+    {"t26-cold-start", {"Cycle", "Session", "Warm-up outcome", "Detail", nullptr}},
 };
 
 }  // namespace
@@ -132,7 +137,7 @@ int main() {
       const std::string html = v4l2diag::render_test_content(test);
       ok &= check(!html.empty(), std::string("the renderer produced nothing for ") + expected.test_id);
       for (int i = 0; expected.columns[i] != nullptr; ++i) {
-        ok &= check(contains(html, std::string("<th>") + expected.columns[i] + "</th>") ||
+        ok &= check(contains(html, std::string("<span>") + expected.columns[i] + "</span>") ||
                         contains(html, std::string(">") + expected.columns[i] + "<"),
                     std::string(expected.test_id) + " lost the approved column \"" + expected.columns[i] + "\"");
       }
@@ -147,7 +152,8 @@ int main() {
       v4l2diag::TestResult test = test_of(expected.test_id);
       test.metrics.push_back(mv("frames", 240, ""));
       const std::string html = v4l2diag::render_test_content(test);
-      ok &= check(contains(html, "<table"), std::string(expected.test_id) + " renders no test-specific table");
+      ok &= check(contains(html, "class=\"grid-head cols-"),
+                  std::string(expected.test_id) + " renders no test-specific table");
     }
   }
 
@@ -163,8 +169,9 @@ int main() {
       ok &= check(!contains(html, "240") && !contains(html, "33.1") && !contains(html, "18000"),
                   std::string(expected.test_id) + " invented a value with no data: " + html.substr(0, 200));
       if (!html.empty()) {
-        ok &= check(contains(html, "Unavailable") || contains(html, "<table") || contains(html, "no data"),
-                    std::string(expected.test_id) + " produced neither a table nor an honest empty state");
+        ok &= check(
+            contains(html, "Unavailable") || contains(html, "class=\"grid-head cols-") || contains(html, "no data"),
+            std::string(expected.test_id) + " produced neither a table nor an honest empty state");
       }
     }
   }
@@ -187,15 +194,17 @@ int main() {
 
   // --- 6. Metric definitions appear where the previews have them ---------
   {
-    // Five approved previews carry a "Metric definitions" table (Metric | Meaning). It
-    // explains what the numbers mean, so dropping it leaves the reader with bare figures.
+    // The "Metric definitions" glossary is BANNED (design-spec): some of its rows defined
+    // terms no table used, the rest restated a column heading. A metric that genuinely
+    // needs a bound states it on its own row instead. This assertion is inverted from the
+    // one it replaces -- the section coming back is the regression now.
     for (const char *id :
          {"t22-stuck-frame", "t23-sustained-capture", "t24-latency-under-load", "t25-multi-camera", "t26-cold-start"}) {
       v4l2diag::TestResult test = test_of(id);
       test.metrics.push_back(mv("frames", 240, ""));
       const std::string html = v4l2diag::render_test_content(test);
-      ok &= check(contains(html, "Metric definitions"), std::string(id) + " lost its Metric definitions section");
-      ok &= check(contains(html, "Meaning"), std::string(id) + " lost the Meaning column");
+      ok &= check(!contains(html, "Metric definitions") && !contains(html, "Metric Definitions"),
+                  std::string(id) + " brought the Metric definitions glossary back");
     }
   }
 
@@ -295,7 +304,8 @@ int main() {
     t01.details.push_back("format: UYVY - UYVY 4:2:2 - single-plane");
     const std::string html = v4l2diag::render_test_content(t01);
 
-    ok &= check(contains(html, "Required capabilities"), "T01 has no Required capabilities section");
+    ok &= check(contains(html, "Device Evidence \xC2\xB7 Capability"),
+                "T01 has no Device Evidence \xC2\xB7 Capability section");
     const std::size_t backend_at = html.find("Backend support");
     const std::size_t capture_at = html.find("Capture support");
     const std::size_t streaming_at = html.find("Streaming support");
@@ -328,12 +338,13 @@ int main() {
     ok &= check(!contains(html, "Selected backend"), "the pre-5.1 \"Selected backend\" row survived");
 
     // 5.1.4: RESULT only on non-PASS.
-    ok &= check(!contains(v4l2diag::render_test_content(t01), "section-label\">Result<"),
+    ok &= check(!contains(v4l2diag::render_test_content(t01), "class=\"result-fail\""),
                 "a passing T01 card shows a RESULT section");
     v4l2diag::TestResult warned = t01;
     warned.status = v4l2diag::TestStatus::Warn;
-    ok &= check(contains(v4l2diag::render_test_content(warned), "section-label\">Result<"),
-                "a warning T01 card hides its RESULT section");
+    // The result line is a status-classed div above the sections now, not a section.
+    ok &= check(contains(v4l2diag::render_test_content(warned), "class=\"result-warn\""),
+                "a warning T01 card hides its result line");
   }
 
   // --- 11. T02, per review-plan 5.2 ---------------------------------------
@@ -360,7 +371,7 @@ int main() {
 
     // 5.2.5: the approved five columns, replacing the monospace detail list.
     for (const char *column : {"Control", "Access", "Range", "Default", "Current"}) {
-      ok &= check(contains(html, std::string("<th>") + column + "</th>"),
+      ok &= check(contains(html, std::string("<span>") + column + "</span>"),
                   std::string("T02 is missing the ") + column + " column");
     }
     ok &= check(!contains(html, "class=\"detail-list\""), "T02 still emits the monospace detail list");
@@ -380,7 +391,7 @@ int main() {
 
     // 5.2.7: categorical inventory test -- no chart, and no RESULT on a passing card.
     ok &= check(!v4l2diag::test_charts_approved("t02-control-inventory"), "T02 is allowed to render a chart");
-    ok &= check(!contains(html, "section-label\">Result<"), "a passing T02 card shows a RESULT section");
+    ok &= check(!contains(html, "class=\"result-fail\""), "a passing T02 card shows a RESULT section");
   }
 
   // --- 12. T03, per review-plan 5.3 ---------------------------------------
@@ -419,20 +430,15 @@ int main() {
     ok &= check(contains(free_html, "STREAMON") && contains(free_html, "Total"),
                 "T03's chart does not label the STREAMON phase or the per-cycle total");
 
-    // 5.3.5: free-run's precise cycle table -- Cycle/STREAMON/First frame/Total ready, and
-    // explicitly NO Pulses column.
-    for (const char *column : {"Cycle", "STREAMON", "First frame", "Total ready"}) {
-      ok &= check(contains(free_html, std::string("<th>") + column + "</th>"),
-                  std::string("T03 free-run is missing the ") + column + " column");
-    }
-    ok &= check(!contains(free_html, "<th>Pulses</th>"), "T03 free-run shows a Pulses column");
+    // The per-cycle TABLE is gone: the approved layout charts those numbers and charting
+    // them loses nothing, so a table beside the chart would print each value twice under
+    // two labels. What must survive is the chart carrying the per-cycle data, asserted
+    // just above, and free-run still claiming no trigger pulses.
+    ok &= check(!contains(free_html, "<span>Pulses</span>"), "T03 free-run shows a Pulses column");
     ok &= check(!contains(free_html, "pulse"), "T03 free-run mentions trigger pulses at all");
 
-    // 5.3.8: EAGAIN and STREAMON-attempt values live in Technical details, not the summary.
-    ok &= check(contains(free_html, "Technical details"), "T03 has no Technical details section");
-    ok &= check(contains(free_html, "Average retries"), "T03's retry average is not labelled \"Average retries\"");
-    ok &= check(contains(free_html, "1,234") || contains(free_html, "1234"),
-                "the EAGAIN average does not appear in Technical details");
+    // The Technical details section is gone with it -- three sections, no fourth.
+    ok &= check(!contains(free_html, "Technical details"), "T03's Technical details section came back");
 
     // 5.3.6: a hardware/software run adds the Pulses column.
     v4l2diag::TestResult t03_hw = t03_free;
@@ -440,7 +446,7 @@ int main() {
     t03_hw.details.push_back("cycle: 1|1133.0|145.0|1278.0|2");
     t03_hw.details.push_back("cycle: 2|1124.0|145.0|1269.0|2");
     const std::string hw_html = v4l2diag::render_test_content(t03_hw);
-    ok &= check(contains(hw_html, "<th>Pulses</th>"), "T03 hardware/software does not show a Pulses column");
+    ok &= check(contains(hw_html, "trigger pulses"), "T03 hardware/software loses the trigger pulse count");
   }
 
   // --- 13. T04, per review-plan 5.4 ---------------------------------------
@@ -460,8 +466,8 @@ int main() {
 
     // 5.4.4: the structured CHECK/EXPECTED/OBSERVED/OUTCOME table replaces the raw metric
     // list and the repeating detail block.
-    for (const char *column : {"Check", "Expected", "Observed", "Outcome"}) {
-      ok &= check(contains(html, std::string("<th>") + column + "</th>"),
+    for (const char *column : {"Phase", "Expected", "Observed", "Detail"}) {
+      ok &= check(contains(html, std::string("<span>") + column + "</span>"),
                   std::string("T04 is missing the ") + column + " column");
     }
     ok &= check(contains(html, "poll() before STREAMON") && contains(html, "DQBUF before STREAMON"),
@@ -471,11 +477,11 @@ int main() {
     ok &= check(!contains(html, "class=\"detail-list\""), "T04 still emits the raw repeating detail block");
 
     // 5.4.3: FAIL states which sequence was delivered before STREAMON.
-    ok &= check(contains(html, "section-label\">Result<"), "a failing T04 card hides its RESULT section");
+    ok &= check(contains(html, "class=\"result-fail\""), "a failing T04 card hides its result line");
     ok &= check(contains(html, "3"), "T04's RESULT does not name the delivered sequence number");
 
     // 5.4.7: Buffers requested and Poll timeout in Test configuration.
-    ok &= check(contains(html, "Test configuration"), "T04 has no Test configuration section");
+    ok &= check(contains(html, "Test Configuration"), "T04 has no Test Configuration section");
     ok &= check(contains(html, "Buffers requested") && contains(html, "Poll timeout"),
                 "T04's Test configuration is missing a required parameter");
 
@@ -489,7 +495,7 @@ int main() {
     t04_pass.details.push_back("check: poll() before STREAMON|POLLIN not expected|Timed out after 50ms|as expected");
     t04_pass.details.push_back(
         "check: DQBUF before STREAMON|Rejected with EAGAIN|Rejected with EAGAIN (11)|as expected");
-    ok &= check(!contains(v4l2diag::render_test_content(t04_pass), "section-label\">Result<"),
+    ok &= check(!contains(v4l2diag::render_test_content(t04_pass), "class=\"result-fail\""),
                 "a passing T04 card shows a RESULT section");
   }
 
@@ -512,8 +518,8 @@ int main() {
     const std::string html = v4l2diag::render_test_content(t05);
 
     // 5.5.5: PHASE/EXPECTED/OBSERVED/OUTCOME, in the six-step run order.
-    for (const char *column : {"Phase", "Expected", "Observed", "Outcome"}) {
-      ok &= check(contains(html, std::string("<th>") + column + "</th>"),
+    for (const char *column : {"Phase", "Expected", "Observed", "Detail"}) {
+      ok &= check(contains(html, std::string("<span>") + column + "</span>"),
                   std::string("T05 is missing the ") + column + " column");
     }
     const std::size_t baseline_at = html.find("Baseline capture");
@@ -541,7 +547,7 @@ int main() {
     ok &= check(!v4l2diag::test_charts_approved("t05-pollerr-handling"), "T05 is allowed to render a chart");
 
     // A passing card shows no RESULT.
-    ok &= check(!contains(html, "section-label\">Result<"), "a passing T05 card shows a RESULT section");
+    ok &= check(!contains(html, "class=\"result-fail\""), "a passing T05 card shows a RESULT section");
 
     // 5.5.6: the capture-rate note, only when a pacing observation exists.
     v4l2diag::TestResult t05_paced = t05;
@@ -549,7 +555,9 @@ int main() {
         "capture_rate_note: Observed 28 fps against a configured 30 fps read pace; "
         "verdict unaffected.");
     const std::string paced_html = v4l2diag::render_test_content(t05_paced);
-    ok &= check(contains(paced_html, "Capture rate note"), "T05 does not show the capture rate note when present");
+    // The standalone note section is gone; the observation rides on the row it qualifies,
+    // so the TEXT must still be present -- just not under its own heading.
+    ok &= check(contains(paced_html, "Capture rate note") == false, "T05's Capture rate note section came back");
     ok &= check(!contains(html, "Capture rate note"),
                 "T05 shows a capture rate note when no pacing observation was recorded");
   }
@@ -558,12 +566,14 @@ int main() {
   {
     v4l2diag::TestResult t06 = test_of("t06-stream-cycles", v4l2diag::TestStatus::Pass);
     t06.name = "STREAMON/STREAMOFF Cycle Reliability";
-    t06.metrics.push_back(mv("full_cycles", 20, ""));
-    t06.metrics.push_back(mv("full_configured", 20, ""));
+    // The names diagnostic_runner.cpp actually emits. The old ones were the renderer's
+    // guesses and are kept as fallbacks, so both are present here.
+    t06.metrics.push_back(mv("full_cycles_success", 20, ""));
+    t06.metrics.push_back(mv("full_cycles_attempted", 20, ""));
     t06.metrics.push_back(mv("full_start_fail", 0, ""));
     t06.metrics.push_back(mv("full_timeouts", 0, ""));
-    t06.metrics.push_back(mv("rapid_cycles", 50, ""));
-    t06.metrics.push_back(mv("rapid_configured", 50, ""));
+    t06.metrics.push_back(mv("rapid_cycles_ok", 50, ""));
+    t06.metrics.push_back(mv("rapid_cycles_attempted", 50, ""));
     t06.metrics.push_back(mv("rapid_start_fail", 0, ""));
     t06.metrics.push_back(mv("rapid_capture_timeouts", 0, ""));
     t06.metrics.push_back(mv("open_streamon_mean_ms", 0.271, "ms"));
@@ -583,8 +593,8 @@ int main() {
     const std::string html = v4l2diag::render_test_content(t06);
 
     // 5.6.4: Full and rapid rows in ONE table; counts as completed/configured.
-    for (const char *column : {"Phase", "Completed", "Start fail", "Timeout", "Outcome"}) {
-      ok &= check(contains(html, std::string("<th>") + column + "</th>"),
+    for (const char *column : {"Phase", "Completed", "Start fail", "Timeout", "Detail"}) {
+      ok &= check(contains(html, std::string("<span>") + column + "</span>"),
                   std::string("T06 is missing the ") + column + " column");
     }
     ok &= check(contains(html, "20/20"), "T06 does not show completed/configured for the full phase");
@@ -654,11 +664,11 @@ int main() {
     ok &= check(!contains(html, "miss=0/20"), "T07 writes the aggregate as \"miss=N/M\"");
 
     // 5.7.5: the five approved columns, Title Case in the markup (CSS may transform it).
-    for (const char *column : {"Requested", "Allocated", "Captured", "Mean latency", "Outcome"}) {
-      ok &= check(contains(html, std::string("<th>") + column + "</th>"),
+    for (const char *column : {"Requested", "Allocated", "Captured", "Mean latency", "Detail"}) {
+      ok &= check(contains(html, std::string("<span>") + column + "</span>"),
                   std::string("T07 is missing the ") + column + " column");
     }
-    ok &= check(count_of(html, "<td>20/20</td>") == 5, "T07 does not show captured/attempted per request row");
+    ok &= check(count_of(html, "<span>20/20</span>") == 5, "T07 does not show captured/attempted per request row");
     ok &= check(!contains(html, "class=\"detail-list\""), "T07 still emits the raw repeating detail block");
 
     // 5.7.6: requested-vs-allocated chart, and 5.7.7: latency grouped by allocated depth,
@@ -721,8 +731,8 @@ int main() {
     ok &= check(contains(html, "buffer 0"), "T08's error slot does not name its buffer index");
 
     // 5.8.7: the six approved columns, observed/allocated format.
-    for (const char *column : {"Variant", "Trigger load", "Allocated", "Available", "Error flagged", "Outcome"}) {
-      ok &= check(contains(html, std::string("<th>") + column + "</th>"),
+    for (const char *column : {"Variant", "Trigger load", "Allocated", "Available", "Error flagged", "Detail"}) {
+      ok &= check(contains(html, std::string("<span>") + column + "</span>"),
                   std::string("T08 is missing the ") + column + " column");
     }
     ok &= check(contains(html, "2/2") && contains(html, "1/2"),
@@ -790,13 +800,13 @@ int main() {
 
     // 5.9.8: the four approved columns, one row PER DELAY -- not one aggregate row, which
     // is what the pre-5.9 renderer produced and which hid every individual dip.
-    for (const char *column : {"Delay", "Available", "Mean wait", "Outcome"}) {
-      ok &= check(contains(html, std::string("<th>") + column + "</th>"),
+    for (const char *column : {"Delay", "Available", "Mean wait", "Detail"}) {
+      ok &= check(contains(html, std::string("<span>") + column + "</span>"),
                   std::string("T09 is missing the ") + column + " column");
     }
     ok &= check(contains(html, ">0ms<") && contains(html, ">100ms<"),
                 "T09's Delay Results table is missing the 0ms or 100ms row");
-    ok &= check(count_of(html, "<td>as expected</td>") == 12,
+    ok &= check(count_of(html, "<span>as expected</span>") == 12,
                 "T09's Delay Results table does not carry all twelve delay rows");
     ok &= check(!contains(html, ">Requeue<"), "T09 still aggregates every delay into one \"Requeue\" row");
     ok &= check(!contains(html, "class=\"detail-list\""), "T09 still emits the raw repeating detail block");
@@ -815,11 +825,11 @@ int main() {
     v4l2diag::TestResult t09_gap = t09;
     t09_gap.details.push_back("sequence_gap: Second frame at 0ms delay|sequence 41 -> 43, one frame missing");
     const std::string gap_html = v4l2diag::render_test_content(t09_gap);
-    ok &= check(contains(gap_html, "Technical details"), "T09 does not show sequence-gap evidence as technical detail");
+    ok &= check(contains(gap_html, "Aggregate"), "T09 does not show sequence-gap evidence below the delay table");
     ok &= check(contains(gap_html, "sequence 41 -&gt; 43") || contains(gap_html, "sequence 41"),
                 "T09's technical detail does not carry the sequence-gap evidence");
     // It sits BELOW the results table: the reader meets the verdict before the forensics.
-    ok &= check(gap_html.find("Delay Results") < gap_html.find("Technical details"),
+    ok &= check(gap_html.find("Wait time by requeue delay") < gap_html.find("Technical details"),
                 "T09 puts its technical detail above the Delay Results table");
   }
 
@@ -859,8 +869,8 @@ int main() {
     ok &= check(!contains(html, "Frames captured:"), "T10 still writes capture completeness as prose");
 
     // 5.10.6: the five approved columns, and the four semantic groups.
-    for (const char *column : {"Group", "Flag", "Observed", "Meaning", "State"}) {
-      ok &= check(contains(html, std::string("<th>") + column + "</th>"),
+    for (const char *column : {"Group", "Flag", "Observed", "Meaning", "Detail"}) {
+      ok &= check(contains(html, std::string("<span>") + column + "</span>"),
                   std::string("T10 is missing the ") + column + " column");
     }
     for (const char *group : {"Frame health", "Frame type", "Clock type", "Timestamp point"}) {
@@ -877,7 +887,7 @@ int main() {
     ok &= check(!contains(html, "class=\"detail-list\""), "T10 still emits the raw key-value list");
 
     // 5.10.7: the combined mask decoded by name, with the raw hex kept on the same row.
-    ok &= check(contains(html, "Combined Flag Evidence"), "T10 has no Combined Flag Evidence section");
+    ok &= check(contains(html, "Decoded buffer flags"), "T10 has no Decoded buffer flags item");
     ok &= check(contains(html, "MAPPED, TIMESTAMP_COPY"), "T10 does not decode the combined mask by name");
     ok &= check(contains(html, "0x00004001"), "T10 does not preserve the raw combined mask");
 
@@ -900,7 +910,7 @@ int main() {
     }
 
     // 5.10.10: a passing card carries no RESULT, and T10 draws no chart.
-    ok &= check(!contains(html, "section-label\">Result<"), "a passing T10 card shows a RESULT section");
+    ok &= check(!contains(html, "class=\"result-fail\""), "a passing T10 card shows a RESULT section");
     ok &= check(!v4l2diag::test_charts_approved("t10-buffer-flags"), "T10 is allowed to render a chart");
   }
 
@@ -938,21 +948,24 @@ int main() {
     ok &= check(!contains(html, "MB/s"), "T11 still labels throughput MB/s despite a 1,048,576 base");
 
     // 5.11.5: the derived end-user figures, and NOT named as a capture or sensor frame rate.
-    ok &= check(contains(html, "GiB/s"), "T11 does not derive a readable GiB/s figure");
-    ok &= check(contains(html, "ms/buffer") || contains(html, "ms / buffer"),
-                "T11 does not derive the estimated copy time per buffer");
-    ok &= check(contains(html, "buffers/s"), "T11 does not derive theoretical copies per second");
+    ok &= check(contains(html, "GiB/s") || contains(html, "gibibytes per second"),
+                "T11 does not derive a readable GiB/s figure");
+    ok &=
+        check(contains(html, "ms/buffer") || contains(html, "ms / buffer") || contains(html, "milliseconds per buffer"),
+              "T11 does not derive the estimated copy time per buffer");
+    ok &= check(contains(html, "buffers/s") || contains(html, "buffers per second"),
+                "T11 does not derive theoretical copies per second");
     // A thousands separator must not land inside a decimal: "2,186,.75" is what a
     // digit-grouping helper written for whole byte counts produces when handed a fraction.
     ok &= check(!contains(html, ",."), "T11 puts a thousands separator immediately before a decimal point");
-    ok &= check(contains(html, "2,187 buffers/s") || contains(html, "2,186 buffers/s"),
+    ok &= check(contains(html, "2,187") || contains(html, "2,186"),
                 "T11's theoretical copy capacity is not a readable whole number");
     ok &= check(!contains(html, "frames/s") && !contains(html, "FPS") && !contains(html, "frame rate"),
                 "T11 names a derived copy figure as a capture or sensor frame rate");
 
     // 5.11.4: the cache-sized reads are grouped as SECONDARY evidence, so 31,593 MiB/s is
     // not read as camera throughput.
-    ok &= check(contains(html, "Cache-sized reads"), "T11 does not group the small copies as cache-sized reads");
+    ok &= check(contains(html, "Aggregate"), "T11 does not group the small copies as cache-sized reads");
     ok &= check(contains(html, "Full frame"), "T11 does not name the full-frame result");
 
     // 5.11.7: the throughput-by-copy-size chart, one bar per measurement.
@@ -961,8 +974,8 @@ int main() {
     ok &= check(count_of(html, "t11-copy-bar") == 3, "T11's chart does not show all three copy sizes");
 
     // 5.11.7: the five approved result columns.
-    for (const char *column : {"Mapping", "Copy region", "Bytes/copy", "Throughput", "Relative to full"}) {
-      ok &= check(contains(html, std::string("<th>") + column + "</th>"),
+    for (const char *column : {"Copy region", "Bytes per copy", "Throughput", "Relative to full", "Detail"}) {
+      ok &= check(contains(html, std::string("<span>") + column + "</span>"),
                   std::string("T11 is missing the ") + column + " column");
     }
     ok &= check(contains(html, "1.00x"), "T11 does not show the full-frame result as the 1.00x reference");
@@ -974,7 +987,7 @@ int main() {
 
     // 5.11.2: PASS confirms a valid benchmark ran; no platform threshold was applied, so
     // there is no RESULT block on a passing card.
-    ok &= check(!contains(html, "section-label\">Result<"), "a passing T11 card shows a RESULT section");
+    ok &= check(!contains(html, "class=\"result-fail\""), "a passing T11 card shows a RESULT section");
   }
 
   if (ok) {

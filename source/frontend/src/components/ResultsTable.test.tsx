@@ -42,7 +42,7 @@ describe("ResultsTable", () => {
   // Characterisation, not a contract: these are today's labels. Faz 4.0 moves
   // test status onto PASS / WARN / FAIL / SKIP (distribution counts keep
   // Passed / Warned / Failed / Skipped), and this expectation changes with it.
-  // See plan item 4.0 in docs/web-ui-audit-fix-plan.md.
+  // See plan item 4.0 in docs/implementation-plan.md.
   it("maps every backend status value to a canonical status label (PASS / WARN / FAIL / SKIP)", () => {
     render(
       <ResultsTable

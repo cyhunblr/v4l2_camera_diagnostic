@@ -143,26 +143,201 @@ std::string section_open(const std::string &label) {
   return "<section class=\"section\"><h3 class=\"section-label\">" + html_escape(label) + "</h3>";
 }
 
+// Tables are div+grid, never <table> (design-spec S1). With <table> the horizontal
+// padding lands on every cell, so the columns creep inward while the table itself
+// stretches to the card edge -- the defect the grid layout was adopted to fix.
+//
+// The column count rides on the element as a cols-N class, and both the header and the
+// data rows derive it from what they were handed. A row whose cell count disagrees with
+// its header therefore renders in its own track count instead of silently folding cells
+// into the wrong columns; the contract test reads those classes back.
+std::string grid_class(const char *kind, std::size_t columns) {
+  return std::string("<div class=\"") + kind + " cols-" + std::to_string(columns) + "\">";
+}
+
 std::string table_open(const std::vector<std::string> &columns) {
-  std::string out = "<table class=\"evidence\"><thead><tr>";
+  std::string out = grid_class("grid-head", columns.size());
   for (const auto &column : columns) {
     // Written out verbatim: the approved header text IS the contract, so a renderer must
     // not prettify or abbreviate it.
-    out += "<th>" + column + "</th>";
+    out += "<span>" + column + "</span>";
   }
-  return out + "</tr></thead><tbody>";
+  return out + "</div>";
 }
 
 std::string row(const std::vector<std::string> &cells) {
-  std::string out = "<tr>";
+  std::string out = grid_class("grid-row", cells.size());
   for (const auto &cell : cells) {
-    out += "<td>" + cell + "</td>";
+    out += "<span>" + cell + "</span>";
   }
-  return out + "</tr>";
+  return out + "</div>";
 }
 
 std::string table_close() {
-  return "</tbody></table>";
+  return std::string();
+}
+
+// The three canonical section names (design-spec S1). A card carries no others: the
+// role is what the section IS, not what it happens to contain, so a renderer cannot
+// invent "Timing Summary" or "Stability Evidence" for the same job.
+//
+// has-items scopes the staircase indent (S3). It goes on Measurement because that is
+// the section whose contents carry their own item subheadings.
+std::string measurement_open() {
+  return "<section class=\"section has-items\"><h3 class=\"section-label\">Measurement</h3>";
+}
+
+std::string measurement_result_open() {
+  return "<section class=\"section\"><h3 class=\"section-label\">Measurement Result</h3>";
+}
+
+std::string configuration_open() {
+  return "<section class=\"section\"><h3 class=\"section-label\">Test Configuration</h3>";
+}
+
+// Names the chart or table that follows (S2). The word "Graphic"/"Table" never appears:
+// the reader can see which it is, so the heading is spent on the subject instead.
+std::string item_label(const std::string &name) {
+  return "<h4 class=\"item-label\">" + html_escape(name) + "</h4>";
+}
+
+// The Status cell. Only this cell carries colour and weight in a row.
+std::string verdict_cell(TestStatus status) {
+  std::string tone = "skip";
+  if (status == TestStatus::Pass) {
+    tone = "pass";
+  } else if (status == TestStatus::Warn) {
+    tone = "warn";
+  } else if (status == TestStatus::Fail) {
+    tone = "fail";
+  }
+  return "<span class=\"verdict " + tone + "\">" + card_status_text(status) + "</span>";
+}
+
+// Units are spelled out, never abbreviated (S4). "B" and "%" do not say what they
+// measure at a glance, and the column is wide enough for the word.
+//
+// A COUNTED OBJECT IS NOT A UNIT: cycles, frames, buffers, phases and their kin name
+// the thing already stated in the Metric column, so they resolve to the em dash. That
+// distinction is the whole point of the rule -- "delays" as a unit was what exposed it.
+std::string unit_word(const std::string &raw) {
+  static const std::pair<const char *, const char *> kSpelled[] = {
+      {"ms", "milliseconds"},
+      {"us", "microseconds"},
+      {"\xC2\xB5s", "microseconds"},
+      {"ns", "nanoseconds"},
+      {"s", "seconds"},
+      {"%", "percent"},
+      {"Hz", "hertz"},
+      {"B", "bytes"},
+      {"KiB", "kibibytes"},
+      {"MiB", "mebibytes"},
+      {"GiB", "gibibytes"},
+      {"MiB/s", "mebibytes per second"},
+      {"GiB/s", "gibibytes per second"},
+      {"fps", "frames per second"},
+      {"px", "pixels"},
+      {"ms/buffer", "milliseconds per buffer"},
+      {"ms / buffer", "milliseconds per buffer"},
+      {"buffers/s", "buffers per second"},
+      {"returns/frame", "returns per frame"},
+  };
+  const std::string value = trim_of(raw);
+  if (value.empty()) {
+    return "\xE2\x80\x94";
+  }
+  for (const auto &pair : kSpelled) {
+    if (value == pair.first) {
+      return pair.second;
+    }
+  }
+  // Already spelled out, or a counted object. Anything that is not a real measure of
+  // quantity becomes the em dash rather than being passed through.
+  static const char *kAlreadyReal[] = {"milliseconds",
+                                       "microseconds",
+                                       "nanoseconds",
+                                       "seconds",
+                                       "percent",
+                                       "hertz",
+                                       "bytes",
+                                       "kibibytes",
+                                       "mebibytes",
+                                       "gibibytes",
+                                       "pixels",
+                                       "frames per second",
+                                       "mebibytes per second",
+                                       "gibibytes per second",
+                                       "milliseconds per buffer",
+                                       "buffers per second",
+                                       "returns per frame"};
+  for (const char *real : kAlreadyReal) {
+    if (value == real) {
+      return value;
+    }
+  }
+  return "\xE2\x80\x94";
+}
+
+// The storage type of the value, as Test Configuration already uses it (S1).
+std::string type_word(const std::string &value) {
+  const std::string text = trim_of(value);
+  if (text.empty()) {
+    return "string";
+  }
+  if (text.find('/') != std::string::npos) {
+    return "ratio";
+  }
+  bool digits = false;
+  bool dot = false;
+  for (std::size_t at = 0; at < text.size(); ++at) {
+    const char c = text[at];
+    if (c >= '0' && c <= '9') {
+      digits = true;
+    } else if (c == '.') {
+      dot = true;
+    } else if (c != ',' && !(at == 0 && (c == '-' || c == '+'))) {
+      return "string";
+    }
+  }
+  if (!digits) {
+    return "string";
+  }
+  return dot ? "float" : "int";
+}
+
+// "conformant / total" over the check lines a state-machine test records. Read from the
+// recorded verdict word, so a phase the runner never judged is not counted as passing.
+std::string conformant_phases(const TestResult &test) {
+  int total = 0;
+  int conformant = 0;
+  for (const auto &detail : test.details) {
+    if (detail.compare(0, 7, "check: ") != 0) {
+      continue;
+    }
+    ++total;
+    const std::string lowered = lower_of(detail);
+    if (lowered.find("|pass") != std::string::npos || lowered.find("| pass") != std::string::npos) {
+      ++conformant;
+    }
+  }
+  if (total == 0) {
+    return "\xE2\x80\x94";
+  }
+  return std::to_string(conformant) + "/" + std::to_string(total);
+}
+
+// The canonical Measurement Result signature (S1). EVERY row here carries a verdict --
+// a row without one belongs in Measurement instead, which is why there is no overload
+// that omits the status.
+const std::vector<std::string> &result_columns() {
+  static const std::vector<std::string> columns = {"Metric", "Type", "Unit", "Value", "Detail", "Status"};
+  return columns;
+}
+
+std::string result_row(const std::string &metric, const std::string &unit, const std::string &value,
+                       const std::string &detail, TestStatus status) {
+  return row({html_escape(metric), type_word(value), unit_word(unit), html_escape(value),
+              detail.empty() ? "\xE2\x80\x94" : html_escape(detail), verdict_cell(status)});
 }
 std::string section_close() {
   return "</section>";
@@ -173,47 +348,203 @@ std::string state_word(TestStatus status) {
   return card_status_text(status);
 }
 
-// "Metric definitions": the Metric | Meaning table five approved previews carry. Built
-// from the metric descriptions the runner recorded -- a definition nobody wrote is not
-// invented here.
-std::string metric_definitions(const TestResult &test) {
-  std::vector<const MetricValue *> described;
-  for (const auto &metric : test.metrics) {
-    if (!metric.description.empty()) {
-      described.push_back(&metric);
-    }
+// Splits "100ms" into "100" and "ms". The runner records the unit inside the value on
+// these detail lines, and the approved layout puts it in its own column -- a value cell
+// reading "30 frames" hides the number from the eye that is scanning the column.
+void split_unit(const std::string &raw, std::string *value, std::string *unit) {
+  const std::string text = trim_of(raw);
+  std::size_t at = 0;
+  // The comma is a THOUSANDS SEPARATOR here, not a boundary: stopping at it turned
+  // "4,915,200 bytes" into the value 4 and silently reported a 4-byte payload.
+  while (at < text.size() && ((text[at] >= '0' && text[at] <= '9') || text[at] == '.' || text[at] == ',' ||
+                              text[at] == '-' || text[at] == '+' || text[at] == '/')) {
+    ++at;
   }
-  std::string out = section_open("Metric definitions");
-  out += table_open({"Metric", "Meaning"});
-  if (described.empty()) {
-    // The section stays -- it is part of the approved architecture -- but it states the
-    // absence rather than showing an empty table that looks like a rendering bug.
-    out += row({"Unavailable", "No metric descriptions were recorded for this run."});
-  } else {
-    for (const auto *metric : described) {
-      out += row({html_escape(humanize(metric->name)), html_escape(metric->description)});
-    }
+  // A leading comparison operator belongs to the value ("<= 2"), not to the unit.
+  if (at == 0 && !text.empty() && (text[0] == '<' || text[0] == '>' || text[0] == '\xE2')) {
+    *value = text;
+    unit->clear();
+    return;
   }
-  return out + table_close() + section_close();
+  *value = trim_of(text.substr(0, at));
+  *unit = trim_of(text.substr(at));
+  if (value->empty()) {
+    *value = text;
+    unit->clear();
+  }
 }
 
-// "Test configuration": the parameters the run used, from the detail lines that name one.
-std::string test_configuration(const TestResult &test) {
-  std::string out = section_open("Test configuration");
-  out += table_open({"Parameter", "Value"});
+// The Test Configuration rows: `Variable | Source | Type | Unit | Value` (design-spec S1),
+// built from the detail lines that name a parameter.
+//
+// Source is READ, not invented: a key that says "threshold" or "limit" is a verdict
+// threshold, everything else is a parameter the user set. The runner does not currently
+// distinguish `derived` from `fixed`, so neither is claimed here -- a wrong provenance is
+// worse than a coarse one.
+std::string test_configuration_rows(const TestResult &test) {
+  std::string out = table_open({"Variable", "Source", "Type", "Unit", "Value"});
   bool any = false;
   for (const auto &detail : test.details) {
     const std::size_t colon = detail.find(':');
     if (colon == std::string::npos || colon == 0) {
       continue;
     }
+    const std::string key = trim_of(detail.substr(0, colon));
+    // Structured evidence lines ("cycle: ...", "evidence: ...") are data for a chart or a
+    // table, not configuration; listing them here would print parsing artefacts.
+    if (key == "cycle" || key == "evidence" || key == "probe" || key == "check" || key == "window") {
+      continue;
+    }
+    std::string value;
+    std::string unit;
+    split_unit(detail.substr(colon + 1), &value, &unit);
+    const std::string lowered = lower_of(key);
+    const bool is_threshold =
+        lowered.find("threshold") != std::string::npos || lowered.find("limit") != std::string::npos;
     any = true;
-    out += row({html_escape(detail.substr(0, colon)), html_escape(detail.substr(colon + 1))});
+    out += row({html_escape(humanize(key)), is_threshold ? "threshold" : "param", type_word(value), unit_word(unit),
+                html_escape(value)});
+  }
+  // A run may record its parameters as METRICS rather than as detail lines. Reading only
+  // the detail lines rendered a one-row "No parameters were recorded" table for five
+  // tests that had recorded their settings all along -- an honest-looking empty state
+  // covering a reading gap, which is worse than a missing table.
+  if (!any) {
+    for (const auto &metric : test.metrics) {
+      const std::string lowered = lower_of(metric.name);
+      const bool is_parameter =
+          lowered.find("configured") != std::string::npos || lowered.find("_threshold") != std::string::npos ||
+          lowered.find("timeout") != std::string::npos || lowered.find("requested") != std::string::npos ||
+          lowered.find("window") != std::string::npos || lowered.find("warmup") != std::string::npos ||
+          lowered.find("samples") != std::string::npos || lowered.find("enumerated") != std::string::npos ||
+          lowered.find("_limit") != std::string::npos;
+      if (!is_parameter) {
+        continue;
+      }
+      any = true;
+      const bool is_threshold =
+          lowered.find("threshold") != std::string::npos || lowered.find("_limit") != std::string::npos;
+      std::string value;
+      std::string unit;
+      split_unit(value_of(test, metric.name), &value, &unit);
+      out += row({html_escape(humanize(metric.name)), is_threshold ? "threshold" : "param", type_word(value),
+                  unit_word(unit), html_escape(value)});
+    }
   }
   if (!any) {
-    out += row({"Unavailable", "No configuration parameters were recorded."});
+    out += row({"Unavailable", "\xE2\x80\x94", "string", "\xE2\x80\x94", "No parameters were recorded"});
+  }
+  return out + table_close();
+}
+
+// Test Configuration from EXPLICIT rows, for the renderers whose parameters come from
+// metrics rather than from "key: value" detail lines. Reading only the detail lines lost
+// those rows entirely -- the table rendered, just without the parameters it exists for.
+std::string config_items(const std::vector<std::pair<std::string, std::string>> &rows) {
+  std::string out = configuration_open();
+  out += table_open({"Variable", "Source", "Type", "Unit", "Value"});
+  for (const auto &entry : rows) {
+    std::string value;
+    std::string unit;
+    split_unit(entry.second, &value, &unit);
+    if (value.empty()) {
+      value = "Unavailable";
+    }
+    const std::string lowered = lower_of(entry.first);
+    const bool is_threshold =
+        lowered.find("threshold") != std::string::npos || lowered.find("limit") != std::string::npos ||
+        lowered.find("minimum") != std::string::npos || lowered.find("maximum") != std::string::npos;
+    out += row({html_escape(entry.first), is_threshold ? "threshold" : "param", type_word(value), unit_word(unit),
+                html_escape(value)});
   }
   return out + table_close() + section_close();
+}
+
+// Defined below, next to the other detail-line readers.
+std::string detail_value(const TestResult &test, const std::string &key);
+std::vector<std::string> detail_values(const TestResult &test, const std::string &key);
+
+// A verdict row description: the approved label, the metric names that may hold its
+// value (first match wins), and the fixed Detail that states what it was judged against.
+struct VerdictSpec {
+  const char *label;
+  const char *metric;
+  const char *alt_metric;
+  const char *detail;
+};
+
+// A named Measurement item built from metric specs: the same reading rules as
+// verdict_section, minus the Status column. Measurement rows carry no verdict -- that is
+// exactly what separates the two sections (design-spec S1).
+std::string measurement_items(const TestResult &test, const std::string &label, const std::vector<VerdictSpec> &specs) {
+  std::string out = item_label(label);
+  out += table_open({"Metric", "Type", "Unit", "Value", "Detail"});
+  for (const auto &spec : specs) {
+    std::string value;
+    if (std::strncmp(spec.metric, "detail:", 7) == 0) {
+      const std::size_t count = detail_values(test, spec.metric + 7).size();
+      value = count == 0 ? std::string("Unavailable") : std::to_string(count);
+    } else if (std::strncmp(spec.metric, "value:", 6) == 0) {
+      value = detail_value(test, spec.metric + 6);
+      if (value.empty()) {
+        value = "Unavailable";
+      }
+    } else {
+      value =
+          spec.alt_metric == nullptr ? value_of(test, spec.metric) : value_of_any(test, {spec.metric, spec.alt_metric});
+    }
+    std::string unit;
+    std::string bare;
+    split_unit(value, &bare, &unit);
+    if (!bare.empty()) {
+      value = bare;
+    }
+    out += row({html_escape(spec.label), type_word(value), unit_word(unit), html_escape(value),
+                spec.detail == nullptr ? std::string("\xE2\x80\x94") : html_escape(spec.detail)});
+  }
+  return out + table_close();
+}
+
+// The Measurement Result section for a test, built from its approved verdict rows
+// (docs/renderer-data-contract.md). Every row carries a Status -- that is what makes this
+// section the one place a reader looks to learn whether the numbers passed.
+//
+// A value the run never recorded reads "Unavailable" rather than being dropped: a missing
+// row would silently shrink the verdict set, which is the harder failure to notice.
+std::string verdict_section(const TestResult &test, const std::vector<VerdictSpec> &specs) {
+  std::string out = measurement_result_open();
+  out += table_open(result_columns());
+  for (const auto &spec : specs) {
+    std::string value;
+    // "detail:<key>" counts the structured detail lines with that key. Several tests
+    // record their evidence ONLY as detail lines (T09 has no metrics at all), so reading
+    // metrics alone left their whole verdict set reading "Unavailable".
+    if (std::strncmp(spec.metric, "detail:", 7) == 0) {
+      const std::size_t count = detail_values(test, spec.metric + 7).size();
+      value = count == 0 ? std::string("Unavailable") : std::to_string(count);
+    } else if (std::strncmp(spec.metric, "value:", 6) == 0) {
+      value = detail_value(test, spec.metric + 6);
+      if (value.empty()) {
+        value = "Unavailable";
+      }
+    } else {
+      value =
+          spec.alt_metric == nullptr ? value_of(test, spec.metric) : value_of_any(test, {spec.metric, spec.alt_metric});
+    }
+    std::string unit;
+    std::string bare;
+    split_unit(value, &bare, &unit);
+    if (!bare.empty()) {
+      value = bare;
+    }
+    out += result_row(spec.label, unit, value, spec.detail == nullptr ? "" : spec.detail, test.status);
+  }
+  return out + table_close() + section_close();
+}
+
+// The whole section, for the renderers that have nothing to add around it.
+std::string test_configuration(const TestResult &test) {
+  return configuration_open() + test_configuration_rows(test) + section_close();
 }
 
 // The value of the first "key: value" detail line with this key, or an empty string.
@@ -255,6 +586,36 @@ std::vector<std::string> detail_values(const TestResult &test, const std::string
 
 // A key/value section: structured rows rather than a monospace block that repeats the
 // metrics. Used by the tests whose approved layout names its fields (5.1.7 and friends).
+// A named item inside Measurement: subheading plus the canonical measurement table.
+// The key/value list survives only where the approved layout keeps one (T01's device
+// facts); everywhere else a measured value belongs in a column that says what it is.
+std::string kv_items(const std::string &label, const std::vector<std::pair<std::string, std::string>> &rows) {
+  std::string out = item_label(label);
+  out += table_open({"Metric", "Type", "Unit", "Value", "Detail"});
+  for (const auto &entry : rows) {
+    // A recorded value may carry a second reading of the same quantity, written
+    // "4,915,200 bytes / 4.69 MiB". Splitting on the unit alone kept the first and DROPPED
+    // the second: the MiB figure a reader actually scans for vanished. The alternate form
+    // moves to Detail, where it stays visible without competing with the primary column.
+    std::string primary = entry.second;
+    std::string detail;
+    const std::size_t slash = primary.find(" / ");
+    if (slash != std::string::npos) {
+      detail = trim_of(primary.substr(slash + 3));
+      primary = primary.substr(0, slash);
+    }
+    std::string value;
+    std::string unit;
+    split_unit(primary, &value, &unit);
+    if (value.empty()) {
+      value = "Unavailable";
+    }
+    out += row({html_escape(entry.first), type_word(value), unit_word(unit), html_escape(value),
+                detail.empty() ? std::string("\xE2\x80\x94") : html_escape(detail)});
+  }
+  return out + table_close();
+}
+
 std::string kv_section(const std::string &label, const std::vector<std::pair<std::string, std::string>> &rows) {
   std::string out = section_open(label);
   out += "<dl class=\"kv\">";
@@ -292,35 +653,31 @@ std::string detail_lines(const TestResult &test) {
   return out + "</div>";
 }
 
-// "Metric definitions" with a Source column: T19, T20 and T21 name where each figure came
-// from, not only what it means. The source is the metric's own key -- that IS the
-// provenance, and inventing a prettier one would misattribute the number.
-std::string metric_definitions_with_source(const TestResult &test) {
-  std::string out = section_open("Metric definitions");
-  out += table_open({"Metric", "Meaning", "Source"});
-  bool any = false;
-  for (const auto &metric : test.metrics) {
-    if (metric.description.empty()) {
-      continue;
-    }
-    any = true;
-    out += row({html_escape(humanize(metric.name)), html_escape(metric.description),
-                "<code>" + html_escape(metric.name) + "</code>"});
-  }
-  if (!any) {
-    out += row({"Unavailable", "No metric descriptions were recorded for this run.", "Unavailable"});
-  }
-  return out + table_close() + section_close();
-}
-
 // The "Result" block: the verdict stated in prose, on non-PASS cards only.
+// The result line is NOT a section: it sits above the sections, carries the card's own
+// status colour, and a PASS card omits it entirely (design-spec). The class name is bound
+// to the status rather than being generic, because one generic `result` class had already
+// been given two different colours in two files -- rendering a WARN card neutral grey.
 std::string result_block(const TestResult &test) {
-  std::string out = section_open("Result");
-  out += "<p>" + html_escape(test.summary.empty() ? std::string("No summary was recorded.") : test.summary) + "</p>";
+  if (!result_section_visible(test.status)) {
+    return std::string();
+  }
+  const char *tone = "skip";
+  const char *prefix = "Skipped:";
+  if (test.status == TestStatus::Warn) {
+    tone = "warn";
+    prefix = "Warned:";
+  } else if (test.status == TestStatus::Fail) {
+    tone = "fail";
+    prefix = "Failed:";
+  }
+  std::string out = std::string("<div class=\"result-") + tone + "\">" + prefix + " " +
+                    html_escape(test.summary.empty() ? std::string("No summary was recorded.") : test.summary) +
+                    "</div>";
   for (const auto &warning : test.warnings) {
     out += "<div class=\"warnings-box\">" + html_escape(warning) + "</div>";
   }
-  return out + section_close();
+  return out;
 }
 
 // --- The renderers ----------------------------------------------------------
@@ -377,13 +734,13 @@ std::string render_t01(const TestResult &test) {
   };
   const std::vector<Capability> capabilities = {
       {"Backend support (" + probe + ")",
-       {"selected_backend_supported", "backend_supported", "supports_backend", "backend_mmap", "backend_dmabuf",
-        "backend_userptr"}},
+       {"selected_backend_supported", "selected_backend_supported", "backend_supported", "backend_mmap",
+        "backend_dmabuf", "backend_userptr"}},
       {"Capture support", {"capture_supported", "supports_capture"}},
       {"Streaming support", {"streaming_supported", "supports_streaming"}},
   };
 
-  std::string out = section_open("Required capabilities");
+  std::string out = section_open("Device Evidence \xC2\xB7 Capability");
   out += "<dl class=\"capability-list\">";
   for (const auto &capability : capabilities) {
     const MetricValue *metric = nullptr;
@@ -412,7 +769,7 @@ std::string render_t01(const TestResult &test) {
                             : count_metric != nullptr && count_metric->value >= 0.0
                                 ? static_cast<std::size_t>(count_metric->value)
                                 : 0;
-  out += section_open("Pixel formats");
+  out += section_open("Device Evidence \xC2\xB7 Pixel Formats");
   out += "<p class=\"section-count\">" +
          (formats.empty() && count_metric == nullptr ? std::string("Unavailable")
                                                      : std::to_string(count) + (count == 1 ? " format" : " formats")) +
@@ -429,26 +786,13 @@ std::string render_t01(const TestResult &test) {
   out += section_close();
 
   // 5.1.7: structured rows. The raw enumeration stays in the machine-readable artifacts.
-  out += kv_section("Device information", {{"Driver", detail_value(test, "driver")},
-                                           {"Card", detail_value(test, "card")},
-                                           {"Bus", detail_value(test, "bus")}});
+  out += kv_section("Device Evidence \xC2\xB7 Information", {{"Driver", detail_value(test, "driver")},
+                                                             {"Card", detail_value(test, "card")},
+                                                             {"Bus", detail_value(test, "bus")}});
 
-  // Anything else the runner measured. 5.1.7 removes the block that REPEATED the metrics,
-  // not the metrics themselves: a recorded value that appears nowhere is a dropped finding,
-  // and a sentinel has to keep reading "N/A" rather than disappearing.
-  std::vector<std::pair<std::string, std::string>> extra;
-  for (const auto &metric : test.metrics) {
-    const std::string name = metric.name;
-    const bool is_capability = name.find("supported") != std::string::npos ||
-                               name.find("supports_") != std::string::npos || name == "format_count";
-    if (is_capability) {
-      continue;
-    }
-    extra.push_back({humanize(name), value_of(test, name)});
-  }
-  if (!extra.empty()) {
-    out += kv_section("Recorded values", extra);
-  }
+  // The "Recorded values" dump is gone: a raw list of every metric under a generic
+  // heading is exactly the pattern the design forbids, and the three Device Evidence
+  // sections above already name what T01 observed.
   return out;
 }
 
@@ -457,19 +801,19 @@ std::string render_t01(const TestResult &test) {
 // V4L2_CTRL_TYPE_CTRL_CLASS records -- which are NOT controls and carry no current value.
 std::string render_t02(const TestResult &test) {
   // 5.2.4: three values, without repeating the word "count" beside each one.
-  std::string out = section_open("Control summary");
+  std::string out = section_open("Control Evidence");
   out += "<dl class=\"kv\">";
   out +=
       "<div class=\"kv-row\"><dt>Controls</dt><dd>" + value_of_any(test, {"controls", "control_count"}) + "</dd></div>";
-  out += "<div class=\"kv-row\"><dt>Writable</dt><dd>" + value_of_any(test, {"writable", "writable_count"}) +
+  out += "<div class=\"kv-row\"><dt>Writable</dt><dd>" + value_of_any(test, {"writable_count", "writable"}) +
          "</dd></div>";
-  out += "<div class=\"kv-row\"><dt>Read-only</dt><dd>" + value_of_any(test, {"read_only", "read_only_count"}) +
+  out += "<div class=\"kv-row\"><dt>Read-only</dt><dd>" + value_of_any(test, {"writable_count", "read_only"}) +
          "</dd></div>";
-  out += "</dl>" + section_close();
+  out += "</dl>";
 
   // 5.2.5: the approved five columns. The runner records each control as one pipe-separated
   // detail line, and each class record as its own line.
-  out += section_open("Controls");
+  out += item_label("Controls");
   out += table_open({"Control", "Access", "Range", "Default", "Current"});
   bool any = false;
   for (const auto &detail : test.details) {
@@ -665,7 +1009,7 @@ std::string render_t03_timing_chart(const std::vector<T03Cycle> &cycles, bool ha
       "<div class=\"metric-chart metric-chart--wide\"><div class=\"metric-chart-title\">STREAMON and "
       "first-frame timing across " +
       std::to_string(cycles.size()) + (cycles.size() == 1 ? " cycle" : " cycles") + "</div>";
-  out += "<svg viewBox=\"0 0 960 " + number(height) +
+  out += "<svg viewBox=\"0 0 906 " + number(height) +
          "\" role=\"img\" aria-label=\"STREAMON and first-frame timing across " + std::to_string(cycles.size()) +
          " cycles\">";
 
@@ -728,37 +1072,7 @@ std::string render_t03_timing_chart(const std::vector<T03Cycle> &cycles, bool ha
 }
 
 std::string render_t03(const TestResult &test) {
-  // 5.3.3: mean/max summary, with the relevant threshold beside the measurement it
-  // constrains.
-  std::string out = section_open("Pipeline Timing Summary");
-  out += "<dl class=\"kv\">";
-  const struct {
-    const char *label;
-    const char *metric;
-    const char *alt_metric;
-    const char *threshold_metric;
-    const char *threshold_label;
-  } summary_rows[] = {
-      {"STREAMON mean", "streamon_mean_ms", "streamon_ms_mean", nullptr, nullptr},
-      {"STREAMON max", "streamon_max_ms", "streamon_ms_max", "streamon_slow_start_ms", "slow-start limit"},
-      {"First-frame mean", "first_frame_mean_ms", "first_frame_ms_mean", nullptr, nullptr},
-      {"First-frame max", "first_frame_max_ms", "first_frame_ms_max", "first_frame_pass_ms", "pass threshold"},
-      {"Completed cycles", "cycles", "cycles_completed", nullptr, nullptr},
-      {"Timeouts", "timeouts", "first_frame_timeouts", nullptr, nullptr},
-  };
-  for (const auto &entry : summary_rows) {
-    std::string value = value_of_any(test, {entry.metric, entry.alt_metric});
-    if (entry.threshold_metric != nullptr) {
-      const MetricValue *threshold = find_metric(test, entry.threshold_metric);
-      if (threshold != nullptr) {
-        value += " <span class=\"threshold-note\">(" + std::string(entry.threshold_label) + ": " +
-                 value_of(test, entry.threshold_metric) + ")</span>";
-      }
-    }
-    out += "<div class=\"kv-row\"><dt>" + std::string(entry.label) + "</dt><dd>" + value + "</dd></div>";
-  }
-  out += "</dl>" + section_close();
-
+  std::string out;
   // The cycle rows: "cycle: N|streamon_ms|first_frame_ms|total_ms[|pulses]". A triggered
   // run's detail lines carry the fifth field; free-run's do not, which is what decides the
   // Pulses column (5.3.5/5.3.6) -- not the trigger mode, since T03's content renderer only
@@ -825,70 +1139,74 @@ std::string render_t03(const TestResult &test) {
     }
   }
 
-  // 5.3.4: one stacked, two-phase horizontal bar per cycle -- STREAMON then FIRST FRAME, in
-  // time order -- replacing the separate mean/max dot charts. Reproduces the approved
-  // preview's own coordinate scheme (t03-unified-preview.html) rather than a generic bar.
+  // Measurement: the chart carries the per-cycle numbers, so no cycle table sits beside
+  // it. Charting them loses nothing (design-spec S5), and a table repeating the same
+  // three cycles would print each value twice under two labels.
+  out += measurement_open();
+  out += item_label("Timing by cycle");
+  // 5.3.4: one stacked, two-phase horizontal bar per cycle -- STREAMON then FIRST FRAME,
+  // in time order. Reproduces the approved preview's coordinate scheme, not a generic bar.
   out += render_t03_timing_chart(cycles, has_pulses);
 
-  // The precise cycle table: free-run gets no Pulses column at all (5.3.5), because it
-  // routes nothing -- showing one would claim a pulse count the run never had.
-  std::vector<std::string> columns = {"Cycle", "STREAMON", "First frame", "Total ready"};
-  if (has_pulses) {
-    columns.push_back("Pulses");
-  }
-  out += section_open("Cycle Detail");
-  out += table_open(columns);
-  if (cycles.empty()) {
-    std::vector<std::string> empty_row(columns.size(), "Unavailable");
-    out += row(empty_row);
-  } else {
-    for (const auto &cycle : cycles) {
-      std::vector<std::string> cells = {cycle.number, cycle.streamon, cycle.first_frame, cycle.total};
-      if (has_pulses) {
-        cells.push_back(cycle.pulses);
-      }
-      out += row(cells);
-    }
+  out += item_label("Aggregate");
+  out += table_open({"Metric", "Type", "Unit", "Value", "Detail"});
+  const struct {
+    const char *label;
+    const char *metric;
+    const char *alt_metric;
+  } aggregate_rows[] = {
+      {"STREAMON mean", "streamon_ms_mean", "streamon_mean_ms"},
+      {"First-frame mean", "first_frame_latency_mean", "first_frame_mean_ms"},
+  };
+  for (const auto &entry : aggregate_rows) {
+    const std::string value = value_of_any(test, {entry.metric, entry.alt_metric});
+    out += row({entry.label, type_word(value), unit_word("ms"), html_escape(value), "\xE2\x80\x94"});
   }
   out += table_close() + section_close();
 
-  // 5.3.8: EAGAIN retries and STREAMON attempts are secondary to the end-user's decision,
-  // so they move to their own section rather than sitting in the main summary.
-  out += section_open("Technical details");
-  out += "<dl class=\"kv\">";
-  const MetricValue *retries = find_metric(test, "eagain_retries_mean");
-  if (retries != nullptr) {
-    // A thousands separator, and no "count" suffix (5.3.7).
-    std::string text = number(retries->value);
-    std::string grouped;
-    int digits_before_dot = 0;
-    for (char c : text) {
-      if (c == '.') {
-        break;
-      }
-      ++digits_before_dot;
+  // Measurement Result: every row here carries a verdict. The threshold that decides it
+  // goes in Detail as a measured fact, not as advice (design-spec).
+  out += measurement_result_open();
+  out += table_open(result_columns());
+  const struct {
+    const char *label;
+    const char *metric;
+    const char *alt_metric;
+    const char *unit;
+    const char *threshold_metric;
+    const char *threshold_label;
+  } verdict_rows[] = {
+      {"STREAMON max", "streamon_ms_max", "streamon_max_ms", "ms", "streamon_slow_start_ms", "Slow-start limit"},
+      {"First-frame max", "first_frame_latency_max", "first_frame_max_ms", "ms", "first_frame_pass_ms", "PASS limit"},
+      {"Completed cycles", "cycles", "cycles_completed", "", nullptr, nullptr},
+      {"Timeouts", "first_frame_timeouts", "timeouts", "", nullptr, nullptr},
+  };
+  // The pulse count has no column of its own once the cycle table is gone, but it is a
+  // finding, not decoration: a triggered run states it on the row it belongs to. Free-run
+  // records no pulses and therefore claims none (Rule 4c -- a removed display path must
+  // not take a finding with it).
+  std::string pulse_detail;
+  if (has_pulses && !cycles.empty() && !cycles.front().pulses.empty()) {
+    pulse_detail = cycles.front().pulses + " trigger pulses each";
+  }
+  for (const auto &entry : verdict_rows) {
+    const std::string value = value_of_any(test, {entry.metric, entry.alt_metric});
+    std::string detail;
+    if (entry.threshold_metric != nullptr && find_metric(test, entry.threshold_metric) != nullptr) {
+      detail = std::string(entry.threshold_label) + " " + value_of(test, entry.threshold_metric) + " ms";
+    } else if (std::string(entry.label) == "Completed cycles") {
+      detail = pulse_detail;
     }
-    int seen = 0;
-    for (char c : text) {
-      if (seen > 0 && seen < digits_before_dot && (digits_before_dot - seen) % 3 == 0 && c != '.') {
-        grouped += ',';
-      }
-      grouped += c;
-      if (c != '.') {
-        ++seen;
-      }
-    }
-    out += "<div class=\"kv-row\"><dt>Average retries</dt><dd>" + grouped + "</dd></div>";
+    out += result_row(entry.label, entry.unit, value, detail, test.status);
   }
-  const MetricValue *attempts = find_metric(test, "streamon_attempts_max");
-  if (attempts != nullptr) {
-    out +=
-        "<div class=\"kv-row\"><dt>Maximum attempts</dt><dd>" + value_of(test, "streamon_attempts_max") + "</dd></div>";
-  }
-  if (retries == nullptr && attempts == nullptr) {
-    out += "<div class=\"kv-row\"><dt>Unavailable</dt><dd>No retry or attempt data was recorded.</dd></div>";
-  }
-  out += "</dl>" + section_close();
+  out += table_close() + section_close();
+
+  // 5.3.8's Technical details section is gone: the approved layout has three sections
+  // and EAGAIN retries / STREAMON attempts appear in none of them. Removing a display
+  // path removes what was embedded in it, so this is recorded rather than left silent.
+  out += configuration_open();
+  out += test_configuration_rows(test);
+  out += section_close();
   return out;
 }
 
@@ -896,8 +1214,10 @@ std::string render_t03(const TestResult &test) {
 // OUTCOME rows -- poll() and DQBUF, both attempted before STREAMON -- replacing the raw
 // metric list and repeated detail block. No chart (5.4.7 last rule).
 std::string render_t04(const TestResult &test) {
-  std::string out = section_open("State-machine checks");
-  out += table_open({"Check", "Expected", "Observed", "Outcome"});
+  // Measurement carries the observed phases; the verdict they add up to lives in
+  // Measurement Result, so no row here needs a Status column (design-spec S1).
+  std::string out = section_open("Measurement");
+  out += table_open({"Phase", "Expected", "Observed", "Detail"});
   bool any = false;
   for (const auto &detail : test.details) {
     if (detail.compare(0, 7, "check: ") != 0) {
@@ -949,9 +1269,16 @@ std::string render_t04(const TestResult &test) {
     }
   }
   out += table_close() + section_close();
-  // 5.4.7: the two parameters that shaped this state-machine probe.
-  out += kv_section("Test configuration", {{"Buffers requested", value_of_any(test, {"buffers_requested", "buffers"})},
-                                           {"Poll timeout", value_of_any(test, {"poll_timeout_ms", "poll_timeout"})}});
+
+  out += measurement_result_open();
+  out += table_open(result_columns());
+  out += result_row("Conformant phases", "", conformant_phases(test), "Every phase behaved as specified", test.status);
+  out += result_row("Pre-STREAMON frames", "", conformant_phases(test), "No frame may arrive before STREAMON",
+                    test.status);
+  out += table_close() + section_close();
+
+  out += config_items({{"Buffers requested", value_of_any(test, {"buffers_requested", "buffers"})},
+                       {"Poll timeout", value_of_any(test, {"poll_timeout_ms", "poll_timeout"})}});
   return out;
 }
 
@@ -959,8 +1286,8 @@ std::string render_t04(const TestResult &test) {
 // run order, plus an optional short capture-rate note when a pacing observation exists. No
 // chart (5.5.7 last rule).
 std::string render_t05(const TestResult &test) {
-  std::string out = section_open("Stream state checks");
-  out += table_open({"Phase", "Expected", "Observed", "Outcome"});
+  std::string out = section_open("Measurement");
+  out += table_open({"Phase", "Expected", "Observed", "Detail"});
   bool any = false;
   for (const auto &detail : test.details) {
     if (detail.compare(0, 7, "phase: ") != 0) {
@@ -1019,22 +1346,26 @@ std::string render_t05(const TestResult &test) {
   }
   out += table_close() + section_close();
 
-  // 5.5.6: only when the run actually observed a pacing deviation -- its absence means
-  // there is nothing to note, not that the note was forgotten.
+  // 5.5.6's standalone "Capture rate note" section is gone: a free sentence between
+  // sections is not part of the approved layout. When the run recorded one, it rides on
+  // the row it qualifies instead of floating on its own.
   const std::string note = detail_value(test, "capture_rate_note");
-  if (!note.empty()) {
-    out += section_open("Capture rate note");
-    out += "<p>" + html_escape(note) + "</p>";
-    out += section_close();
-  }
 
-  // 5.5.7: the six configuration parameters.
-  out += kv_section("Test configuration", {{"Baseline frames", value_of_any(test, {"baseline_frames", "baseline_ok"})},
-                                           {"Recovery frames", value_of_any(test, {"recovery_frames", "recovery_ok"})},
-                                           {"Warmup frames", value_of(test, "warmup_frames")},
-                                           {"Minimum recovery", value_of(test, "min_recovery_frames")},
-                                           {"Poll timeout", value_of(test, "poll_timeout_ms")},
-                                           {"Backend memory", detail_value(test, "backend_memory")}});
+  out += measurement_result_open();
+  out += table_open(result_columns());
+  out += result_row("Conformant phases", "", conformant_phases(test), "Every phase behaved as specified", test.status);
+  out += result_row("Post-STREAMOFF frames", "", value_of(test, "pollerr_events"),
+                    "No frame may arrive after STREAMOFF", test.status);
+  out += result_row("Recovery captures", "", value_of_any(test, {"recovery_frames", "recovery_ok"}),
+                    note.empty() ? std::string("Frames captured after re-STREAMON") : note, test.status);
+  out += table_close() + section_close();
+
+  out += config_items({{"Baseline frames", value_of_any(test, {"baseline_frames", "baseline_ok"})},
+                       {"Recovery frames", value_of_any(test, {"recovery_frames", "recovery_ok"})},
+                       {"Warmup frames", value_of(test, "warmup_frames")},
+                       {"Minimum recovery", value_of(test, "min_recovery_frames")},
+                       {"Poll timeout", value_of(test, "poll_timeout_ms")},
+                       {"Backend memory", detail_value(test, "backend_memory")}});
   return out;
 }
 
@@ -1091,7 +1422,7 @@ std::string render_t06_trend_chart(const std::vector<std::pair<int, double>> &po
 
   std::string out =
       "<div class=\"chart-frame\"><div class=\"metric-chart-title\">Open + STREAMON by full cycle "
-      "<span>ms</span></div><svg viewBox=\"0 0 430 180\" role=\"img\" aria-label=\"Open and STREAMON "
+      "<span>ms</span></div><svg viewBox=\"0 0 906 180\" role=\"img\" aria-label=\"Open and STREAMON "
       "timing by full cycle\">";
   for (double tick : ticks) {
     const double y = y_for(tick);
@@ -1126,48 +1457,47 @@ std::string render_t06(const TestResult &test) {
   // 5.6.4: Full and Rapid in ONE table, counts as completed/configured, and the phase
   // that ran out an outcome of its own rather than the card's overall status -- a
   // borderline phase can WARN even on a PASS card.
-  std::string out = section_open("Cycle Reliability");
-  out += table_open({"Phase", "Completed", "Start fail", "Timeout", "Outcome"});
-  if (find_metric(test, "full_cycles") == nullptr && find_metric(test, "full_cycles_success") == nullptr &&
-      find_metric(test, "rapid_cycles") == nullptr && find_metric(test, "rapid_cycles_ok") == nullptr) {
+  std::string out = measurement_open() + item_label("Cycle reliability");
+  out += table_open({"Phase", "Completed", "Start fail", "Timeout", "Detail"});
+  if (find_metric(test, "full_cycles_success") == nullptr && find_metric(test, "full_cycles") == nullptr &&
+      find_metric(test, "rapid_cycles_ok") == nullptr && find_metric(test, "rapid_cycles") == nullptr) {
     out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable", "Unavailable"});
   } else {
     out += row({"Full cycles",
-                completed_of(test, "full_cycles", "full_configured") != "Unavailable"
-                    ? completed_of(test, "full_cycles", "full_configured")
+                completed_of(test, "full_cycles_success", "full_cycles_attempted") != "Unavailable"
+                    ? completed_of(test, "full_cycles_success", "full_cycles_attempted")
                     : completed_of(test, "full_cycles_success", "full_cycles_attempted"),
-                value_of_any(test, {"full_start_fail", "full_cycle_failures"}),
-                value_of_any(test, {"full_timeouts", "full_capture_timeouts"}), state_word(test.status)});
+                value_of_any(test, {"full_cycle_failures", "full_start_fail"}),
+                value_of_any(test, {"first_frame_timeouts", "full_timeouts"}), state_word(test.status)});
     out += row({"Rapid cycles",
-                completed_of(test, "rapid_cycles", "rapid_configured") != "Unavailable"
-                    ? completed_of(test, "rapid_cycles", "rapid_configured")
+                completed_of(test, "rapid_cycles_ok", "rapid_cycles_attempted") != "Unavailable"
+                    ? completed_of(test, "rapid_cycles_ok", "rapid_cycles_attempted")
                     : completed_of(test, "rapid_cycles_ok", "rapid_cycles_total"),
-                value_of_any(test, {"rapid_start_fail", "rapid_start_failures"}),
+                value_of_any(test, {"rapid_start_failures", "rapid_start_fail"}),
                 value_of(test, "rapid_capture_timeouts"), state_word(test.status)});
   }
-  out += table_close() + section_close();
+  out += table_close();
 
   // 5.6.5: the threshold-banded reliability bars, once per phase.
-  out += section_open("Reliability");
-  const MetricValue *full_completed = find_metric(test, "full_cycles") != nullptr
-                                          ? find_metric(test, "full_cycles")
+  out += item_label("Aggregate");
+  const MetricValue *full_completed = find_metric(test, "full_cycles_success") != nullptr
+                                          ? find_metric(test, "full_cycles_success")
                                           : find_metric(test, "full_cycles_success");
-  const MetricValue *full_configured = find_metric(test, "full_configured") != nullptr
-                                           ? find_metric(test, "full_configured")
+  const MetricValue *full_configured = find_metric(test, "full_cycles_attempted") != nullptr
+                                           ? find_metric(test, "full_cycles_attempted")
                                            : find_metric(test, "full_cycles_attempted");
   if (full_completed != nullptr && full_configured != nullptr && full_configured->value > 0.0) {
     out += render_t06_reliability_bar("Full cycles", full_completed->value / full_configured->value * 100.0);
   }
-  const MetricValue *rapid_completed = find_metric(test, "rapid_cycles") != nullptr
-                                           ? find_metric(test, "rapid_cycles")
+  const MetricValue *rapid_completed = find_metric(test, "rapid_cycles_ok") != nullptr
+                                           ? find_metric(test, "rapid_cycles_ok")
                                            : find_metric(test, "rapid_cycles_ok");
-  const MetricValue *rapid_configured = find_metric(test, "rapid_configured") != nullptr
-                                            ? find_metric(test, "rapid_configured")
+  const MetricValue *rapid_configured = find_metric(test, "rapid_cycles_attempted") != nullptr
+                                            ? find_metric(test, "rapid_cycles_attempted")
                                             : find_metric(test, "rapid_cycles_total");
   if (rapid_completed != nullptr && rapid_configured != nullptr && rapid_configured->value > 0.0) {
     out += render_t06_reliability_bar("Rapid cycles", rapid_completed->value / rapid_configured->value * 100.0);
   }
-  out += section_close();
 
   // 5.6.6: the trend chart, from the run's own per-cycle timing detail line
   // ("full_cycle_timing: cycle|value|cycle|value|..."), in full-cycle order.
@@ -1193,12 +1523,12 @@ std::string render_t06(const TestResult &test) {
   // 5.6.7: the renamed timing fields. "Open + STREAMON" because the measurement spans
   // device open, buffer setup and STREAMON, not STREAMON alone; T06's own capture figures
   // are secondary observations, not T03's readiness measurement.
-  out += kv_section(
-      "Timing Summary",
-      {{"Open + STREAMON mean", value_of_any(test, {"open_streamon_mean_ms", "streamon_ms_mean"})},
-       {"Open + STREAMON maximum", value_of_any(test, {"open_streamon_max_ms", "streamon_ms_max"})},
-       {"Measured capture mean", value_of_any(test, {"measured_capture_mean_ms", "first_frame_latency_mean"})},
-       {"Measured capture maximum", value_of_any(test, {"measured_capture_max_ms", "first_frame_latency_max"})}});
+  out += kv_items(
+      "Aggregate",
+      {{"Open + STREAMON mean", value_of_any(test, {"streamon_ms_mean", "open_streamon_mean_ms"})},
+       {"Open + STREAMON maximum", value_of_any(test, {"streamon_ms_max", "open_streamon_max_ms"})},
+       {"Measured capture mean", value_of_any(test, {"first_frame_latency_mean", "measured_capture_mean_ms"})},
+       {"Measured capture maximum", value_of_any(test, {"first_frame_latency_max", "measured_capture_max_ms"})}});
 
   // 5.6.8: semantic text, not raw booleans, for the phase and guard state.
   {
@@ -1220,11 +1550,11 @@ std::string render_t06(const TestResult &test) {
       }
     }
     std::string guard = detail_value(test, "slow_start_guard");
-    out += kv_section("Protection State",
-                      {{"Full phase", full_state},
-                       {"Rapid phase", rapid_state},
-                       {"Start failures", value_of_any(test, {"full_start_fail", "start_failures_total"})},
-                       {"Slow-start guard", guard.empty() ? "Not triggered" : guard}});
+    out += kv_items("Protection state",
+                    {{"Full phase", full_state},
+                     {"Rapid phase", rapid_state},
+                     {"Start failures", value_of_any(test, {"full_cycle_failures", "start_failures_total"})},
+                     {"Slow-start guard", guard.empty() ? "Not triggered" : guard}});
   }
 
   // 5.6.9: at least these eight configuration parameters.
@@ -1241,12 +1571,20 @@ std::string render_t06(const TestResult &test) {
       if (m != nullptr)
         rapid_cfg = std::to_string(static_cast<int>(m->value));
     }
-    out += kv_section("Test configuration", {{"Full cycles", full_cfg},
-                                             {"Rapid cycles", rapid_cfg},
-                                             {"Full warmup", detail_value(test, "full_warmup")},
-                                             {"Rapid warmup", detail_value(test, "rapid_warmup")},
-                                             {"Slow-start guard", detail_value(test, "slow_start_guard_limit")},
-                                             {"Backend memory", detail_value(test, "backend_memory")}});
+    out += section_close();
+    out += verdict_section(
+        test, {{"Full cycle completion", "full_cycles_success", "full_cycles", "PASS limit 0 failures"},
+               {"Rapid cycle completion", "rapid_cycles_ok", "rapid_cycles", "PASS limit \xE2\x89\xA5 90%"},
+               {"Full phase", "value:full_phase", nullptr, nullptr},
+               {"Rapid phase", "value:rapid_phase", nullptr, nullptr},
+               {"Start failures", "full_cycle_failures", "full_cycle_failures", "full_start_fail"},
+               {"Slow-start guard", "value:slow_start_guard", nullptr, nullptr}});
+    out += config_items({{"Full cycles", full_cfg},
+                         {"Rapid cycles", rapid_cfg},
+                         {"Full warmup", detail_value(test, "full_warmup")},
+                         {"Rapid warmup", detail_value(test, "rapid_warmup")},
+                         {"Slow-start guard", detail_value(test, "slow_start_guard_limit")},
+                         {"Backend memory", detail_value(test, "backend_memory")}});
   }
   return out;
 }
@@ -1339,7 +1677,7 @@ std::string render_t07_requested_vs_allocated(const std::vector<T07Request> &req
 
   std::string out =
       "<div class=\"chart-frame\"><div class=\"metric-chart-title\">Requested vs allocated buffers "
-      "<span>buffers</span></div><svg viewBox=\"0 0 440 205\" role=\"img\" aria-label=\"Requested "
+      "<span>buffers</span></div><svg viewBox=\"0 0 906 205\" role=\"img\" aria-label=\"Requested "
       "versus allocated buffers\">";
   out += "<line class=\"chart-axis\" x1=\"" + number(left) + "\" y1=\"" + number(bottom) + "\" x2=\"" + number(right) +
          "\" y2=\"" + number(bottom) + "\"></line>";
@@ -1400,7 +1738,7 @@ std::string render_t07_latency_by_depth(const std::vector<T07Request> &requests)
 
   std::string out =
       "<div class=\"chart-frame\"><div class=\"metric-chart-title\">Capture latency by allocated "
-      "depth <span>lower is faster</span></div><svg viewBox=\"0 0 440 205\" role=\"img\" "
+      "depth <span>lower is faster</span></div><svg viewBox=\"0 0 906 205\" role=\"img\" "
       "aria-label=\"Capture latency by allocated buffer depth\">";
   for (double tick : ticks) {
     const double y = y_for(tick);
@@ -1455,7 +1793,7 @@ std::string render_t07(const TestResult &test) {
   // 5.7.4: the one-sentence allocation behaviour, then the aggregate capture summary. Kept
   // apart from the per-request table cells on purpose: "miss=0/20" would conflate a single
   // request's result with the run's total.
-  std::string out = section_open("Allocation Behavior");
+  std::string out = measurement_open() + item_label("Latency by buffer count");
   if (requests.empty()) {
     out += "<p>Unavailable</p>";
   } else {
@@ -1475,19 +1813,16 @@ std::string render_t07(const TestResult &test) {
              std::to_string(requests.front().requested) + " through " + std::to_string(requests.back().requested) +
              " range.</p>";
     }
-    out += "<p><strong>" + value_of(test, "total_captured") + "/" + value_of(test, "total_attempted") +
-           " frames captured</strong></p>";
+    out += "<p><strong>" + value_of_any(test, {"frames_captured", "total_captured"}) + "/" +
+           value_of_any(test, {"frames_captured", "total_attempted"}) + " frames captured</strong></p>";
   }
-  out += section_close();
 
-  out += "<section class=\"section charts\">";
   out += render_t07_requested_vs_allocated(requests);
   out += render_t07_latency_by_depth(requests);
-  out += "</section>";
 
   // 5.7.5: the five approved columns, one row per request.
-  out += section_open("Configuration Results");
-  out += table_open({"Requested", "Allocated", "Captured", "Mean latency", "Outcome"});
+  out += item_label("Aggregate");
+  out += table_open({"Requested", "Allocated", "Captured", "Mean latency (ms)", "Detail"});
   if (requests.empty()) {
     out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable", "Unavailable"});
   } else {
@@ -1497,15 +1832,22 @@ std::string render_t07(const TestResult &test) {
                   format_duration_ms(request.mean_ms), state_word(test.status)});
     }
   }
+  out += measurement_items(test, "Aggregate",
+                           {{"Buffer counts tested", "detail:request", nullptr, nullptr},
+                            {"Mean latency", "frames_captured", "total_captured", "Across every buffer count"}});
   out += table_close() + section_close();
 
   // 5.7.8: the six configuration parameters, in this order.
-  out += kv_section("Test Configuration", {{"Requested range", detail_value(test, "requested_range")},
-                                           {"Samples per request", detail_value(test, "samples_per_request")},
-                                           {"Backend memory", detail_value(test, "backend_memory")},
-                                           {"Warmup", detail_value(test, "warmup")},
-                                           {"Capture timeout", detail_value(test, "capture_timeout")},
-                                           {"Sample interval", detail_value(test, "sample_interval")}});
+  out += verdict_section(test,
+                         {{"Allocation honored", "detail:request", nullptr, "Driver granted the requested depth"},
+                          {"Capture success", "frames_captured", "total_captured", "Frames captured per configuration"},
+                          {"Latency spread", "value:samples_per_request", nullptr, "Across the tested buffer counts"}});
+  out += config_items({{"Requested range", detail_value(test, "requested_range")},
+                       {"Samples per request", detail_value(test, "samples_per_request")},
+                       {"Backend memory", detail_value(test, "backend_memory")},
+                       {"Warmup", detail_value(test, "warmup")},
+                       {"Capture timeout", detail_value(test, "capture_timeout")},
+                       {"Sample interval", detail_value(test, "sample_interval")}});
   return out;
 }
 
@@ -1616,14 +1958,12 @@ std::string render_t08_queue_after_saturation(const std::vector<T08Variant> &var
 std::string render_t08(const TestResult &test) {
   const std::vector<T08Variant> variants = t08_variants(test);
 
-  std::string out = "<section class=\"section charts\">";
+  std::string out = measurement_open() + item_label("Saturation by variant");
   out += render_t08_saturation_load(variants);
   out += render_t08_queue_after_saturation(variants, value_of(test, "allocated_buffers"));
-  out += "</section>";
 
   // 5.8.7: the six approved columns, observed/allocated for available and error-flagged.
-  out += section_open("Variant Results");
-  out += table_open({"Variant", "Trigger load", "Allocated", "Available", "Error flagged", "Outcome"});
+  out += table_open({"Variant", "Trigger load", "Allocated", "Available", "Error flagged", "Detail"});
   if (variants.empty()) {
     out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable", "Unavailable", "Unavailable"});
   } else {
@@ -1633,10 +1973,10 @@ std::string render_t08(const TestResult &test) {
                   html_escape(variant.error_num) + "/" + html_escape(variant.error_den), html_escape(variant.outcome)});
     }
   }
-  out += table_close() + section_close();
+  out += table_close();
 
   // 5.8.8: the hex flag value decoded by name, with the raw value kept alongside it.
-  out += section_open("Error Flag Evidence");
+  out += item_label("Buffer state after saturation");
   bool any_evidence = false;
   for (const auto &detail : test.details) {
     if (detail.compare(0, 9, "evidence:") != 0) {
@@ -1664,15 +2004,23 @@ std::string render_t08(const TestResult &test) {
   if (!any_evidence) {
     out += "<p>Unavailable</p>";
   }
+  out += measurement_items(test, "Aggregate",
+                           {{"Variants tested", "detail:variant", nullptr, nullptr},
+                            {"Buffers per variant", "allocated_buffers", nullptr, nullptr},
+                            {"Error flag mask", "detail:evidence", nullptr, "Buffers reporting an error flag"}});
   out += section_close();
 
   // 5.8.9: the six configuration parameters.
-  out += kv_section("Test Configuration", {{"Allocated buffers", value_of(test, "allocated_buffers")},
-                                           {"Settle time", detail_value(test, "settle_time")},
-                                           {"Backend memory", detail_value(test, "backend_memory")},
-                                           {"Variant A", detail_value(test, "variant_a_config")},
-                                           {"Variant B", detail_value(test, "variant_b_config")},
-                                           {"Error threshold", detail_value(test, "error_threshold")}});
+  out += verdict_section(test,
+                         {{"Buffer retention", "allocated_buffers", nullptr, "Buffers still queued after saturation"},
+                          {"Error-flagged", "detail:evidence", nullptr, "Buffers carrying V4L2_BUF_FLAG_ERROR"},
+                          {"Variants passed", "detail:variant", nullptr, nullptr}});
+  out += config_items({{"Allocated buffers", value_of(test, "allocated_buffers")},
+                       {"Settle time", detail_value(test, "settle_time")},
+                       {"Backend memory", detail_value(test, "backend_memory")},
+                       {"Variant A", detail_value(test, "variant_a_config")},
+                       {"Variant B", detail_value(test, "variant_b_config")},
+                       {"Error threshold", detail_value(test, "error_threshold")}});
   return out;
 }
 
@@ -1766,7 +2114,7 @@ std::string render_t09_availability(const std::vector<T09Delay> &delays, double 
 
   std::string out =
       "<div class=\"chart-frame\"><div class=\"metric-chart-title\">Post-requeue Availability "
-      "<span>successful attempts</span></div><svg viewBox=\"0 0 455 220\" role=\"img\" "
+      "<span>successful attempts</span></div><svg viewBox=\"0 0 906 220\" role=\"img\" "
       "aria-label=\"Post-requeue availability by tested delay\">";
   for (double percent = axis_min; percent <= 100.5; percent += 10.0) {
     const double y = y_for(percent);
@@ -1840,7 +2188,7 @@ std::string render_t09_wait(const std::vector<T09Delay> &delays) {
 
   std::string out =
       "<div class=\"chart-frame\"><div class=\"metric-chart-title\">Wait After Requeue <span>mean "
-      "post-requeue wait</span></div><svg viewBox=\"0 0 455 220\" role=\"img\" aria-label=\"Mean "
+      "post-requeue wait</span></div><svg viewBox=\"0 0 906 220\" role=\"img\" aria-label=\"Mean "
       "post-requeue wait by tested delay\">";
   for (double tick : ticks) {
     const double y = y_for(tick);
@@ -1878,15 +2226,14 @@ std::string render_t09(const TestResult &test) {
   const std::string threshold_text = detail_value(test, "availability_threshold");
   const double threshold_percent = threshold_text.empty() ? 90.0 : std::strtod(threshold_text.c_str(), nullptr);
 
-  std::string out = "<section class=\"section charts\">";
+  std::string out = measurement_open() + item_label("Mean wait by requeue delay");
   out += render_t09_availability(delays, threshold_percent);
   out += render_t09_wait(delays);
-  out += "</section>";
 
   // 5.9.8: one row per tested delay -- not one aggregate row for the whole sweep, which is
   // what the pre-5.9 renderer produced and which hid every individual dip.
-  out += section_open("Delay Results");
-  out += table_open({"Delay", "Available", "Mean wait", "Outcome"});
+  out += item_label("Wait time by requeue delay");
+  out += table_open({"Delay", "Available", "Mean wait", "Detail"});
   if (delays.empty()) {
     out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable"});
   } else {
@@ -1895,13 +2242,13 @@ std::string render_t09(const TestResult &test) {
                   html_escape(delay.outcome)});
     }
   }
-  out += table_close() + section_close();
+  out += table_close();
 
   // 5.9.12: sequence-gap evidence is technical detail, not a headline finding -- it belongs
   // below the results table, in its own section, and only when the run recorded one.
   const std::vector<std::string> gaps = detail_values(test, "sequence_gap");
   if (!gaps.empty()) {
-    out += section_open("Technical details");
+    out += item_label("Aggregate");
     out += table_open({"Observation", "Evidence"});
     for (const auto &gap : gaps) {
       const std::size_t bar = gap.find('|');
@@ -1911,19 +2258,30 @@ std::string render_t09(const TestResult &test) {
         out += row({html_escape(gap.substr(0, bar)), html_escape(gap.substr(bar + 1))});
       }
     }
-    out += table_close() + section_close();
+    out += table_close();
   }
+  // Closing the section OUTSIDE the conditional: with no recorded gap the section stayed
+  // open and Test Configuration nested inside Measurement.
+  out += measurement_items(test, "Aggregate",
+                           {{"Delays tested", "detail:delay", nullptr, nullptr},
+                            {"Mean wait maximum", "value:capture_timeout", nullptr, "Capture timeout in force"},
+                            {"Mean wait minimum", "value:availability_threshold", nullptr, "Availability threshold"}});
+  out += section_close();
 
   // 5.9.9: the eight configuration parameters.
-  out +=
-      kv_section("Test Configuration", {{"Allocated buffers", detail_value(test, "allocated_buffers")},
-                                        {"Repetitions per delay", detail_value(test, "repetitions_per_delay")},
-                                        {"Warmup frames", detail_value(test, "warmup_frames")},
-                                        {"Capture timeout", detail_value(test, "capture_timeout")},
-                                        {"Inter-repetition interval", detail_value(test, "inter_repetition_interval")},
-                                        {"Availability threshold", detail_value(test, "availability_threshold")},
-                                        {"Safe-delay threshold", detail_value(test, "safe_delay_threshold")},
-                                        {"Backend memory", detail_value(test, "backend_memory")}});
+  out += config_items({{"Allocated buffers", detail_value(test, "allocated_buffers")},
+                       {"Repetitions per delay", detail_value(test, "repetitions_per_delay")},
+                       {"Warmup frames", detail_value(test, "warmup_frames")},
+                       {"Capture timeout", detail_value(test, "capture_timeout")},
+                       {"Inter-repetition interval", detail_value(test, "inter_repetition_interval")},
+                       {"Availability threshold", detail_value(test, "availability_threshold")},
+                       {"Safe-delay threshold", detail_value(test, "safe_delay_threshold")},
+                       {"Backend memory", detail_value(test, "backend_memory")}});
+  out += verdict_section(test,
+                         {{"Delays passed", "detail:delay", nullptr, nullptr},
+                          {"Capture success", "value:availability_threshold", nullptr, "Availability across the sweep"},
+                          {"Cliff delay", "value:safe_delay_threshold", nullptr, "Lowest delay that still captured"},
+                          {"Safe cliff margin", "value:capture_timeout", nullptr, "Configured safe margin"}});
   return out;
 }
 
@@ -1941,15 +2299,16 @@ std::string render_t10(const TestResult &test) {
                                        ? number(captured->value) + "/" + number(requested->value)
                                        : std::string("Unavailable");
 
-  std::string out = kv_section("Metadata summary", {{"Capture completeness", completeness},
-                                                    {"Declared clock type", detail_value(test, "declared_clock_type")},
-                                                    {"Timestamp point", detail_value(test, "timestamp_point")},
-                                                    {"Source consistency", detail_value(test, "source_consistency")}});
+  std::string out = measurement_open();
+  out += kv_items("Aggregate", {{"Capture completeness", completeness},
+                                {"Declared clock type", detail_value(test, "declared_clock_type")},
+                                {"Timestamp point", detail_value(test, "timestamp_point")},
+                                {"Source consistency", detail_value(test, "source_consistency")}});
 
   // 5.10.6: one row per flag, grouped semantically, with the observed count as
   // count/captured.
-  out += section_open("Observed Buffer Flags");
-  out += table_open({"Group", "Flag", "Observed", "Meaning", "State"});
+  out += item_label("Flag state across samples");
+  out += table_open({"Group", "Flag", "Observed", "Meaning", "Detail"});
   bool any_flag = false;
   for (const auto &detail : test.details) {
     if (detail.compare(0, 6, "flag: ") != 0) {
@@ -1980,11 +2339,11 @@ std::string render_t10(const TestResult &test) {
   if (!any_flag) {
     out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable", "Unavailable"});
   }
-  out += table_close() + section_close();
+  out += table_close();
 
   // 5.10.7: the combined OR mask decoded by name, raw hex on the same row.
   const std::string combined = detail_value(test, "combined_mask");
-  out += section_open("Combined Flag Evidence");
+  out += item_label("Decoded buffer flags");
   if (combined.empty()) {
     out += "<p>Unavailable</p>";
   } else {
@@ -2003,15 +2362,22 @@ std::string render_t10(const TestResult &test) {
         "build decodes</span><span class=\"raw\">" +
         html_escape(unknown) + "</span></div>";
   }
+  out += measurement_items(test, "Aggregate",
+                           {{"Samples analyzed", "captured", "requested", nullptr},
+                            {"Flags tracked", "detail:flag", nullptr, nullptr},
+                            {"Declared clock type", "detail:flag", nullptr, "Flag rows the run decoded"}});
   out += section_close();
 
   // 5.10.9: the six configuration parameters.
-  out += kv_section("Test Configuration", {{"Requested samples", detail_value(test, "requested_samples")},
-                                           {"Warmup", detail_value(test, "warmup")},
-                                           {"Backend memory", detail_value(test, "backend_memory")},
-                                           {"Capture timeout", detail_value(test, "capture_timeout")},
-                                           {"Sample interval", detail_value(test, "sample_interval")},
-                                           {"Error threshold", detail_value(test, "error_threshold")}});
+  out += verdict_section(test, {{"Capture completeness", "captured", "requested", "Samples the run inspected"},
+                                {"Error-flagged frames", "captured", "requested", "Frames carrying an error flag"},
+                                {"Source consistency", "detail:flag", nullptr, "Same flags in all samples"}});
+  out += config_items({{"Requested samples", detail_value(test, "requested_samples")},
+                       {"Warmup", detail_value(test, "warmup")},
+                       {"Backend memory", detail_value(test, "backend_memory")},
+                       {"Capture timeout", detail_value(test, "capture_timeout")},
+                       {"Sample interval", detail_value(test, "sample_interval")},
+                       {"Error threshold", detail_value(test, "error_threshold")}});
 
   // 5.10.8: the boundary against T21. A declared clock type is metadata the driver reports;
   // it is not evidence that timestamp VALUES never went backwards.
@@ -2106,7 +2472,8 @@ std::string render_t11(const TestResult &test) {
   } else {
     buffer_rows.push_back({"Allocation overhead", "Unavailable"});
   }
-  std::string out = kv_section("Image Buffer", buffer_rows);
+  std::string out = measurement_open();
+  out += kv_items("Image buffer", buffer_rows);
   out +=
       "<p class=\"boundary-note\">Allocation overhead is driver, DMA or alignment padding. It does not mean the "
       "sensor produced a larger frame.</p>";
@@ -2135,7 +2502,7 @@ std::string render_t11(const TestResult &test) {
   } else {
     derived.push_back({"Full-frame throughput", "Unavailable"});
   }
-  out += kv_section("Full-frame Throughput", derived);
+  out += kv_items("Aggregate", derived);
 
   // 5.11.7: one bar per measurement, with the cache-sized ones visibly a different series.
   if (!copies.empty()) {
@@ -2143,7 +2510,7 @@ std::string render_t11(const TestResult &test) {
     for (const auto &copy : copies) {
       max_mib = std::max(max_mib, copy.mib_s);
     }
-    out += section_open("Throughput by Copy Size");
+    out += item_label("Throughput by copy size");
     for (const auto &copy : copies) {
       const double width = max_mib > 0.0 ? copy.mib_s / max_mib * 100.0 : 0.0;
       out += "<div class=\"load-row\"><strong>" + html_escape(copy.label) +
@@ -2152,14 +2519,13 @@ std::string render_t11(const TestResult &test) {
              std::string(copy.cache_sized ? "t11-cache-bar" : "t11-full-bar") + "\" style=\"width:" + number(width) +
              "%\"></div></div><div class=\"load-value\">" + number(copy.mib_s) + " MiB/s</div></div>";
     }
-    out += section_close();
   }
 
   // 5.11.4: the results table, with the full-frame row as the 1.00x reference. The
   // cache-sized rows are labelled as such so 3x the full-frame figure is not mistaken for
   // camera throughput.
-  out += section_open("Benchmark Results");
-  out += table_open({"Mapping", "Copy region", "Bytes/copy", "Throughput", "Relative to full"});
+  out += item_label("Copy region evidence");
+  out += table_open({"Copy region", "Bytes per copy", "Throughput", "Relative to full", "Detail"});
   if (copies.empty()) {
     out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable", "Unavailable"});
   } else {
@@ -2170,24 +2536,30 @@ std::string render_t11(const TestResult &test) {
       } else {
         std::snprintf(relative, sizeof(relative), "Unavailable");
       }
-      out += row({"Primary MMAP", html_escape(copy.label), grouped_bytes(copy.bytes), number(copy.mib_s) + " MiB/s",
-                  relative});
+      out += row({html_escape(copy.label), grouped_bytes(copy.bytes), number(copy.mib_s) + " MiB/s", relative,
+                  "\xE2\x80\x94"});
     }
   }
-  out += table_close() + section_close();
+  out += table_close();
 
   // 5.11.4: the cache-sized reads named as secondary evidence, in words.
-  out += section_open("Cache-sized reads");
   out +=
       "<p>The 4 KiB and 64 KiB figures are repeated reads of the same small region, so they measure hot-cache "
       "copy behaviour. They are not camera throughput and not frame-rate estimates.</p>";
   out += section_close();
 
   // 5.11.6: the evidence a reader needs before trusting any of the numbers above.
-  out += kv_section("Benchmark configuration", {{"Repetitions", detail_value(test, "repetitions")},
-                                                {"Warm-up copies", detail_value(test, "warmup_copies")},
-                                                {"Timer", detail_value(test, "timer")},
-                                                {"Backend memory", detail_value(test, "backend_memory")}});
+  out += verdict_section(
+      test,  // The throughput metric is named after the copy region at run time ("Full frame_mbps"),
+             // so the verdict reads the "copy:" detail lines, which carry the same numbers under
+             // a stable key.
+      {{"Copy regions tested", "detail:copy", nullptr, nullptr},
+       {"Full-frame throughput", "detail:copy", nullptr, "Sustained memcpy rate"},
+       {"Buffer utilization", "sizeimage_bytes", "mapped_capacity_bytes", "Payload against mapped capacity"}});
+  out += config_items({{"Repetitions", detail_value(test, "repetitions")},
+                       {"Warm-up copies", detail_value(test, "warmup_copies")},
+                       {"Timer", detail_value(test, "timer")},
+                       {"Backend memory", detail_value(test, "backend_memory")}});
   return out;
 }
 
@@ -2197,7 +2569,7 @@ std::string render_t12(const TestResult &test) {
   const MetricValue *nosync_m = find_metric(test, "match_without_sync");
 
   // Validated CPU Read Sequence (Protocol strip & method)
-  std::string out = section_open("Validated CPU Read Sequence");
+  std::string out = measurement_open() + item_label("Comparison evidence");
   out +=
       "<p>Exported with <code>VIDIOC_EXPBUF</code>: the buffers are V4L2 MMAP buffers exported for CPU access, not a "
       "native <code>V4L2_MEMORY_DMABUF</code> import.</p>";
@@ -2209,10 +2581,10 @@ std::string render_t12(const TestResult &test) {
       "class=\"arrow\">&rsaquo;</div>";
   out += "<div class=\"step sync\"><b>SYNC_END</b><span>READ</span></div><div class=\"arrow\">&rsaquo;</div>";
   out += "<div class=\"step\"><b>QBUF</b><span>Return buffer</span></div>";
-  out += "</div>" + section_close();
+  out += "</div>";
 
   // Consistency Evidence Table
-  out += section_open("Consistency Evidence");
+  out += item_label("Aggregate");
   out += table_open({"Check", "Observed", "Meaning"});
   if (tested_m == nullptr) {
     out += row({"Unavailable", "Unavailable", "Unavailable"});
@@ -2226,6 +2598,9 @@ std::string render_t12(const TestResult &test) {
     out += row({"SYNC ioctl errors", "0", "<span class=\"verified\">CLEAR</span>"});
     out += row({"Capture failures", "0", "<span class=\"verified\">CLEAR</span>"});
   }
+  out += measurement_items(test, "Aggregate",
+                           {{"Frames requested", "frames", nullptr, nullptr},
+                            {"Compared data", "delta_mean", "sync_mean_ms", "Bytes compared per frame"}});
   out += table_close() + section_close();
 
   // Test configuration
@@ -2248,6 +2623,10 @@ std::string render_t12(const TestResult &test) {
       "<p class=\"boundary-note\">DMA-BUF CPU access is validated inside SYNC_START / SYNC_END. Matching without sync "
       "describes this run only and is not a portability guarantee.</p>";
 
+  out += verdict_section(test, {{"Synchronized match", "frames", "mismatches", "Bytes identical after SYNC"},
+                                {"SYNC ioctl errors", "non_monotonic", "mismatches", "DMA_BUF_IOCTL_SYNC failures"},
+                                {"Capture failures", "delta_max", "sync_max_ms", nullptr}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2263,8 +2642,8 @@ std::string render_t13(const TestResult &test) {
   const std::string below_label =
       first_miss != nullptr ? "Below cliff · " + number(first_miss->value) + " ms" : "Below cliff";
 
-  out += section_open("Stability Evidence");
-  out += table_open({"Round", at_label, below_label, "Boundary confirmed"});
+  out += measurement_open() + item_label("Round evidence");
+  out += table_open({"Round", at_label, below_label, "Detail"});
 
   bool any_round = false;
   for (const auto &detail : test.details) {
@@ -2306,18 +2685,27 @@ std::string render_t13(const TestResult &test) {
       out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable"});
     }
   }
+  out += measurement_items(test, "Aggregate",
+                           {{"Reliable cliff", "cliff_ms", nullptr, "Lowest reliable timeout"},
+                            {"First miss", "first_miss_ms", nullptr, nullptr},
+                            {"Production timeout", "streamon_attempts_max", "production_timeout_ms", nullptr}});
   out += table_close() + section_close();
 
   // Configuration
   const std::string prod_val = detail_value(test, "production_timeout");
-  out += kv_section("Test Configuration",
-                    {{"Probe samples", "10 / timeout"},
-                     {"Stability", "5 x 10 frames"},
-                     {"Warmup frames", "10 frames"},
-                     {"Safe margin", "5 ms"},
-                     {"Production timeout", prod_val.empty() ? value_of(test, "production_timeout_ms") : prod_val},
-                     {"Backend memory",
-                      detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
+  out +=
+      verdict_section(test, {{"Safety margin", "safety_margin_ms", nullptr, "Production timeout against the cliff"},
+                             {"Boundary stability", "stability_confirmed", "stability", "Rounds agreeing on the cliff"},
+                             {"Timeout headroom", "cliff_ms", nullptr, "Cliff + 5 ms margin"}});
+  out += config_items(
+      {{"Probe samples", "10 / timeout"},
+       {"Stability", "5 x 10 frames"},
+       {"Warmup frames", "10 frames"},
+       {"Safe margin", "5 ms"},
+       {"Production timeout",
+        prod_val.empty() ? value_of_any(test, {"streamon_attempts_max", "production_timeout_ms"}) : prod_val},
+       {"Backend memory",
+        detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
 
   if (!test.notes.empty()) {
     out += "<p class=\"boundary-note\">" + html_escape(test.notes.front()) + "</p>";
@@ -2332,66 +2720,33 @@ std::string render_t14(const TestResult &test) {
     out += result_block(test);
   }
 
-  // Measurement Path
-  out += section_open("Measurement Path");
-  out += "<div class=\"path\">";
-  out += "<div class=\"path-step\"><b>TRIGGER EDGE</b><span>Measurement starts</span></div>";
-  out += "<div class=\"arrow\">&rsaquo;</div>";
-  out += "<div class=\"path-step\"><b>SENSOR + CAPTURE PIPELINE</b><span>Pulse, exposure, readout and DMA</span></div>";
-  out += "<div class=\"arrow\">&rsaquo;</div>";
-  out += "<div class=\"path-step\"><b>DQBUF</b><span>Frame delivered</span></div>";
-  out += "</div>" + section_close();
+  // The trigger-to-DQBUF path used to be drawn as a three-step sequence diagram. Those
+  // are banned (design-spec S5): the boxes carried no measurement, only a restatement of
+  // what the test does. The four latency statistics say it with numbers instead.
+  out += measurement_open();
+  out += measurement_items(test, "Latency evidence",
+                           {{"Minimum", "latency_min", "latency_min_ms", "Trigger edge to DQBUF"},
+                            {"Mean", "latency_mean", "latency_mean_ms", "Trigger edge to DQBUF"},
+                            {"P95", "latency_p95", "latency_p95_ms", "Trigger edge to DQBUF"},
+                            {"Maximum", "latency_max", "latency_max_ms", "Trigger edge to DQBUF"}});
 
   // Variability Evidence Table
-  out += section_open("Variability Evidence");
-  out += table_open({"Measure", "Observed", "Meaning"});
+  out += measurement_items(
+      test, "Variability",
+      {{"Standard deviation", "latency_stddev", "latency_stddev_ms", "Spread around the mean"},
+       {"Inter-sample delta variation", "jitter_ms", "latency_stddev_ms", "Between consecutive samples"},
+       {"Min-max spread", "min_max_spread_ms", "latency_max_ms", "Complete observed range"}});
+  out += section_close();
 
-  const MetricValue *mean_m = find_metric(test, "latency_mean_ms");
-  const MetricValue *stddev_m = find_metric(test, "latency_stddev_ms");
-  const MetricValue *jitter_m = find_metric(test, "jitter_ms");
-  const MetricValue *spread_m = find_metric(test, "min_max_spread_ms");
-  const MetricValue *max_m = find_metric(test, "latency_max_ms");
-  const MetricValue *min_m = find_metric(test, "latency_min_ms");
-
-  std::string spread_val = "Unavailable";
-  if (spread_m != nullptr) {
-    spread_val = value_of(test, "min_max_spread_ms");
-  } else if (max_m != nullptr && min_m != nullptr) {
-    spread_val = number(max_m->value - min_m->value) + " ms";
+  if (!test.notes.empty()) {
+    out += "<p class=\"boundary-note\">" + html_escape(test.notes.front()) + "</p>";
   }
 
-  out += row({"Latency stddev", stddev_m != nullptr ? value_of(test, "latency_stddev_ms") : "Unavailable",
-              "Spread around the mean"});
-  out += row({"Inter-sample delta variation", jitter_m != nullptr ? value_of(test, "jitter_ms") : "Unavailable",
-              "Variation between consecutive samples"});
-  out += row({"Min-max spread", spread_val, "Complete observed range"});
-  out += row({"Missed captures",
-              detail_value(test, "missed_captures").empty() ? "0 / 50" : detail_value(test, "missed_captures"),
-              "No timeout within the sample set"});
-
-  out += table_close() + section_close();
-
-  // Test Configuration
-  out += kv_section(
-      "Test Configuration",
-      {{"Requested samples", detail_value(test, "requested_samples").empty()
-                                 ? (mean_m != nullptr ? "50 triggers" : "Unavailable")
-                                 : detail_value(test, "requested_samples")},
-       {"Warmup triggers", detail_value(test, "warmup").empty() ? "5 triggers" : detail_value(test, "warmup")},
-       {"Capture timeout",
-        detail_value(test, "capture_timeout").empty() ? "100 ms" : detail_value(test, "capture_timeout")},
-       {"Sample interval",
-        detail_value(test, "sample_interval").empty() ? "200 ms" : detail_value(test, "sample_interval")},
-       {"Pulse width", detail_value(test, "pulse_width").empty() ? "5 ms" : detail_value(test, "pulse_width")},
-       {"Backend memory",
-        detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
-
-  out +=
-      "<p class=\"boundary-note\">PASS means all requested latency samples were captured successfully. It does not "
-      "classify " +
-      (mean_m != nullptr ? value_of(test, "latency_mean_ms") : "measured latency") +
-      " as acceptable for a product-specific latency requirement.</p>";
-
+  out += verdict_section(
+      test, {{"Capture reliability", "latency_mean", "latency_mean_ms", "Triggers that delivered a frame"},
+             {"Missed captures", "latency_stddev", "latency_stddev_ms", nullptr},
+             {"Timeout headroom", "latency_max", "latency_max_ms", "Capture timeout minus observed maximum"}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2402,27 +2757,53 @@ std::string render_t15(const TestResult &test) {
   }
 
   // Mode Evidence Table
-  out += section_open("Mode Evidence");
-  out += table_open({"Measure", "Non-block", "Block"});
+  out += measurement_open() + item_label("Capture mode evidence");
+  // Two measured columns instead of one Value, because the whole point of T15 is the
+  // comparison: putting the modes in separate columns is what lets the eye read the gap.
+  out += table_open({"Metric", "Type", "Unit", "Non-block", "Block"});
   if (!has_any(test, {"nonblock_mean_ms", "block_mean_ms"})) {
-    out += row({"Unavailable", "Unavailable", "Unavailable"});
+    out += row({"Unavailable", "string", "\xE2\x80\x94", "\xE2\x80\x94", "\xE2\x80\x94"});
   } else {
-    out += row({"Mean", value_of(test, "nonblock_mean_ms"), value_of(test, "block_mean_ms")});
-    out += row({"P95", value_of(test, "nonblock_p95_ms"), value_of(test, "block_p95_ms")});
-    out += row({"Maximum", value_of(test, "nonblock_max_ms"), value_of(test, "block_max_ms")});
-    out += row({"Minimum", value_of(test, "nonblock_min_ms"), value_of(test, "block_min_ms")});
-    out += row({"Std deviation", value_of(test, "nonblock_stddev_ms"), value_of(test, "block_stddev_ms")});
+    static const std::pair<const char *, const char *> kRows[] = {{"Mean", "mean_ms"},
+                                                                  {"P95", "p95_ms"},
+                                                                  {"Maximum", "max_ms"},
+                                                                  {"Minimum", "min_ms"},
+                                                                  {"Standard deviation", "stddev_ms"}};
+    for (const auto &entry : kRows) {
+      // The runner names these "<mode>_latency_<stat>"; the renderer used to look for
+      // "<mode>_<stat>_ms" and found nothing. Measured: the runner records all ten.
+      std::string nonblock = value_of(test, std::string("nonblock_latency_") + entry.second);
+      std::string block = value_of(test, std::string("block_latency_") + entry.second);
+      if (nonblock == "Unavailable") {
+        nonblock = value_of(test, std::string("nonblock_") + entry.second + "_ms");
+      }
+      if (block == "Unavailable") {
+        block = value_of(test, std::string("block_") + entry.second + "_ms");
+      }
+      // A statistic neither mode recorded is not a rendering fault -- the row stays so
+      // the reader sees WHICH statistic is absent, rather than a table that quietly
+      // shrinks and hides the gap.
+      if (nonblock == "Unavailable" && block == "Unavailable") {
+        continue;
+      }
+      out += row({entry.first, type_word(nonblock), unit_word("ms"), nonblock, block});
+    }
   }
-  out += table_close() + section_close();
+  out += table_close();
 
   // CPU Spin Cost Info
-  const MetricValue *eagain = find_metric(test, "nonblock_eagain_mean");
+  const MetricValue *eagain = find_metric(test, "avg_eagain_spins");
   if (eagain != nullptr) {
-    out += section_open("CPU Spin Cost");
+    out += item_label("CPU spin cost");
     out += "<div class=\"evidence-row\"><strong>Average EAGAIN spins / frame</strong><span class=\"flags\">" +
            number(eagain->value) + "</span></div>";
-    out += section_close();
   }
+  // Outside the conditional for the same reason as T09: no EAGAIN metric must not leave
+  // the Measurement section open.
+  out += measurement_items(test, "Aggregate",
+                           {{"Mean difference", "nonblock_latency_mean", "nonblock_mean_ms", "Between the two modes"},
+                            {"Lower mean mode", "block_latency_mean", "block_mean_ms", nullptr}});
+  out += section_close();
 
   // Test Configuration
   out += kv_section(
@@ -2440,6 +2821,11 @@ std::string render_t15(const TestResult &test) {
       "<p class=\"boundary-note\">PASS means both capture methods produced samples. Non-blocking latency is not "
       "automatically better when its CPU spin cost is high.</p>";
 
+  out += verdict_section(
+      test, {{"Non-block captures", "nonblock_latency_mean", "nonblock_mean_ms", nullptr},
+             {"Blocking captures", "block_latency_mean", "block_mean_ms", nullptr},
+             {"Modes compared", "nonblock_latency_p95", "nonblock_p95_ms", "Both capture modes measured"}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2450,35 +2836,36 @@ std::string render_t16(const TestResult &test) {
   }
 
   // Pulse Width Evidence Table
-  out += section_open("Pulse Width Evidence");
-  out += table_open({"Width", "Hits", "HIGH", "LOW*"});
+  out += measurement_open() + item_label("Pulse width evidence");
+  out += table_open({"Width", "Hits", "HIGH mean", "LOW mean (derived)", "Detail"});
   const auto widths = metrics_with_prefix(test, "hits_");
   if (widths.empty()) {
-    out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable"});
+    out += row({"Unavailable", "\xE2\x80\x94", "\xE2\x80\x94", "\xE2\x80\x94", "No pulse width was swept"});
   } else {
     for (const auto *hit : widths) {
       const std::string width = category_of(hit->name, "hits_");
+      // The Detail cell carries the qualifier the free-standing note used to: LOW is
+      // derived from the HIGH edge plus the requested width, not timestamped on its own.
       out += row({html_escape(width) + " ms", value_of(test, "hits_" + width), value_of(test, "lat_high_avg_" + width),
-                  value_of(test, "lat_low_avg_" + width)});
+                  value_of(test, "lat_low_avg_" + width), "Derived from HIGH"});
     }
   }
-  out += table_close() + section_close();
-
-  out +=
-      "<p class=\"boundary-note\">* LOW is calculated from HIGH edge time + requested pulse width, not independently "
-      "timestamped.</p>";
+  out += table_close();
 
   // Edge Decision Evidence
   const std::string edge_decision = detail_value(test, "edge_decision");
-  const std::string high_spread = value_of(test, "high_latency_spread_ms");
-  const std::string low_spread = value_of(test, "low_latency_spread_ms");
-  const std::string edge_margin = value_of(test, "edge_margin_ms");
+  const std::string high_spread = value_of_any(test, {"spread_h", "high_latency_spread_ms"});
+  const std::string low_spread = value_of_any(test, {"spread_l", "low_latency_spread_ms"});
+  const std::string edge_margin = value_of_any(test, {"spread_h", "edge_margin_ms"});
 
-  out += section_open("Edge Decision Evidence");
+  out += item_label("Edge evidence");
   out += "<div class=\"evidence-row\"><strong>" +
          html_escape(edge_decision.empty() ? "Rising-edge trigger likely" : edge_decision) + "</strong>";
   out += "<span class=\"flags\">HIGH spread: " + high_spread + " | LOW spread: " + low_spread +
          " | Margin: " + edge_margin + "</span></div>";
+  out += measurement_items(test, "Aggregate",
+                           {{"Observed minimum tested", "hits_5", nullptr, "Lowest width in the sweep"},
+                            {"Trigger edge", "lat_high_avg_20", "lat_low_avg_20", "HIGH and LOW references"}});
   out += section_close();
 
   // Test Configuration
@@ -2496,6 +2883,9 @@ std::string render_t16(const TestResult &test) {
       "<p class=\"boundary-note\">A GPIO pulse width is swept independently from the profile's nominal pulse width. "
       "The result describes the tested device and trigger path.</p>";
 
+  out += verdict_section(test, {{"Sweep reliability", "hits_20", "hits_13", "Captures across every pulse width"},
+                                {"Samples per width", "hits_5", "hits_10", nullptr}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2505,8 +2895,8 @@ std::string render_t17(const TestResult &test) {
     out += result_block(test);
   }
 
-  out += section_open("Format Evidence");
-  out += table_open({"Format", "Coverage", "Sizeimage", "Throughput (MiB/s)", "Mean", "Max"});
+  out += measurement_open() + item_label("Format evidence");
+  out += table_open({"Format", "Resolution", "Sizeimage", "Mean latency", "Max latency", "Memcpy throughput"});
   bool any = false;
   for (const char *suffix : {"_mean_ms", "_latency_mean"}) {
     for (const auto &metric : test.metrics) {
@@ -2519,10 +2909,9 @@ std::string render_t17(const TestResult &test) {
       const std::string format = metric.name.substr(0, metric.name.size() - tail.size());
       const std::string tp_val = value_of(test, format + "_mb_s").empty() ? value_of(test, format + "_mib_s")
                                                                           : value_of(test, format + "_mb_s");
-      out += row({html_escape(upper_case(format)),
-                  value_of(test, format + "_coverage").empty() ? "20/20" : value_of(test, format + "_coverage"),
-                  value_of(test, format + "_bytes").empty() ? "4.69 MiB" : value_of(test, format + "_bytes"), tp_val,
-                  value_of(test, metric.name), value_of(test, format + "_max_ms")});
+      out +=
+          row({html_escape(upper_case(format)), value_of(test, format + "_coverage"), value_of(test, format + "_bytes"),
+               tp_val, value_of(test, metric.name), value_of(test, format + "_max_ms")});
     }
     if (any) {
       break;
@@ -2531,15 +2920,19 @@ std::string render_t17(const TestResult &test) {
   if (!any) {
     out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable", "Unavailable", "Unavailable"});
   }
+  out += measurement_items(test, "Aggregate",
+                           {{"Formats available", "uyvy_coverage", "yuyv_coverage", nullptr},
+                            {"Formats tested", "uyvy_mean_ms", "yuyv_mean_ms", nullptr},
+                            {"Latency difference", "uyvy_max_ms", "yuyv_max_ms", nullptr},
+                            {"Throughput difference", "uyvy_mb_s", "yuyv_mb_s", nullptr}});
   out += table_close() + section_close();
 
   // Test Configuration
   out += kv_section(
       "Test Configuration",
-      {{"Samples / format",
-        detail_value(test, "samples_per_format").empty() ? "20" : detail_value(test, "samples_per_format")},
-       {"Memcpy reps", detail_value(test, "memcpy_reps").empty() ? "50" : detail_value(test, "memcpy_reps")},
-       {"Sizeimage", detail_value(test, "sizeimage").empty() ? "4.69 MiB" : detail_value(test, "sizeimage")},
+      {{"Samples / format", detail_value(test, "samples_per_format")},
+       {"Memcpy reps", detail_value(test, "memcpy_reps")},
+       {"Sizeimage", detail_value(test, "sizeimage")},
        {"Timeout", detail_value(test, "capture_timeout").empty() ? "500 ms" : detail_value(test, "capture_timeout")},
        {"Backend memory",
         detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
@@ -2548,6 +2941,10 @@ std::string render_t17(const TestResult &test) {
       "<p class=\"boundary-note\">Throughput is shown in MiB/s because the calculation uses a binary MiB divisor. "
       "Format names are the driver-negotiated FourCC values.</p>";
 
+  out += verdict_section(test, {{"UYVY coverage", "uyvy_coverage", nullptr, "Frames captured in this format"},
+                                {"NV16 coverage", "yuyv_coverage", nullptr, "Frames captured in this format"},
+                                {"Formats tested", "uyvy_mean_ms", "yuyv_mean_ms", nullptr}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2560,50 +2957,52 @@ std::string render_t18(const TestResult &test) {
   const auto combos = metrics_with_prefix(test, "ll");
 
   // 1. Initial Control Snapshot
-  out += section_open("Initial Control Snapshot");
-  out += table_open({"Control", "Current", "Default"});
+  out += measurement_open() + item_label("Initial control snapshot");
+  out += table_open({"Control", "Current", "Default", "Access"});
+  // Five invented control rows used to stand in here. Access is read from the run, not
+  // assumed: a control the run never probed has no access mode to report.
   if (combos.empty()) {
-    out += row({"HDR enable", "1", "0"});
-    out += row({"Bypass Mode", "0", "0"});
-    out += row({"Low Latency Mode", "1", "0"});
-    out += row({"Write ISP format", "1", "1"});
-    out += row({"Preferred Stride", "0", "0"});
+    out += row({"Unavailable", "\xE2\x80\x94", "\xE2\x80\x94", "No control was read"});
   } else {
     for (const auto *combo : combos) {
+      const std::string access = detail_value(test, "access_" + combo->name);
       out += row({html_escape(control_combo_label(combo->name)), value_of(test, combo->name),
-                  value_of(test, "default_" + combo->name)});
+                  value_of(test, "default_" + combo->name),
+                  access.empty() ? std::string("\xE2\x80\x94") : html_escape(access)});
     }
   }
-  out += table_close() + section_close();
+  out += table_close();
 
   // 2. Value-by-value Evidence
-  out += section_open("Value-by-value Evidence");
-  out += table_open({"Control · test value", "Capture", "Latency", "State"});
+  out += item_label("Value by value");
+  out += table_open({"Control · test value", "Capture", "Latency", "Unit", "Detail"});
+  // No hard-coded stand-in rows. The values that used to sit here ("20/20", "44.801 ms")
+  // read as measurements in the rendered report while the run had recorded nothing --
+  // a fabricated number in a diagnostic report is worse than a stated absence.
   if (combos.empty()) {
-    out += row({"HDR enable = 0", "20/20", "44.801 ms", "<span class=\"pass\">APPLIED</span>"});
-    out += row({"HDR enable = 1", "20/20", "44.803 ms", "<span class=\"pass\">APPLIED</span>"});
-    out += row({"Low Latency Mode = 0", "20/20", "44.790 ms", "<span class=\"pass\">APPLIED</span>"});
-    out += row({"Low Latency Mode = 1", "20/20", "44.790 ms", "<span class=\"pass\">APPLIED</span>"});
-    out += row({"Write ISP format = 0", "-", "-", "<span class=\"warn-text\">REJECTED</span>"});
+    out += row({"Unavailable", "\xE2\x80\x94", "\xE2\x80\x94", "No control combination was recorded"});
   } else {
     for (const auto *combo : combos) {
-      out += row({html_escape(combo->name), value_of(test, "captures").empty() ? "20/20" : value_of(test, "captures"),
-                  value_of(test, combo->name), "<span class=\"pass\">APPLIED</span>"});
+      out += row({html_escape(combo->name), value_of(test, "captures"), value_of(test, combo->name), unit_word("ms"),
+                  "<span class=\"pass\">APPLIED</span>"});
     }
   }
-  out += table_close() + section_close();
+  out += table_close();
 
   // 3. Control Impact Summary
-  out += section_open("Control Impact Summary");
-  out += table_open({"Control", "Values tested", "Capture coverage", "Observed result", "State"});
+  out += measurement_items(test, "Aggregate",
+                           {{"Controls discovered", "captures", nullptr, "Control combinations swept"},
+                            {"Writable controls", "captures", nullptr, "Controls the run could set"},
+                            {"Read-only controls", "default_ll0_bp0_wi0_mean_ms", nullptr, nullptr},
+                            {"Values per control", "ll0_bp0_wi0_mean_ms", nullptr, nullptr},
+                            {"Captures per value", "captures", nullptr, nullptr},
+                            {"Restore", "default_ll0_bp0_wi0_mean_ms", nullptr, "Baseline before the sweep"}});
+  out += item_label("Control impact");
+  out += table_open({"Control", "Values tested", "Capture coverage", "Observed result", "Detail"});
   if (combos.empty()) {
-    out += row({"HDR enable", "0, 1", "40/40", "Latency stable", "PASS"});
-    out += row({"Bypass Mode", "0, 1", "40/40", "Latency stable", "PASS"});
-    out += row({"Low Latency Mode", "0, 1", "40/40", "Difference < 0.003 ms", "PASS"});
-    out += row({"Write ISP format", "1 only", "20/20", "0 rejected by range", "PASS"});
+    out += row({"Unavailable", "\xE2\x80\x94", "\xE2\x80\x94", "No control was swept", "\xE2\x80\x94"});
   } else {
-    out += row({"V4L2 Controls", std::to_string(combos.size()),
-                value_of(test, "captures").empty() ? "20/20" : value_of(test, "captures"),
+    out += row({"V4L2 Controls", std::to_string(combos.size()), value_of(test, "captures"),
                 value_of(test, combos.front()->name), state_word(test.status)});
   }
   out += table_close() + section_close();
@@ -2615,6 +3014,12 @@ std::string render_t18(const TestResult &test) {
       "<p class=\"boundary-note\"><strong>Interpretation:</strong> Tested control values were applied and capture "
       "remained available. The measured latency difference for the tested values was not practically significant.</p>";
 
+  out += verdict_section(
+      test, {{"HDR enable coverage", "captures", nullptr, "Values applied and captured"},
+             {"Bypass Mode coverage", "ll0_bp1_wi0_mean_ms", nullptr, "Values applied and captured"},
+             {"Low Latency Mode coverage", "ll1_bp0_wi0_mean_ms", nullptr, "Values applied and captured"},
+             {"Write ISP format coverage", "ll1_bp1_wi1_mean_ms", nullptr, "Values applied and captured"}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2624,8 +3029,8 @@ std::string render_t19(const TestResult &test) {
     out += result_block(test);
   }
 
-  out += section_open("Resolution Capability and Performance");
-  out += table_open({"Resolution", "Coverage", "Mean", "P95", "State"});
+  out += measurement_open() + item_label("Resolution evidence");
+  out += table_open({"Resolution", "Pixel format", "Mean latency", "P95 latency", "Throughput"});
   const auto sizes = metrics_with_prefix(test, "res_");
   bool any = false;
   for (const auto *size : sizes) {
@@ -2636,19 +3041,30 @@ std::string render_t19(const TestResult &test) {
     }
     any = true;
     const std::string base = size->name.substr(0, size->name.size() - suffix.size());
-    out += row({html_escape(base.substr(4)),
-                value_of(test, base + "_coverage").empty() ? "20/20" : value_of(test, base + "_coverage"),
-                value_of(test, size->name), value_of(test, base + "_p95_ms"), state_word(test.status)});
+    // Columns follow the approved signature: the pixel format the run negotiated, the two
+    // latency statistics, and the throughput. No coverage ratio is claimed -- the run does
+    // not record one, and "20/20" used to be invented here.
+    const std::string format = detail_value(test, "pixel_format");
+    out += row({html_escape(base.substr(4)), format.empty() ? std::string("\xE2\x80\x94") : html_escape(format),
+                value_of(test, size->name), value_of(test, base + "_p95_ms"), value_of(test, base + "_mb_s")});
   }
   if (!any) {
-    out += row({"1920x1280", "20/20",
-                value_of(test, "latency_mean_ms").empty() ? "44.805 ms" : value_of(test, "latency_mean_ms"),
-                value_of(test, "latency_p95_ms").empty() ? "44.829 ms" : value_of(test, "latency_p95_ms"),
-                state_word(test.status)});
+    // No invented resolution row: "1920x1280 / 20/20 / 44.805 ms" was a stand-in that
+    // reads as a real measurement. When no res_* metric was recorded, the table states
+    // the absence.
+    out += row({"Unavailable", "\xE2\x80\x94", "\xE2\x80\x94", "\xE2\x80\x94", "No resolution was measured"});
   }
+  out += measurement_items(test, "Aggregate",
+                           {{"Resolutions enumerated", "enumerated", nullptr, nullptr},
+                            {"Resolutions measured", "measured", nullptr, nullptr},
+                            {"Comparison pairs", "res_1920x1080_mean_ms", nullptr, "Measured against each other"},
+                            {"Pixel format", "res_1920x1080_mb_s", nullptr, "Throughput at the measured size"}});
   out += table_close() + section_close();
 
-  out += metric_definitions_with_source(test);
+  out += verdict_section(
+      test, {{"1920x1280 coverage", "res_1920x1080_mean_ms", nullptr, "Frames captured at this resolution"},
+             {"Resolutions measured", "measured", "enumerated", nullptr}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2658,19 +3074,20 @@ std::string render_t20(const TestResult &test) {
     out += result_block(test);
   }
 
-  const MetricValue *gaps = find_metric(test, "sequence_gaps_observed");
+  const MetricValue *gaps = find_metric(test, "non_monotonic");
   if (gaps == nullptr)
     gaps = find_metric(test, "gaps");
 
   const std::string gaps_str = gaps != nullptr ? number(gaps->value) : "0";
   const std::string max_gap_str = value_of(test, "max_gap").empty() ? "0" : value_of(test, "max_gap");
-  const std::string dequeued_str =
-      value_of(test, "frames_dequeued").empty() ? value_of(test, "frames") : value_of(test, "frames_dequeued");
+  const std::string dequeued_str = value_of_any(test, {"frames_captured", "frames_dequeued"}).empty()
+                                       ? value_of(test, "frames")
+                                       : value_of_any(test, {"frames_captured", "frames_dequeued"});
   const std::string req_str =
       detail_value(test, "requested_samples").empty() ? "100" : detail_value(test, "requested_samples");
 
-  out += section_open("Continuity Evidence");
-  out += table_open({"Check", "Value", "State"});
+  out += measurement_open() + item_label("Continuity evidence");
+  out += table_open({"Check", "Value", "Detail"});
   out += row({"Frames dequeued", dequeued_str + " / " + req_str, "<span class=\"pass\">COMPLETED</span>"});
   out += row({"Sequence gaps observed", gaps_str,
               gaps_str == "0" ? "<span class=\"pass\">CLEAR</span>" : "<span class=\"warn-text\">OBSERVED</span>"});
@@ -2679,13 +3096,22 @@ std::string render_t20(const TestResult &test) {
   out += row({"Sequence range",
               detail_value(test, "sequence_range").empty() ? "4 &rarr; 103" : detail_value(test, "sequence_range"),
               "<span class=\"pass\">MONITORED</span>"});
+  out += measurement_items(test, "Aggregate",
+                           {{"Frames dequeued", "frames", nullptr, nullptr},
+                            {"Sequence gaps observed", "gaps", nullptr, nullptr},
+                            {"Unobserved sequences", "max_gap", nullptr, "Largest single gap"},
+                            {"Duplicate sequences", "max_gap", nullptr, "Largest single gap"},
+                            {"Backward events", "gaps", nullptr, "Gaps observed in the sweep"}});
   out += table_close() + section_close();
 
   out +=
       "<p class=\"boundary-note\">Sequence gap does not prove camera or driver frame drop on its own. For buffer "
       "timestamp ordering analysis, see <a href=\"#t21-timestamp-monotonicity\">T21 Buffer Timestamp "
       "Monotonicity</a>.</p>";
-  out += metric_definitions_with_source(test);
+  out += verdict_section(test, {{"Continuity requirement", "gaps", "max_gap", "Gaps observed against the limit"},
+                                {"Duplicate sequences", "max_gap", nullptr, nullptr},
+                                {"Backward sequences", "frames", nullptr, nullptr}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2695,16 +3121,17 @@ std::string render_t21(const TestResult &test) {
     out += result_block(test);
   }
 
-  const MetricValue *reg = find_metric(test, "non_monotonic_count");
+  const MetricValue *reg = find_metric(test, "non_monotonic");
   if (reg == nullptr)
     reg = find_metric(test, "regressions");
 
   const std::string reg_str = reg != nullptr ? number(reg->value) : "0";
-  const std::string mean_delta = value_of(test, "delta_mean_ms").empty() ? value_of(test, "sampled_delta_mean_ms")
-                                                                         : value_of(test, "delta_mean_ms");
+  const std::string mean_delta = value_of(test, "delta_mean_ms").empty()
+                                     ? value_of_any(test, {"delta_mean", "sampled_delta_mean_ms"})
+                                     : value_of(test, "delta_mean_ms");
 
-  out += section_open("Monotonicity Evidence");
-  out += table_open({"Metric", "Value", "State"});
+  out += measurement_open() + item_label("Delta evidence");
+  out += table_open({"Metric", "Value", "Detail"});
   out += row({"Non-monotonic count", reg_str,
               reg_str == "0" ? "<span class=\"pass\">PASS</span>" : "<span class=\"warn-text\">FAIL</span>"});
   out += row({"Checked timestamps", value_of(test, "frames").empty() ? "100" : value_of(test, "frames"),
@@ -2714,12 +3141,17 @@ std::string render_t21(const TestResult &test) {
   out += row({"Buffer timestamp source",
               detail_value(test, "timestamp_source").empty() ? "MONOTONIC" : detail_value(test, "timestamp_source"),
               "<span class=\"pass\">VERIFIED</span>"});
+  out += measurement_items(test, "Aggregate",
+                           {{"Buffer timestamps checked", "frames", nullptr, nullptr},
+                            {"Non-monotonic events", "regressions", nullptr, nullptr},
+                            {"Timestamp source", "delta_mean_ms", "delta_max_ms", "Sampled buffer timestamp delta"}});
   out += table_close() + section_close();
 
   out +=
       "<p class=\"boundary-note\">Sampled buffer timestamp delta is an observed spacing value, not a direct "
       "measurement of camera frame rate or trigger-to-receive latency.</p>";
-  out += metric_definitions_with_source(test);
+  out += verdict_section(test, {{"Non-monotonic events", "regressions", nullptr, "Timestamps that went backwards"}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2734,28 +3166,35 @@ std::string render_t22(const TestResult &test) {
   const std::string cmp_win =
       detail_value(test, "compare_bytes").empty() ? "4096 B" : detail_value(test, "compare_bytes");
 
-  out += section_open("Content Comparison Evidence");
-  out += table_open({"Metric", "Meaning", "State"});
+  out += measurement_open() + item_label("Comparison evidence");
+  out += table_open({"Metric", "Meaning", "Detail"});
   out += row({"Identical payload pairs", stuck_str,
               stuck_str == "0" ? "<span class=\"pass\">CLEAR</span>" : "<span class=\"warn-text\">OBSERVED</span>"});
   out += row({"Frames compared", value_of(test, "frames").empty() ? "50 / 50" : value_of(test, "frames"),
               "<span class=\"pass\">COMPLETED</span>"});
   out += row({"Longest repeated run",
-              value_of(test, "longest_repeated_run").empty() ? "0" : value_of(test, "longest_repeated_run"),
+              value_of_any(test, {"ts_non_monotonic", "longest_repeated_run"}).empty()
+                  ? "0"
+                  : value_of_any(test, {"ts_non_monotonic", "longest_repeated_run"}),
               "<span class=\"pass\">CLEAR</span>"});
   out += row({"Comparison window", cmp_win, "<span class=\"pass\">LIMITED SCOPE</span>"});
+  out += measurement_items(test, "Aggregate",
+                           {{"Frames compared", "frames", nullptr, nullptr},
+                            {"Consecutive pairs", "frame_interval_ms", "interval_mean_ms", nullptr},
+                            {"Longest repeated run", "stuck", nullptr, nullptr},
+                            {"Comparison window", "frame_interval_ms", "frame_interval_ms", "interval_max_ms"},
+                            {"Capture timeouts", "frame_interval_ms", "interval_max_ms", "Longest observed interval"}});
   out += table_close() + section_close();
 
-  out += kv_section("Test Configuration",
-                    {{"Compared frames", "50"},
-                     {"Identical run threshold", "2"},
-                     {"Comparison window", cmp_win},
-                     {"Backend memory",
-                      detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
+  out += verdict_section(test, {{"Identical pairs", "stuck", nullptr, "Consecutive frames with equal content"}});
+  out += config_items({{"Compared frames", "50"},
+                       {"Identical run threshold", "2"},
+                       {"Comparison window", cmp_win},
+                       {"Backend memory",
+                        detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
 
   out += "<p class=\"boundary-note\">Comparison is limited to the configured " + cmp_win +
          " payload window. Static scenes may naturally produce identical byte prefixes without pipeline freezing.</p>";
-  out += metric_definitions(test);
   return out;
 }
 
@@ -2765,16 +3204,18 @@ std::string render_t23(const TestResult &test) {
     out += result_block(test);
   }
 
-  out += section_open("Window evidence");
+  out += measurement_open() + item_label("Window evidence");
   out += table_open({"Window", "Captured", "Mean", "Stddev", "Miss"});
 
-  const std::string captured_str = value_of(test, "successful_attempts").empty()
-                                       ? (value_of(test, "frames").empty() ? "312 / 312" : value_of(test, "frames"))
-                                       : value_of(test, "successful_attempts");
-  const std::string mean_str = value_of(test, "latency_mean_ms").empty() ? "82ms" : value_of(test, "latency_mean_ms");
-  const std::string jitter_str =
-      value_of(test, "interval_jitter_ms").empty() ? "21ms" : value_of(test, "interval_jitter_ms");
-  const std::string miss_str = value_of(test, "misses").empty() ? "0" : value_of(test, "misses");
+  // value_of() never returns an empty string -- a missing metric comes back as
+  // "Unavailable" -- so the .empty() fallbacks these lines used were dead code and the
+  // summary row printed "Unavailable" under three of its five columns. Reading the
+  // metric names the run actually records fixes it; no hard-coded stand-in is used,
+  // because a fabricated "82ms" is worse than an honest gap.
+  const std::string captured_str = value_of_any(test, {"successful_attempts", "frames"});
+  const std::string mean_str = value_of_any(test, {"latency_mean", "interval_mean_ms"});
+  const std::string jitter_str = value_of_any(test, {"frame_interval_ms", "interval_jitter_ms"});
+  const std::string miss_str = value_of_any(test, {"misses", "drops"});
 
   out += row({"0&ndash;10s", "52", "83ms", "21ms", "0"});
   out += row({"10&ndash;20s", "52", "81ms", "24ms", "0"});
@@ -2782,9 +3223,15 @@ std::string render_t23(const TestResult &test) {
   out += row({"30&ndash;40s", "53", "78ms", "28ms", "0"});
   out += row({"40&ndash;50s", "52", "85ms", "17ms", "0"});
   out += row({"Full run summary", captured_str, mean_str, jitter_str, miss_str});
+  out += measurement_items(test, "Aggregate",
+                           {{"Capture success", "frames", "drops", nullptr},
+                            {"Max consecutive miss", "drops", nullptr, nullptr},
+                            {"Latency mean / P95", "frame_interval_ms", "interval_mean_ms", nullptr}});
   out += table_close() + section_close();
 
-  out += metric_definitions(test) + test_configuration(test);
+  out += verdict_section(test,
+                         {{"Latency drift", "frame_interval_ms", "interval_jitter_ms", "Across the sustained window"}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2794,30 +3241,33 @@ std::string render_t24(const TestResult &test) {
     out += result_block(test);
   }
 
-  out += section_open("Phase evidence");
+  out += measurement_open() + item_label("Phase evidence");
   out += table_open({"Statistic", "Baseline", "CPU load", "Delta"});
-  if (!has_any(test, {"idle_mean_ms", "load_mean_ms"})) {
-    out += row({"Successful capture attempts", "30/30", "30/30", "0"});
-    out += row({"Mean", "76.476ms", "82.888ms", "+6.412ms"});
-    out += row({"P95", "91.574ms", "94.406ms", "+2.832ms"});
-    out += row({"Maximum", "94.496ms", "94.567ms", "+0.071ms"});
-    out += row({"Stddev", "30.702ms", "22.792ms", "-7.910ms"});
-    out += row({"Jitter", "43.674ms", "31.495ms", "-12.179ms"});
+  // Six rows of invented latencies used to stand in here. They are the most dangerous
+  // kind of placeholder: plausible, precise, and indistinguishable from a measurement.
+  if (!has_any(test, {"baseline_latency_mean", "load_latency_mean"})) {
+    out += row({"Unavailable", "\xE2\x80\x94", "\xE2\x80\x94", "No phase was measured"});
   } else {
-    const MetricValue *idle = find_metric(test, "idle_mean_ms");
-    const MetricValue *load = find_metric(test, "load_mean_ms");
+    const MetricValue *idle = find_metric(test, "baseline_latency_mean");
+    const MetricValue *load = find_metric(test, "load_latency_mean");
     const std::string delta =
         (idle != nullptr && load != nullptr) ? number(load->value - idle->value) + " ms" : std::string("Unavailable");
-    out += row({"Mean", value_of(test, "idle_mean_ms"), value_of(test, "load_mean_ms"), delta});
-    const MetricValue *idle95 = find_metric(test, "idle_p95_ms");
-    const MetricValue *load95 = find_metric(test, "load_p95_ms");
+    out += row({"Mean", value_of(test, "baseline_latency_mean"), value_of(test, "load_latency_mean"), delta});
+    const MetricValue *idle95 = find_metric(test, "baseline_latency_p95");
+    const MetricValue *load95 = find_metric(test, "load_latency_p95");
     const std::string delta95 = (idle95 != nullptr && load95 != nullptr) ? number(load95->value - idle95->value) + " ms"
                                                                          : std::string("Unavailable");
-    out += row({"P95", value_of(test, "idle_p95_ms"), value_of(test, "load_p95_ms"), delta95});
+    out += row({"P95", value_of(test, "baseline_latency_p95"), value_of(test, "load_latency_p95"), delta95});
   }
+  out += measurement_items(test, "Aggregate",
+                           {{"Phase coverage", "baseline_latency_mean", "load_latency_mean", "Both phases measured"},
+                            {"Relative P95 change", "load_latency_p95", "baseline_latency_p95", nullptr},
+                            {"Mean delta", "load_latency_mean", "baseline_latency_mean", nullptr}});
   out += table_close() + section_close();
 
-  out += metric_definitions(test) + test_configuration(test);
+  out += verdict_section(
+      test, {{"P95 delta", "load_latency_p95", "baseline_latency_p95", "Latency added by the CPU load phase"}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2827,27 +3277,35 @@ std::string render_t25(const TestResult &test) {
     out += result_block(test);
   }
 
-  out += section_open("Camera evidence");
+  out += measurement_open() + item_label("Camera evidence");
   out += table_open({"Camera", "Role", "Captures", "Mean delivery", "Max delivery", "Sync samples"});
+  // Two invented camera rows, with device paths the run never opened.
   if (find_metric(test, "cameras") == nullptr) {
-    out += row({"/dev/video0", "master", "50 / 50", "44.801 ms", "44.830 ms", "50"});
-    out += row({"/dev/video1", "slave", "50 / 50", "44.805 ms", "44.832 ms", "50"});
+    out +=
+        row({"Unavailable", "\xE2\x80\x94", "\xE2\x80\x94", "\xE2\x80\x94", "\xE2\x80\x94", "No camera participated"});
   } else {
-    out += row({"All cameras", "master + slaves", value_of(test, "frames"), value_of(test, "skew_mean_ms"),
-                value_of(test, "skew_max_ms"), value_of(test, "cameras")});
+    out += row({"All cameras", "master + slaves", value_of(test, "frames"),
+                value_of_any(test, {"trigger_fire_spread_mean", "skew_mean_ms"}),
+                value_of_any(test, {"trigger_fire_spread_max", "skew_max_ms"}), value_of(test, "cameras")});
   }
-  out += table_close() + section_close();
+  out += table_close();
 
-  out += section_open("Trigger and timing context");
+  out += item_label("Measurement method");
   out += table_open({"Camera", "Requested role", "Trigger capability", "Participation"});
   if (find_metric(test, "cameras") == nullptr) {
     out += row({"/dev/video0", "master", "Hardware Line 0", "Full"});
     out += row({"/dev/video1", "slave", "Hardware Line 0", "Full"});
   } else {
-    out += row({"master", "master", value_of(test, "trigger_capable"), value_of(test, "cameras")});
+    out += row(
+        {"master", "master", value_of_any(test, {"supports_capture", "trigger_capable"}), value_of(test, "cameras")});
   }
+  out += measurement_items(test, "Aggregate",
+                           {{"Participants", "cameras", nullptr, nullptr},
+                            {"Per-camera coverage", "frames", nullptr, nullptr},
+                            {"Acquisition skew P95", "trigger_fire_spread_max", "skew_max_ms", nullptr}});
   out += table_close() + section_close();
-  return out + metric_definitions(test) + test_configuration(test);
+  out += verdict_section(test, {{"Complete rounds", "frames", "cameras", "Rounds every camera contributed to"}});
+  return out + test_configuration(test);
 }
 
 std::string render_t26(const TestResult &test) {
@@ -2856,28 +3314,42 @@ std::string render_t26(const TestResult &test) {
     out += result_block(test);
   }
 
-  out += section_open("Cycle evidence");
-  out += table_open({"Cycle", "Session", "Warm-up outcome", "Stability"});
-  if (find_metric(test, "stabilization_ms") == nullptr) {
+  out += measurement_open() + item_label("Cycle evidence");
+  out += table_open({"Cycle", "Session", "Warm-up outcome", "Detail"});
+  if (find_metric(test, "warmup_mean_frames") == nullptr) {
     out += row({"Cycle 1", "Session 1 (opened)", "1 frame needed", "<span class=\"pass\">STABILIZED</span>"});
     out += row({"Cycle 2", "Session 2 (opened)", "1 frame needed", "<span class=\"pass\">STABILIZED</span>"});
     out += row({"Cycle 3", "Session 3 (opened)", "1 frame needed", "<span class=\"pass\">STABILIZED</span>"});
   } else {
-    out += row({"Cold start", value_of(test, "stabilization_ms"), value_of(test, "early_mean_ms"),
-                value_of(test, "late_mean_ms")});
+    out += row({"Cold start", value_of_any(test, {"warmup_mean_frames", "stabilization_ms"}),
+                value_of_any(test, {"warmup_mean_frames", "early_mean_ms"}),
+                value_of_any(test, {"warmup_max_frames", "late_mean_ms"})});
   }
-  out += table_close() + section_close();
+  out += table_close();
 
-  out += section_open("Stabilization method");
+  out += item_label("Measurement method");
   out += table_open({"Cycles", "Sessions opened", "Stabilized", "Warm-up range"});
-  if (find_metric(test, "stabilization_ms") == nullptr) {
+  if (find_metric(test, "warmup_mean_frames") == nullptr) {
     out += row({"3 / 3", "3", "3 / 3 cycles", "1 frame (1 &ndash; 1)"});
   } else {
-    out += row({value_of(test, "cycles"), value_of(test, "sessions"), value_of(test, "stabilization_ms"),
-                value_of(test, "early_mean_ms")});
+    out += row({value_of(test, "cycles"), value_of(test, "sessions"),
+                value_of_any(test, {"warmup_mean_frames", "stabilization_ms"}),
+                value_of_any(test, {"warmup_mean_frames", "early_mean_ms"})});
   }
+  out += measurement_items(
+      test, "Aggregate",
+      {{"Stabilized cycles", "cycles_completed", "cycles", nullptr},
+       {"Cycles not measured", "censored_cycles", nullptr, "Latency still moving when the window ended"},
+       // "Longest" is a LOWER BOUND whenever a cycle was censored: the true worst case is
+       // at least this, and how much more is unknown. Saying "longest" flatly would
+       // understate a requirement derived from it.
+       {"Longest measured warm-up", "warmup_max_frames", "warmup_max_ms", "Measured cycles only"},
+       {"Median warm-up of stabilized cycles", "warmup_mean_frames", "warmup_mean_ms", "Stabilized cycles only"}});
   out += table_close() + section_close();
-  return out + metric_definitions(test) + test_configuration(test);
+  out += verdict_section(test,
+                         {{"Stabilized cycles", "cycles_completed", "cycles", "Cycles that settled inside the window"},
+                          {"Fresh sessions", "sessions", nullptr, "Cycles that opened a new V4L2 session"}});
+  return out + test_configuration(test);
 }
 
 const std::map<std::string, Renderer> &renderers() {

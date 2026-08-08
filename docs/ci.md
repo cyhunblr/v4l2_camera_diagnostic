@@ -23,6 +23,10 @@ Gates every other job. Fails fast on:
 - **C++ style** — `cpplint` (config: [`CPPLINT.cfg`](../CPPLINT.cfg)) and
   `clang-format-18 --dry-run --Werror` (config:
   [`.clang-format`](../.clang-format)) against `source/backend/`.
+  - The **pre-commit hook checks more**: every staged `.cpp`/`.hpp`, including
+    `tests/`. A format violation left under `tests/` passes this CI step and
+    then blocks the commit, so run the hook's own command before committing —
+    see [`scripts/dev/check-cpp-format.sh`](../scripts/dev/check-cpp-format.sh).
 - **Frontend lint** — `eslint .` in `source/frontend`
   ([`eslint.config.js`](../source/frontend/eslint.config.js)).
 

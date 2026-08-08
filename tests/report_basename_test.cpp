@@ -59,7 +59,7 @@ int main() {
 
   // --- 1. The approved examples -------------------------------------------
   {
-    // report-ui-review-plan.md / fix-plan 3.5, verbatim.
+    // report-ui-design-spec.md / fix-plan 3.5, verbatim.
     ok &= check(v4l2diag::canonical_report_basename(naming(v4l2diag::TriggerMode::FreeRun, "", "")) ==
                     "2026-07-30_12-02-38_free-run_default_v4l2_camera_diagnostic",
                 "the free-run + default example changed: " +
