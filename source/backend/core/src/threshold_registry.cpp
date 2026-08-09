@@ -235,7 +235,19 @@ bool parse_config_file(const std::string &path, ThresholdConfig *config) {
   }
   // Surface the reconciliation: a config that silently loses entries is how a
   // stale file went unnoticed while the UI showed almost no tests.
-  if (!migrated.empty() || !dropped.empty()) {
+  // The values map and the params map are both walked into the same two lists, so a test
+  // renumbered in both appeared twice in one notice. Report each id once.
+  std::sort(migrated.begin(), migrated.end());
+  migrated.erase(std::unique(migrated.begin(), migrated.end()), migrated.end());
+
+  std::sort(dropped.begin(), dropped.end());
+  dropped.erase(std::unique(dropped.begin(), dropped.end()), dropped.end());
+
+  // Say it once per file, not once per read. The web server constructs a
+  // ThresholdRegistry on every API request, so this notice was reprinted on each one and
+  // buried the log it was meant to draw attention to.
+  static std::set<std::string> announced;
+  if ((!migrated.empty() || !dropped.empty()) && announced.insert(path).second) {
     std::cerr << "v4l2diag: threshold config " << path << " no longer matches the current tests;";
     if (!migrated.empty()) {
       std::cerr << " migrated " << migrated.size() << " (";

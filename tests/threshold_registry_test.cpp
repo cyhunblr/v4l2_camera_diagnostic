@@ -9,7 +9,9 @@
 #include <set>
 #include <vector>
 #include <string>
+#include <sys/stat.h>
 #include <unistd.h>
+#include <cstdio>
 
 namespace {
 
@@ -61,6 +63,40 @@ void write_stale_config(const std::string &path) {
 }
 
 }  // namespace
+
+namespace testing {
+
+// Redirects stderr to a temporary file for the lifetime of the object, so a test can read
+// what a component printed. Restores the original descriptor on destruction.
+class CapturedStderr {
+ public:
+  CapturedStderr() {
+    path_ = "/tmp/v4l2diag-stderr-XXXXXX";
+    fd_ = mkstemp(&path_[0]);
+    saved_ = dup(STDERR_FILENO);
+    fflush(stderr);
+    dup2(fd_, STDERR_FILENO);
+  }
+  ~CapturedStderr() {
+    fflush(stderr);
+    dup2(saved_, STDERR_FILENO);
+    close(saved_);
+    close(fd_);
+    unlink(path_.c_str());
+  }
+  std::string text() const {
+    fflush(stderr);
+    std::ifstream in(path_);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  }
+
+ private:
+  std::string path_;
+  int fd_ = -1;
+  int saved_ = -1;
+};
+
+}  // namespace testing
 
 int main() {
   const std::string dir = make_temp_dir();
@@ -192,8 +228,7 @@ int main() {
     v4l2diag::ThresholdConfig custom = v4l2diag::default_threshold_config();
     custom.id = "stress-test";
     custom.name = "Stress Test";
-    ok &= require(registry.add_or_update_config(custom, &error),
-                  "add_or_update_config rejected a normal id: " + error);
+    ok &= require(registry.add_or_update_config(custom, &error), "add_or_update_config rejected a normal id: " + error);
     v4l2diag::ThresholdConfig read_back;
     ok &= require(registry.get_config("stress-test", &read_back) && read_back.name == "Stress Test",
                   "a normal config did not round-trip");
@@ -201,6 +236,47 @@ int main() {
     unlink((guard_dir + "/stress-test.json").c_str());
     unlink((guard_dir + "/default.json").c_str());
     rmdir(guard_dir.c_str());
+  }
+
+  // A stale config must announce itself ONCE, and each renumbered id must appear once in
+  // that announcement. Measured before this check, on a real UI session: the web server
+  // builds a ThresholdRegistry per request, so the warning was reprinted on every call --
+  // and each id appeared TWICE inside it, because the values map and the params map both
+  // append to one shared list. The log filled with the same paragraph until it drowned
+  // everything else, which is the opposite of what a reconciliation notice is for.
+  {
+    const std::string noisy_dir = dir + "-noise";
+    mkdir(noisy_dir.c_str(), 0755);
+    {
+      std::ofstream out(noisy_dir + "/default.json");
+      out << R"JSON({"id":"default","name":"Default",
+        "values":{"t22-sustained-capture":{"min_success_rate_pct":90}},
+        "params":{"t22-sustained-capture":{"duration_sec":10}}})JSON";
+    }
+
+    testing::CapturedStderr capture;
+    v4l2diag::ThresholdRegistry first(noisy_dir);
+    const std::string first_log = capture.text();
+    v4l2diag::ThresholdRegistry second(noisy_dir);
+    const std::string second_log = capture.text().substr(first_log.size());
+
+    const std::string needle = "no longer matches the current tests";
+    ok &= require(first_log.find(needle) != std::string::npos,
+                  "a stale threshold config no longer reports that it was reconciled");
+    ok &= require(second_log.find(needle) == std::string::npos,
+                  "the reconciliation notice is reprinted on every registry construction");
+
+    // The same id, listed twice in one notice.
+    const std::string id = "t22-sustained-capture -> t23-sustained-capture";
+    std::size_t occurrences = 0;
+    for (std::size_t at = first_log.find(id); at != std::string::npos; at = first_log.find(id, at + 1)) {
+      ++occurrences;
+    }
+    ok &= require(occurrences == 1,
+                  "the reconciliation notice lists the same migrated id " + std::to_string(occurrences) + " times");
+
+    unlink((noisy_dir + "/default.json").c_str());
+    rmdir(noisy_dir.c_str());
   }
 
   unlink((dir + "/default.json").c_str());
