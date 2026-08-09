@@ -22,6 +22,7 @@
 #include <iostream>
 #include <map>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -345,6 +346,69 @@ std::map<std::string, std::pair<std::vector<v4l2diag::MetricValue>, std::vector<
   return out;
 }
 
+// How a card draws its charts: one entry per chart, in document order, each either
+// "svg" or "css-bar".
+//
+// This is the check whose ABSENCE let the largest defect through. The previous version of
+// this file said, in a comment, that charts were "covered by report_card_contract_test" --
+// but that test only asserts a chart's SHELL (frame, viewBox width, CSS classes present),
+// never which KIND of chart a given card draws. So counting 26 charts read as success
+// while, measured on the 2026-08-09 device report, 17 of 24 cards drew a different chart
+// type than their approved preview: t13/t14/t16/t23 were SVG in the preview and CSS bars
+// in production, t03/t07 the reverse, and t11/t25 had a chart approved but drew none.
+std::vector<std::string> chart_kinds(const std::string &raw) {
+  std::vector<std::string> kinds;
+  // Markup only. A stylesheet DEFINES .bar-track and .budget-track without drawing
+  // anything, and counting those rules read a preview's <style> block as a row of charts.
+  std::string html = raw;
+  for (std::size_t at = html.find("<style"); at != std::string::npos; at = html.find("<style", at)) {
+    const std::size_t end = html.find("</style>", at);
+    if (end == std::string::npos) {
+      html.erase(at);
+      break;
+    }
+    html.erase(at, end + 8 - at);
+  }
+  // A CSS bar chart is spelled with a per-test track class in the previews
+  // (".budget-track" in t13, ".headroom-track" in t14, ".rel-track", ".thr-track") and
+  // with the shared ".bar-track" in production. Recognising only ".bar-track" read t13's
+  // and t14's second chart as absent, which would have demanded their removal instead of
+  // their conversion. The suffix is the contract; the prefix is per-test naming.
+  // A run of consecutive track rows is ONE chart, not one per bar: the run is closed by
+  // the next <svg> or the next item label (<h4>), which is where a new chart starts.
+  const std::regex mark(R"RX(<svg|<h4|class="[a-z0-9]+-track")RX");
+  bool in_bar_run = false;
+  for (auto it = std::sregex_iterator(html.begin(), html.end(), mark); it != std::sregex_iterator(); ++it) {
+    const std::string token = it->str(0);
+    if (token == "<svg") {
+      kinds.push_back("svg");
+      in_bar_run = false;
+    } else if (token == "<h4") {
+      in_bar_run = false;  // a new item begins; the next track starts a new chart
+    } else if (!in_bar_run) {
+      kinds.push_back("css-bar");
+      in_bar_run = true;
+    }
+  }
+  return kinds;
+}
+
+// Every class token used inside a card. Used to prove production invents no visual
+// vocabulary the approved previews do not have: a class with no counterpart in any
+// preview is content the user never approved, whatever it renders.
+std::set<std::string> class_tokens(const std::string &html) {
+  std::set<std::string> tokens;
+  const std::regex attr(R"RX(class="([^"]*)")RX");
+  for (auto it = std::sregex_iterator(html.begin(), html.end(), attr); it != std::sregex_iterator(); ++it) {
+    std::istringstream stream((*it)[1].str());
+    std::string token;
+    while (stream >> token) {
+      tokens.insert(token);
+    }
+  }
+  return tokens;
+}
+
 std::string make_temp_dir() {
   char pattern[] = "/tmp/v4l2diag-preview-XXXXXX";
   return mkdtemp(pattern);
@@ -457,6 +521,111 @@ int main() {
     const std::vector<std::string> preview_columns = column_signatures(entry.second);
     compare(slug, "item labels", richest_card_items(entry.second), item_labels(card_of[slug]));
     compare(slug, "table columns", first_cycle(preview_columns), column_signatures(card_of[slug]));
+
+    // Chart kinds, against the richest preview card for the same reason item labels use it.
+    const std::string &card = card_of[slug];
+    std::vector<std::string> preview_charts;
+    for (const std::string &preview_card : cards_in(entry.second)) {
+      const std::vector<std::string> kinds = chart_kinds(preview_card);
+      if (kinds.size() > preview_charts.size()) {
+        preview_charts = kinds;
+      }
+    }
+    compare(slug, "chart kinds", preview_charts, chart_kinds(card));
+
+    // No PROSE production invents on its own.
+    //
+    // Scoped deliberately to classes that carry explanatory text. A blanket
+    // "every class must appear in a preview" check reports 263 differences that are not
+    // defects: the previews spell tables with per-test classes (".win-header", ".sum-row")
+    // and production spells the same table ".grid-head"/".grid-row cols-5" -- an
+    // equivalence this file's column_signatures() already relies on deliberately. Naming
+    // those would bury the real finding, which is text the user never approved appearing
+    // beside measurements: .boundary-note ("Declared clock type describes buffer
+    // metadata..."), .test-note and .chart-axis-caption, in 0 of 26 previews.
+    static const std::set<std::string> kProseClasses = {
+        "boundary-note", "test-note", "axis-caption", "chart-axis-caption", "chart-note", "note", "callout",
+        "hint",          "info-note", "caption",      "explanation",        "advisory"};
+    for (const std::string &token : class_tokens(card)) {
+      if (kProseClasses.count(token) == 0) {
+        continue;
+      }
+      bool approved = false;
+      for (const auto &other : preview_of) {
+        if (other.second.find("class=\"" + token + "\"") != std::string::npos) {
+          approved = true;
+          break;
+        }
+      }
+      if (!approved) {
+        fail(slug + ": renders explanatory text in \"" + token + "\", which appears in no approved preview");
+      }
+    }
+  }
+
+  // The raw monospace dump. Production emitted `<div class="detail-list">` after the last
+  // section of 12 cards, repeating values the Test Configuration table already showed --
+  // in unstyled `key: value` form, outside every <section>. No preview contains it. The
+  // existing per-test assertions covered only t01..t11, so every test renumbered to t13+
+  // was free to emit it.
+  {
+    std::size_t dumps = 0;
+    std::vector<std::string> where;
+    for (const auto &entry : card_of) {
+      if (entry.second.find("class=\"detail-list\"") != std::string::npos) {
+        ++dumps;
+        where.push_back(entry.first.substr(0, 3));
+      }
+    }
+    if (dumps > 0) {
+      std::string joined;
+      for (const std::string &id : where) {
+        joined += (joined.empty() ? "" : ", ") + id;
+      }
+      fail(std::to_string(dumps) + " card(s) emit the raw detail-list dump, which no preview has: " + joined);
+    }
+  }
+
+  // Container structure. A card whose preview groups its sections into a multi-column
+  // wrapper must group them too: t01's three Device Evidence sections sit side by side in
+  // `.three-col`, and production emitted them as three full-width sections stacked
+  // vertically -- the same content, a different page.
+  for (const auto &entry : preview_of) {
+    const std::string slug = entry.first.substr(0, 3);
+    if (entry.second.find("class=\"three-col\"") == std::string::npos) {
+      continue;
+    }
+    const auto card = card_of.find(entry.first);
+    if (card != card_of.end() && card->second.find("three-col") == std::string::npos) {
+      fail(slug + ": preview groups its sections in .three-col, production stacks them vertically");
+    }
+  }
+
+  // Chart framing. The previews frame a chart with padding alone; production added
+  // `overflow-x: auto` together with `min-width: 906px`, which makes a scrollbar appear
+  // under every chart whose card is narrower than 906px. The scrollbar is not a rendering
+  // detail -- it is a control the approved design does not have.
+  {
+    const std::size_t at = html.find(".chart-frame, .metric-chart");
+    if (at != std::string::npos) {
+      const std::size_t end = html.find('}', at);
+      const std::string rule = html.substr(at, end == std::string::npos ? 0 : end - at);
+      if (rule.find("overflow-x") != std::string::npos && rule.find("auto") != std::string::npos) {
+        fail("chart frames set overflow-x:auto, so a scrollbar is drawn under charts; no preview does");
+      }
+    }
+    // Searched inside the svg rule, not across the whole document: the stylesheet ships
+    // its own comments, and a comment EXPLAINING why the fixed width was removed contains
+    // the very text a document-wide search looks for. Matching prose would make this
+    // check fire forever on a file that is already correct.
+    const std::size_t svg_at = html.find(".chart-frame svg");
+    if (svg_at != std::string::npos) {
+      const std::size_t rule_end = html.find('}', svg_at);
+      const std::string rule = html.substr(svg_at, rule_end == std::string::npos ? 0 : rule_end - svg_at);
+      if (rule.find("min-width") != std::string::npos) {
+        fail("chart SVGs are pinned with a min-width, which forces the scrollbar above");
+      }
+    }
   }
 
   // Guard the guard: a parse that silently returned nothing would make every comparison

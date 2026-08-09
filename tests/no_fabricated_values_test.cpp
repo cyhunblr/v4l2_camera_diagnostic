@@ -93,6 +93,16 @@ int main() {
       if (text.find("\\x") != std::string::npos) {
         continue;
       }
+      // A number chosen for SVG GEOMETRY is not a stand-in for a measurement: it is the
+      // drawing, not the datum. The literal that provoked this is a circle radius --
+      // `(point.flag.empty() ? "4" : "5")` picks a marker 1px larger for a flagged point.
+      // The exemption is deliberately narrow: the match must be immediately followed by
+      // an SVG attribute close, so a fabricated table value can never take this path.
+      const std::size_t after = static_cast<std::size_t>(it->position(0)) + it->length(0);
+      const std::string tail = src.substr(after, 40);
+      if (tail.find("/>") != std::string::npos || tail.find("\\\" ") != std::string::npos) {
+        continue;
+      }
       if (looks_measured(text)) {
         hits.push_back(text);
       }

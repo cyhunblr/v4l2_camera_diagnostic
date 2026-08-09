@@ -8,6 +8,9 @@
 
 # Generated diagnostic reports
 /reports/*
+# Reports rendered from a fixture for preview comparison. Reproducible from the
+# committed tests/data/*.json, so the rendered HTML is never the evidence itself.
+/output/
 
 # Local device profiles (never commit hardware-specific wiring)
 /configs/profiles/

@@ -677,19 +677,24 @@ table.overview .status-cell { font-weight: 700; font-size: 12px; text-transform:
    886, 900 and 902px boxes for a single 906-unit viewBox.
    The fix is to give the chart box NO horizontal padding of its own and let the section
    that holds it be the only one that indents. */
-.chart-frame { padding: 0; }
+/* T01's three Device Evidence sections side by side, verbatim from the approved preview.
+   Without it they stack, which is the same content on a different page. */
+.three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; border-bottom: 1px solid #dfe5eb; }
+.three-col .section { border-bottom: 0; border-right: 1px solid #dfe5eb; }
+.three-col .section:last-child { border-right: 0; }
+.chart-frame { padding: 0 16px; }
 .section .section { padding: 0; border-bottom: 0; }
 .metric-chart { padding: 14px 0; }
-/* The SVG renders at its viewBox width and is NOT stretched: with width:100% the box is
-   whatever the container happens to be (measured: 852, 870, 886, 934, 938) and every
-   declared font-size is multiplied by that ratio. Fixing the rendered width to the
-   viewBox width makes one SVG unit exactly one CSS pixel, so an 8px label is 8px.
-   A narrow viewport still scales the whole chart down together via max-width. */
-.chart-frame svg, .metric-chart svg { display: block; width: 906px; min-width: 906px; height: auto; overflow: visible; }
-/* Below ~1000px the fixed-width chart no longer fits. It SCROLLS inside its own box
-   rather than being squeezed: shrinking it would scale every label with it, which is the
-   defect the fixed width exists to prevent. The page itself never scrolls sideways. */
-.chart-frame, .metric-chart { overflow-x: auto; max-width: 100%; }
+/* Exactly what the approved previews declare. The chart fills its container and keeps its
+   proportions through aspect-ratio, so it never overflows and never needs to scroll.
+   This replaces a fixed `width: 906px; min-width: 906px` plus `overflow-x: auto`, which
+   was reasoned from "one SVG unit should be one CSS pixel, so an 8px label is really 8px".
+   That reasoning had a visible cost the previews had already rejected: any card narrower
+   than 906px grew a scrollbar under its chart -- a control the approved design does not
+   have, on every chart, at common window widths. Label sizes scale with the chart, which
+   is what the previews do. */
+.chart-frame svg, .metric-chart svg { display: block; width: 100%; aspect-ratio: 906/240; height: auto;
+                                      overflow: visible; }
 /* Charts render at a FIXED 906px rather than filling whatever their container gives
    them. Chasing the container width does not converge: the staircase indent, the nested
    section and .metric-chart's own padding each subtract a different amount, and the
@@ -814,6 +819,29 @@ table.overview .summary-text { color: #475569; }
 .svg-label { fill: #657382; font-size: 8px; }
 .svg-value { fill: #44515f; font-size: 9px; font-weight: 700; }
 .axis-title { fill: #44515f; font-size: 9px; font-weight: 600; }
+/* The rest of the SVG vocabulary, copied verbatim from the approved previews. T13's line
+   and area, T14's and T23's columns, T16's two-series lines. Declared once here because
+   the previews declare the same values in each file that uses them; a chart that names
+   one of these classes without a rule renders as an invisible or unstyled shape. */
+.axis { stroke: #9ba8b5; stroke-width: 1; }
+.arrow { fill: #8d99a6; }
+.axis-arrow { fill: #9ba8b5; }
+.tick { stroke: #9ba8b5; stroke-width: 1; }
+.axis-text { fill: #657382; font-size: 8px; }
+.axis-label { fill: #44515f; font-size: 9px; font-weight: 600; }
+.svg-axis-title { fill: #44515f; font-size: 9px; font-weight: 600; }
+.area { fill: #e8f0f7; }
+.line { fill: none; stroke: #2563a6; stroke-width: 2.5; }
+.point { fill: #fff; stroke: #2563a6; stroke-width: 2; }
+.point-miss { fill: #fff; stroke: #c55757; stroke-width: 2; }
+.point-cliff { fill: #fff; stroke: #b8860b; stroke-width: 2; }
+.lat-bar, .win-bar { fill: #2563a6; }
+/* The preview tints one column of T14's distribution so P95 reads apart from min/mean/max. */
+.lat-bar-p95 { fill: #71879a; }
+.line-high { fill: none; stroke: #2563a6; stroke-width: 2.5; }
+.line-low { fill: none; stroke: #71879a; stroke-width: 2.5; }
+.point-high { fill: #fff; stroke: #2563a6; stroke-width: 2; }
+.point-low { fill: #fff; stroke: #71879a; stroke-width: 2; }
 /* Horizontal bar charts, verbatim from the approved previews: one row is a fixed-width
    label, a proportional track and the unit, and the axis under them repeats the same
    three-column grid so the ticks line up with the tracks. The value rides INSIDE the

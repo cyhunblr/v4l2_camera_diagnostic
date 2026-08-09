@@ -107,30 +107,31 @@ const Expectation kApproved[] = {
 // that draws no chart is doing so by its own structure rather than for want of data.
 v4l2diag::TestResult chartable_test(const std::string &id) {
   v4l2diag::TestResult test = test_of(id);
-  for (const auto &entry : {std::make_pair("latency_min", 44.7),
-                            std::make_pair("latency_mean", 44.8),
-                            std::make_pair("latency_p95", 44.9),
-                            std::make_pair("latency_max", 45.0),
-                            std::make_pair("baseline_latency_mean", 44.8),
-                            std::make_pair("baseline_latency_p95", 44.9),
-                            std::make_pair("load_latency_mean", 44.9),
-                            std::make_pair("load_latency_p95", 44.8),
-                            std::make_pair("cliff_ms", 45.0),
-                            std::make_pair("first_miss_ms", 44.0),
-                            std::make_pair("safety_margin_ms", 3.5),
-                            std::make_pair("hits_1ms", 8.0),
-                            std::make_pair("lat_high_avg_1ms", 44.8),
-                            std::make_pair("lat_low_avg_1ms", 43.8),
-                            std::make_pair("success_rate_pct", 100.0),
-                            std::make_pair("frames_captured", 388.0),
-                            std::make_pair("max_consecutive_miss", 0.0),
-                            std::make_pair("cycles_completed", 10.0),
-                            std::make_pair("censored_cycles", 0.0),
-                            std::make_pair("warmup_mean_frames", 1.0),
-                            std::make_pair("warmup_max_frames", 1.0),
-                            std::make_pair("identical_pairs", 0.0),
-                            std::make_pair("frames_tested", 50.0),
-                            std::make_pair("max_identical_run", 0.0)}) {
+  for (const auto &entry :
+       {std::make_pair("latency_min", 44.7), std::make_pair("latency_mean", 44.8), std::make_pair("latency_p95", 44.9),
+        std::make_pair("latency_max", 45.0), std::make_pair("baseline_latency_mean", 44.8),
+        std::make_pair("baseline_latency_p95", 44.9), std::make_pair("load_latency_mean", 44.9),
+        std::make_pair("load_latency_p95", 44.8), std::make_pair("cliff_ms", 45.0),
+        std::make_pair("first_miss_ms", 44.0), std::make_pair("safety_margin_ms", 3.5), std::make_pair("hits_1ms", 8.0),
+        // Eleven swept widths, as the device records: T16's chart is a LINE over the
+        // sweep, and a single width cannot make a line -- a one-width fixture made the
+        // renderer look broken when it was correctly refusing to draw.
+        std::make_pair("lat_high_avg_1ms", 44.80), std::make_pair("lat_low_avg_1ms", 43.80),
+        std::make_pair("lat_high_avg_2ms", 44.82), std::make_pair("lat_low_avg_2ms", 43.82),
+        std::make_pair("lat_high_avg_3ms", 44.84), std::make_pair("lat_low_avg_3ms", 43.84),
+        std::make_pair("lat_high_avg_5ms", 44.86), std::make_pair("lat_low_avg_5ms", 43.86),
+        std::make_pair("lat_high_avg_7ms", 44.88), std::make_pair("lat_low_avg_7ms", 43.88),
+        std::make_pair("lat_high_avg_10ms", 44.90), std::make_pair("lat_low_avg_10ms", 43.90),
+        std::make_pair("lat_high_avg_13ms", 44.92), std::make_pair("lat_low_avg_13ms", 43.92),
+        std::make_pair("lat_high_avg_15ms", 44.94), std::make_pair("lat_low_avg_15ms", 43.94),
+        std::make_pair("lat_high_avg_20ms", 44.96), std::make_pair("lat_low_avg_20ms", 43.96),
+        std::make_pair("lat_high_avg_25ms", 44.98), std::make_pair("lat_low_avg_25ms", 43.98),
+        std::make_pair("lat_high_avg_30ms", 45.00), std::make_pair("lat_low_avg_30ms", 44.00),
+        std::make_pair("success_rate_pct", 100.0), std::make_pair("frames_captured", 388.0),
+        std::make_pair("max_consecutive_miss", 0.0), std::make_pair("cycles_completed", 10.0),
+        std::make_pair("censored_cycles", 0.0), std::make_pair("warmup_mean_frames", 1.0),
+        std::make_pair("warmup_max_frames", 1.0), std::make_pair("identical_pairs", 0.0),
+        std::make_pair("frames_tested", 50.0), std::make_pair("max_identical_run", 0.0)}) {
     v4l2diag::MetricValue metric;
     metric.name = entry.first;
     metric.value = entry.second;
@@ -229,9 +230,13 @@ int main() {
                 "an unknown test claims a dedicated renderer");
     const std::string html = v4l2diag::render_test_content(unknown);
     ok &= check(!html.empty(), "an unknown test rendered nothing at all");
-    // The generic fallback presents what it has: the metric and the detail.
+    // The generic fallback presents the metric it has. It does NOT print the raw detail
+    // list: that dump appeared in no approved preview, and on the 2026-08-09 device run
+    // nine real cards emitted it, each repeating its own Test Configuration table in
+    // unstyled `key: value` form. The detail assertion is inverted rather than removed so
+    // the dump coming back counts as a regression.
     ok &= check(contains(html, "240"), "the generic fallback dropped the metric value");
-    ok &= check(contains(html, "something happened"), "the generic fallback dropped the detail line");
+    ok &= check(!contains(html, "something happened"), "the raw detail dump came back in the generic fallback");
   }
 
   // --- 6. Metric definitions appear where the previews have them ---------
@@ -449,9 +454,13 @@ int main() {
     // 5.3.4: ONE stacked bar per cycle, not two separate dot charts.
     ok &= check(!contains(free_html, "First frame ms") || !contains(free_html, "Streamon ms"),
                 "T03 still renders the separate mean/max dot charts");
-    ok &= check(contains(free_html, "t03-phase-streamon") && contains(free_html, "t03-phase-frame"),
+    // The approved preview stacks two CSS segments per cycle inside one .bar-track.
+    // These ids belonged to an SVG production drew instead; the chart is the same
+    // measurement, drawn the way the design asks for.
+    ok &= check(contains(free_html, "class=\"stacked-chart\"") && contains(free_html, "class=\"bar-streamon\"") &&
+                    contains(free_html, "class=\"bar-firstframe\""),
                 "T03 has no stacked two-phase timing chart");
-    ok &= check(contains(free_html, "STREAMON") && contains(free_html, "Total"),
+    ok &= check(contains(free_html, "STREAMON") && contains(free_html, "class=\"cycle-info\""),
                 "T03's chart does not label the STREAMON phase or the per-cycle total");
 
     // The per-cycle TABLE is gone: the approved layout charts those numbers and charting
@@ -634,14 +643,19 @@ int main() {
     ok &= check(!contains(html, "class=\"detail-list\""), "T06 still emits the raw supporting-value list");
 
     // 5.6.5: a threshold-banded horizontal reliability bar, once per phase.
-    ok &= check(contains(html, "class=\"reliability-bar\""), "T06 has no reliability bar chart");
-    ok &= check(count_of(html, "class=\"reliability-bar\"") == 2, "T06's reliability chart does not show both phases");
-    ok &= check(contains(html, "100%"), "T06's reliability bar does not print the percentage alongside the bar");
+    // .rel-row inside a .chart-frame, as the preview draws it -- the old .reliability-bar
+    // markup carried no chart frame at all, so the card had no chart by the contract.
+    ok &= check(contains(html, "class=\"rel-chart\""), "T06 has no reliability bar chart");
+    ok &= check(count_of(html, "class=\"rel-row\"") == 2, "T06's reliability chart does not show both phases");
+    ok &= check(contains(html, "class=\"rel-info\""), "T06's reliability bar does not print the counts beside the bar");
 
-    // 5.6.6: the Open + STREAMON trend chart, by full-cycle order -- not the removed
-    // Streamon-ms dot chart.
-    ok &= check(contains(html, "Open + STREAMON") && contains(html, "by full cycle"),
-                "T06 has no Open + STREAMON trend chart");
+    // T06 draws ONE chart -- the reliability bars above. The per-cycle "Open + STREAMON"
+    // trend chart is gone: the approved preview has no second chart, and that SVG plotted
+    // cycle duration, which is a different question from the completion rate this card
+    // reports. The metric name itself survives in the Aggregate table, which is what the
+    // second assertion below still checks.
+    ok &= check(!contains(html, "by full cycle"), "T06's unapproved per-cycle trend chart came back");
+    ok &= check(contains(html, "Open + STREAMON"), "T06 lost the Open + STREAMON metric from its tables");
     ok &= check(!contains(html, "Streamon ms"), "T06 still labels the metric \"Streamon ms\"");
 
     // 5.6.7: the renamed timing fields.
@@ -701,19 +715,18 @@ int main() {
     ok &= check(count_of(html, "<span>20/20</span>") == 5, "T07 does not show captured/attempted per request row");
     ok &= check(!contains(html, "class=\"detail-list\""), "T07 still emits the raw repeating detail block");
 
-    // 5.7.6: requested-vs-allocated chart, and 5.7.7: latency grouped by allocated depth,
-    // with repeats collapsing into one point (all five requests share depth 2).
-    // The charts now take their name from the item label above the frame, as the approved
-    // preview shows, so they are found by their accessible name rather than by an
-    // in-frame heading that no longer exists.
-    ok &= check(contains(html, "aria-label=\"Requested versus allocated buffers\""),
-                "T07 has no requested-vs-allocated chart");
-    ok &= check(contains(html, "aria-label=\"Capture latency by allocated buffer depth\""),
-                "T07 has no allocated-depth latency chart");
+    // T07 has NO chart: its approved preview shows none in any of its three cards.
+    // Production drew two SVGs here (requested-vs-allocated, latency-by-depth); both
+    // restated what the Aggregate table states per row. Inverted rather than deleted so
+    // the charts coming back is a regression. The item label below is approved and stays:
+    // it names the table.
+    ok &= check(!contains(html, "aria-label=\"Requested versus allocated buffers\""),
+                "T07's unapproved requested-vs-allocated chart came back");
+    ok &= check(!contains(html, "aria-label=\"Capture latency by allocated buffer depth\""),
+                "T07's unapproved allocated-depth latency chart came back");
     ok &= check(contains(html, "<h4 class=\"item-label\">Latency by buffer count</h4>"),
                 "T07's charts are not named by the approved item label");
-    ok &= check(count_of(html, "t07-depth-point") == 1,
-                "T07's latency chart does not collapse repeated allocated depths into one point");
+    ok &= check(count_of(html, "t07-depth-point") == 0, "T07's unapproved depth chart came back");
 
     // 5.7.8: the six configuration parameters, in order.
     const std::size_t range_at = html.find("Requested range");
@@ -757,7 +770,10 @@ int main() {
                 "T08's load chart does not name Variant A's trigger rate");
     ok &= check(contains(html, "200 at 20/s") || contains(html, "200"),
                 "T08's load chart does not name Variant B's trigger rate");
-    ok &= check(contains(html, "approximately 10 seconds"), "T08 does not state the ~10s trigger-load duration");
+    // The "approximately 10 seconds" sentence went with the load chart it captioned:
+    // T08's preview has no chart, and the trigger load is already a column of the
+    // approved six-column table ("Trigger load").
+    ok &= check(!contains(html, "approximately 10 seconds"), "T08's unapproved load-chart caption came back");
 
     // 5.8.6: the queue-after-saturation slots, with ERROR/READY as visible TEXT, not only
     // colour, and the error slot naming its buffer index.
@@ -936,9 +952,11 @@ int main() {
     ok &= check(contains(unknown_html, "0x00010000"), "T10 does not carry the raw value of unknown bits");
     ok &= check(!contains(html, "Unknown bits"), "T10 reports unknown bits when the mask was fully decoded");
 
-    // 5.10.8: the T21 boundary note -- declared clock metadata is not proof that timestamp
-    // VALUES never went backwards.
-    ok &= check(contains(html, "Timestamp value") && contains(html, "T21"), "T10 is missing the T21 boundary note");
+    // The T21 boundary note is gone. Its content was true -- declared clock metadata is
+    // not proof that timestamp VALUES never went backwards -- but `.boundary-note` appears
+    // in none of the 26 approved previews, and a card may carry only the one approved
+    // piece of prose (the verdict line on a non-PASS card). Inverted, not deleted.
+    ok &= check(!contains(html, "class=\"boundary-note\""), "the unapproved .boundary-note prose came back on T10");
 
     // 5.10.9: the six configuration parameters.
     for (const char *key :

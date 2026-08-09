@@ -219,11 +219,278 @@ struct BarDatum {
   std::string series;  // CSS modifier: which colour the bar takes
 };
 
+// A line chart over a numeric x axis, in the previews' geometry: gridlines, arrowed
+// axes, ticks under the x axis, a filled area under the line, one circle per sample and
+// both axis titles. Points may be flagged so the preview's miss/cliff markers and their
+// dashed drop lines to the axes are reproduced.
+struct LinePoint {
+  double x = 0.0;
+  double y = 0.0;
+  std::string flag;   // "", "miss" or "cliff"
+  std::string value;  // printed beside a flagged point
+};
+
+std::string line_chart(const std::string &name, const std::string &accessible_name,
+                       const std::vector<LinePoint> &points, const std::string &x_title, const std::string &y_title,
+                       double y_max) {
+  if (points.size() < 2) {
+    return std::string();
+  }
+  double x_min = points.front().x;
+  double x_max = points.front().x;
+  for (const auto &point : points) {
+    x_min = std::min(x_min, point.x);
+    x_max = std::max(x_max, point.x);
+  }
+  if (x_max <= x_min) {
+    return std::string();
+  }
+  constexpr double kLeft = 67.6;
+  constexpr double kRight = 821.0;
+  constexpr double kTop = 24.0;
+  constexpr double kBottom = 196.0;
+  const auto x_for = [&](double value) { return kLeft + (value - x_min) / (x_max - x_min) * (kRight - kLeft); };
+  const auto y_for = [&](double value) { return kBottom - (y_max > 0.0 ? value / y_max : 0.0) * (kBottom - kTop); };
+
+  std::string out = item_label(name);
+  out += "<div class=\"chart-frame\"><svg viewBox=\"0 0 906 240\" role=\"img\" aria-label=\"" +
+         html_escape(accessible_name) + "\">";
+  for (int i = 1; i <= 4; ++i) {
+    const double y = y_for(y_max * 0.25 * i);
+    out += "<line class=\"gridline\" x1=\"67.6\" y1=\"" + number(y) + "\" x2=\"821.0\" y2=\"" + number(y) + "\"/>";
+  }
+  out += "<line class=\"axis\" x1=\"67.6\" y1=\"196\" x2=\"67.6\" y2=\"24\"/>";
+  out += "<polygon class=\"arrow\" points=\"67.6,14 63.7,24 71.5,24\"/>";
+  out += "<line class=\"axis\" x1=\"67.6\" y1=\"196\" x2=\"869.3\" y2=\"196\"/>";
+  out += "<polygon class=\"arrow\" points=\"879.0,196 869.3,192 869.3,200\"/>";
+  for (int i = 0; i <= 4; ++i) {
+    const double value = y_max * 0.25 * i;
+    out += "<text class=\"svg-label\" text-anchor=\"end\" x=\"59.9\" y=\"" + number(y_for(value) + 3.0) + "\">" +
+           html_escape(number(value)) + "</text>";
+  }
+  // One tick per sample, so the reader can see which timeouts were actually probed
+  // rather than a rounded scale that suggests points that were never measured.
+  for (const auto &point : points) {
+    const double x = x_for(point.x);
+    out += "<line class=\"tick\" x1=\"" + number(x) + "\" y1=\"196\" x2=\"" + number(x) + "\" y2=\"200\"/>";
+    out += "<text class=\"svg-label\" text-anchor=\"middle\" x=\"" + number(x) + "\" y=\"212\">" +
+           html_escape(number(point.x)) + "</text>";
+  }
+  std::string area = "<polygon class=\"area\" points=\"";
+  std::string line = "<polyline class=\"line\" points=\"";
+  for (const auto &point : points) {
+    const std::string pair = number(x_for(point.x)) + "," + number(y_for(point.y)) + " ";
+    area += pair;
+    line += pair;
+  }
+  area += number(x_for(points.back().x)) + ",196 " + number(x_for(points.front().x)) + ",196";
+  out += area + "\"/>";
+  out += line + "\"/>";
+  for (const auto &point : points) {
+    const std::string shape = point.flag.empty() ? "point" : "point-" + point.flag;
+    out += "<circle class=\"" + shape + "\" cx=\"" + number(x_for(point.x)) + "\" cy=\"" + number(y_for(point.y)) +
+           "\" r=\"" + (point.flag.empty() ? "4" : "5") + "\"/>";
+    if (!point.value.empty()) {
+      out += "<text class=\"svg-value\" text-anchor=\"middle\" x=\"" + number(x_for(point.x)) + "\" y=\"" +
+             number(y_for(point.y) - 10.0) + "\">" + html_escape(point.value) + "</text>";
+    }
+  }
+  if (!x_title.empty()) {
+    out += "<text class=\"svg-axis-title\" x=\"468.5\" y=\"232\" text-anchor=\"middle\">" + html_escape(x_title) +
+           "</text>";
+  }
+  if (!y_title.empty()) {
+    out +=
+        "<text class=\"svg-axis-title\" transform=\"rotate(-90,17.4,110)\" x=\"17.4\" y=\"110\" "
+        "text-anchor=\"middle\">" +
+        html_escape(y_title) + "</text>";
+  }
+  out += "</svg></div>";
+  return out;
+}
+
+// Two series over one x axis: T16 plots the HIGH and the LOW reference latency across
+// the pulse-width sweep so the two edges are read against each other. Same geometry as
+// line_chart, without the filled area -- two overlapping areas would hide one series.
+std::string dual_line_chart(const std::string &name, const std::string &accessible_name,
+                            const std::vector<std::pair<double, double>> &high,
+                            const std::vector<std::pair<double, double>> &low, const std::string &x_title,
+                            const std::string &y_title) {
+  if (high.size() < 2 && low.size() < 2) {
+    return std::string();
+  }
+  double x_min = 0.0;
+  double x_max = 0.0;
+  double y_max = 0.0;
+  bool first = true;
+  for (const auto *series : {&high, &low}) {
+    for (const auto &point : *series) {
+      x_min = first ? point.first : std::min(x_min, point.first);
+      x_max = first ? point.first : std::max(x_max, point.first);
+      y_max = first ? point.second : std::max(y_max, point.second);
+      first = false;
+    }
+  }
+  if (x_max <= x_min || y_max <= 0.0) {
+    return std::string();
+  }
+  // Headroom above the highest sample so the top series is not drawn on the frame edge.
+  y_max *= 1.15;
+  constexpr double kLeft = 67.6;
+  constexpr double kRight = 821.0;
+  constexpr double kTop = 24.0;
+  constexpr double kBottom = 196.0;
+  const auto x_for = [&](double value) { return kLeft + (value - x_min) / (x_max - x_min) * (kRight - kLeft); };
+  const auto y_for = [&](double value) { return kBottom - value / y_max * (kBottom - kTop); };
+
+  std::string out = item_label(name);
+  out +=
+      "<div class=\"chart-legend\"><span><span class=\"legend-dot\" style=\"background:#2563a6\"></span>"
+      "HIGH reference (measured)</span><span><span class=\"legend-dot\" style=\"background:#71879a\"></span>"
+      "LOW reference (derived)</span></div>";
+  out += "<div class=\"chart-frame\"><svg viewBox=\"0 0 906 240\" role=\"img\" aria-label=\"" +
+         html_escape(accessible_name) + "\">";
+  for (int i = 1; i <= 3; ++i) {
+    const double y = y_for(y_max / 4.0 * i);
+    out += "<line class=\"gridline\" x1=\"67.6\" y1=\"" + number(y) + "\" x2=\"821.0\" y2=\"" + number(y) + "\"/>";
+    out += "<text class=\"axis-text\" text-anchor=\"end\" x=\"59.9\" y=\"" + number(y + 3.0) + "\">" +
+           html_escape(number(y_max / 4.0 * i)) + "</text>";
+  }
+  out += "<line class=\"axis\" x1=\"67.6\" y1=\"196\" x2=\"67.6\" y2=\"24\"/>";
+  out += "<polygon class=\"axis-arrow\" points=\"67.6,14 63.7,24 71.5,24\"/>";
+  out += "<line class=\"axis\" x1=\"67.6\" y1=\"196\" x2=\"869.3\" y2=\"196\"/>";
+  out += "<polygon class=\"axis-arrow\" points=\"879.0,196 869.3,192 869.3,200\"/>";
+  for (const auto &point : high) {
+    const double x = x_for(point.first);
+    out += "<line class=\"tick\" x1=\"" + number(x) + "\" y1=\"196\" x2=\"" + number(x) + "\" y2=\"200\"/>";
+    out += "<text class=\"axis-text\" text-anchor=\"middle\" x=\"" + number(x) + "\" y=\"212\">" +
+           html_escape(number(point.first)) + "</text>";
+  }
+  for (int which = 0; which < 2; ++which) {
+    const std::vector<std::pair<double, double>> &series = which == 0 ? high : low;
+    if (series.size() < 2) {
+      continue;
+    }
+    std::string line = std::string("<polyline class=\"") + (which == 0 ? "line-high" : "line-low") + "\" points=\"";
+    for (const auto &point : series) {
+      line += number(x_for(point.first)) + "," + number(y_for(point.second)) + " ";
+    }
+    out += line + "\"/>";
+    for (const auto &point : series) {
+      out += std::string("<circle class=\"") + (which == 0 ? "point-high" : "point-low") + "\" cx=\"" +
+             number(x_for(point.first)) + "\" cy=\"" + number(y_for(point.second)) + "\" r=\"4\"/>";
+    }
+  }
+  if (!x_title.empty()) {
+    out +=
+        "<text class=\"axis-label\" x=\"468.5\" y=\"232\" text-anchor=\"middle\">" + html_escape(x_title) + "</text>";
+  }
+  if (!y_title.empty()) {
+    out +=
+        "<text class=\"axis-label\" transform=\"rotate(-90,17.4,110)\" x=\"17.4\" y=\"110\" "
+        "text-anchor=\"middle\">" +
+        html_escape(y_title) + "</text>";
+  }
+  out += "</svg></div>";
+  return out;
+}
+
+// A vertical column chart, in the geometry the approved previews use: 906x240 viewBox,
+// three gridlines with their values on the left, an arrowed axis pair, one column per
+// datum with its value above and its name below, and the quantity named under the x axis.
+//
+// The four SVG charts in the previews are NOT interchangeable with the horizontal
+// bar_chart() above them -- that one draws CSS divs. Production drew CSS bars for t14 and
+// t23, whose previews draw exactly this, so the numbers were right and the chart was not.
+struct ColumnDatum {
+  std::string label;
+  double value = 0.0;
+  bool measured = true;    // an unmeasured slot keeps its label and draws no column
+  bool highlight = false;  // the preview tints one column (t14's P95)
+};
+
+std::string column_chart(const std::string &name, const std::string &accessible_name,
+                         const std::vector<ColumnDatum> &data, const std::string &axis_title,
+                         const std::string &value_unit) {
+  bool any = false;
+  double low = 0.0;
+  double high = 0.0;
+  for (const auto &datum : data) {
+    if (!datum.measured) {
+      continue;
+    }
+    low = any ? std::min(low, datum.value) : datum.value;
+    high = any ? std::max(high, datum.value) : datum.value;
+    any = true;
+  }
+  if (!any) {
+    return std::string();
+  }
+  // The previews scale the y axis to the DATA, not to zero: these are latencies clustered
+  // in a narrow band, and a zero-based axis would flatten every column into one height.
+  // A flat series still needs a band, hence the fallback span.
+  const double span = high - low > 0.0 ? high - low : (high > 0.0 ? high * 0.1 : 1.0);
+  const double y_min = low - span * 0.15;
+  const double y_max = high + span * 0.25;
+
+  constexpr double kLeft = 70.0;
+  constexpr double kRight = 850.0;
+  constexpr double kTop = 24.0;
+  constexpr double kBottom = 196.0;
+  const auto y_for = [&](double value) {
+    const double t = (value - y_min) / (y_max - y_min);
+    return kBottom - t * (kBottom - kTop);
+  };
+
+  std::string out = item_label(name);
+  out += "<div class=\"chart-frame\"><svg viewBox=\"0 0 906 240\" role=\"img\" aria-label=\"" +
+         html_escape(accessible_name) + "\">";
+  for (int i = 0; i < 3; ++i) {
+    const double value = y_min + (y_max - y_min) * (0.1 + 0.4 * i);
+    const double y = y_for(value);
+    out += "<line class=\"gridline\" x1=\"70\" y1=\"" + number(y) + "\" x2=\"850\" y2=\"" + number(y) + "\"/>";
+    out += "<text class=\"svg-label\" text-anchor=\"end\" x=\"62\" y=\"" + number(y + 3.0) + "\">" +
+           html_escape(number(value)) + "</text>";
+  }
+  out += "<line class=\"axis\" x1=\"70\" y1=\"196\" x2=\"70\" y2=\"24\"/>";
+  out += "<polygon class=\"arrow\" points=\"70,14 66,24 74,24\"/>";
+  out += "<line class=\"axis\" x1=\"70\" y1=\"196\" x2=\"870\" y2=\"196\"/>";
+  out += "<polygon class=\"arrow\" points=\"880,196 870,192 870,200\"/>";
+
+  const double slot = (kRight - kLeft) / static_cast<double>(data.size());
+  const double width = std::min(54.0, slot * 0.42);
+  for (std::size_t i = 0; i < data.size(); ++i) {
+    const double centre = kLeft + slot * (static_cast<double>(i) + 0.5);
+    // The label is drawn even when the value is not: a window that reported no
+    // measurement must read as an empty slot, never as a zero.
+    out += "<text class=\"svg-label\" text-anchor=\"middle\" x=\"" + number(centre) + "\" y=\"212\">" +
+           html_escape(data[i].label) + "</text>";
+    if (!data[i].measured) {
+      continue;
+    }
+    const double top = y_for(data[i].value);
+    out += "<rect class=\"" + std::string(data[i].highlight ? "lat-bar-p95" : "lat-bar") + "\" x=\"" +
+           number(centre - width / 2.0) + "\" y=\"" + number(top) + "\" width=\"" + number(width) + "\" height=\"" +
+           number(kBottom - top) + "\"/>";
+    out += "<text class=\"svg-value\" text-anchor=\"middle\" x=\"" + number(centre) + "\" y=\"" + number(top - 6.0) +
+           "\">" + html_escape(number(data[i].value)) + "</text>";
+  }
+  if (!axis_title.empty()) {
+    out +=
+        "<text class=\"axis-title\" x=\"460\" y=\"232\" text-anchor=\"middle\">" + html_escape(axis_title) + "</text>";
+  }
+  out += "</svg></div>";
+  if (!value_unit.empty()) {
+    out += "<div class=\"scale-name\">" + html_escape(value_unit) + "</div>";
+  }
+  return out;
+}
+
 // Values are drawn against the largest of them, so the widest bar fills the track and the
 // others are read against it. A zero or negative maximum would divide by zero, and a bar
 // chart of nothing is not drawn at all.
 std::string bar_chart(const std::string &name, const std::vector<std::pair<std::string, std::string>> &legend,
-                      const std::vector<BarDatum> &data, const std::string &unit, const std::string &axis_caption) {
+                      const std::vector<BarDatum> &data, const std::string &unit) {
   if (data.empty()) {
     return std::string();
   }
@@ -258,9 +525,6 @@ std::string bar_chart(const std::string &name, const std::vector<std::pair<std::
          html_escape(number(top / 2.0)) + "</span><span>" + html_escape(number(top)) + " " + html_escape(unit) +
          "</span></div><span></span></div>";
   out += "</div>";
-  if (!axis_caption.empty()) {
-    out += "<p class=\"chart-axis-caption\">" + html_escape(axis_caption) + "</p>";
-  }
   return out;
 }
 
@@ -723,23 +987,26 @@ std::string kv_section(const std::string &label, const std::vector<std::pair<std
 // Tests whose approved layout already presents every detail line as a structured row.
 // Emitting the monospace block for these repeats the same values a second time, which is
 // exactly what review-plan 5.1.7 removes.
-bool details_are_structured(const std::string &test_id) {
-  static const std::set<std::string> structured = {"t01-device-compliance", "t02-control-inventory", "t04-no-streamon",
-                                                   "t05-pollerr-handling",  "t06-stream-cycles",     "t07-multi-buffer",
-                                                   "t08-buffer-overwrite",  "t09-buffer-recycling",  "t10-buffer-flags",
-                                                   "t11-memory-throughput"};
-  return structured.count(test_id) != 0;
-}
-
-std::string detail_lines(const TestResult &test) {
-  if (test.details.empty() || details_are_structured(test.id)) {
-    return std::string();
-  }
-  std::string out = "<div class=\"detail-list\">";
-  for (const auto &detail : test.details) {
-    out += html_escape(detail) + "\n";
-  }
-  return out + "</div>";
+// The raw monospace dump of test.details, printed after the last section.
+//
+// It renders nothing now, and the empty string is the whole point: every test has a
+// renderer that presents its details as a table, so the dump could only ever repeat what
+// the card already showed -- in unstyled `key: value` form, outside every <section>. No
+// approved preview contains it.
+//
+// It used to be suppressed by a hand-maintained allow-list of ten test ids. That list was
+// how the dump survived: it was written when the suite ended at t11, still named
+// "t09-buffer-recycling" after that id was renumbered away, and never gained an entry for
+// t03 or for anything from t12 up. Measured on the 2026-08-09 device run, nine cards
+// printed it -- t03, t13, t14, t16, t17, t19, t20, t23, t26 -- each duplicating its own
+// Test Configuration table. A list that must be edited whenever a test is added will be
+// out of date the first time someone forgets, so there is no list any more.
+//
+// The function is kept rather than deleted at every call site: `details` is still the
+// input those per-test renderers parse, and a future test genuinely without a renderer
+// should be caught by preview_structure_test, not silently handed a raw dump.
+std::string detail_lines(const TestResult & /*test*/) {
+  return std::string();
 }
 
 // The "Result" block: the verdict stated in prose, on non-PASS cards only.
@@ -831,9 +1098,14 @@ std::string render_t01(const TestResult &test) {
 
   // 5.1.7: structured rows first -- the approved order names the device before it
   // describes it. The raw enumeration stays in the machine-readable artifacts.
-  std::string out = kv_section("Device Evidence \xC2\xB7 Information", {{"Driver", detail_value(test, "driver")},
-                                                                        {"Card", detail_value(test, "card")},
-                                                                        {"Bus", detail_value(test, "bus")}});
+  // The three Device Evidence sections sit SIDE BY SIDE, not stacked: the approved preview
+  // wraps them in `.three-col`. Production emitted them as three full-width sections in a
+  // column, which is the same content on a visibly different page -- measured on the
+  // 2026-08-09 device run.
+  std::string out = "<div class=\"three-col\">";
+  out += kv_section("Device Evidence \xC2\xB7 Information", {{"Driver", detail_value(test, "driver")},
+                                                             {"Card", detail_value(test, "card")},
+                                                             {"Bus", detail_value(test, "bus")}});
   out += section_open("Device Evidence \xC2\xB7 Capability");
   out += "<dl class=\"capability-list\">";
   for (const auto &capability : capabilities) {
@@ -878,6 +1150,7 @@ std::string render_t01(const TestResult &test) {
     out += "</ul>";
   }
   out += section_close();
+  out += "</div>";  // .three-col
 
   // The "Recorded values" dump is gone: a raw list of every metric under a generic
   // heading is exactly the pattern the design forbids, and the three Device Evidence
@@ -1079,85 +1352,40 @@ std::string render_t03_timing_chart(const std::vector<T03Cycle> &cycles, bool ha
   if (cycles.empty()) {
     return std::string();
   }
+  // The approved preview draws this as a STACKED CSS BAR per cycle -- STREAMON then first
+  // frame, in time order, widths as a percentage of the slowest cycle -- not as an SVG.
+  // Production drew a plotted SVG with its own axis; same numbers, a chart the design
+  // never asked for.
   double max_total = 0.0;
   for (const auto &cycle : cycles) {
     max_total = std::max(max_total, cycle.total_ms);
   }
-  const std::vector<double> ticks = t03_axis_ticks(max_total);
-  const double axis_max = ticks.empty() ? 1.0 : ticks.back();
+  const double scale = max_total > 0.0 ? max_total : 1.0;
 
-  constexpr double left = 100.0;
-  constexpr double right = 780.0;
-  constexpr double plot_width = right - left;
-  constexpr double row_pitch = 42.0;
-  constexpr double bar_height = 24.0;
-  constexpr double top = 16.0;
-  const double axis_y = top + row_pitch * static_cast<double>(cycles.size()) - (row_pitch - bar_height) + 8.0;
-  const double height = axis_y + 34.0;
-  const auto x_for = [&](double ms) { return left + (axis_max > 0.0 ? ms / axis_max : 0.0) * plot_width; };
-
-  std::string out = item_label("Timing by cycle") + "<div class=\"chart-frame\">";
-  out += "<svg viewBox=\"0 0 906 " + number(height) +
-         "\" role=\"img\" aria-label=\"STREAMON and first-frame timing across " + std::to_string(cycles.size()) +
-         " cycles\">";
-
-  // Axis grid and ticks.
-  out += "<line class=\"chart-axis\" x1=\"" + number(left) + "\" y1=\"" + number(top) + "\" x2=\"" + number(left) +
-         "\" y2=\"" + number(axis_y) + "\"></line>";
-  for (double tick : ticks) {
-    const double x = x_for(tick);
-    out += "<line class=\"chart-grid\" x1=\"" + number(x) + "\" y1=\"" + number(top) + "\" x2=\"" + number(x) +
-           "\" y2=\"" + number(axis_y) + "\"></line>";
-    out += "<text class=\"axis-value\" x=\"" + number(x) + "\" y=\"" + number(axis_y + 18.0) +
-           "\" text-anchor=\"middle\">" + html_escape(format_duration_ms(tick)) + "</text>";
-  }
-
-  for (std::size_t i = 0; i < cycles.size(); ++i) {
-    const auto &cycle = cycles[i];
-    const double row_top = top + row_pitch * static_cast<double>(i);
-    const double streamon_width = std::max(1.0, x_for(cycle.streamon_ms) - left);
-    const double frame_width = std::max(1.0, x_for(cycle.total_ms) - x_for(cycle.streamon_ms));
-    out += "<text class=\"axis-caption\" x=\"" + number(left - 14.0) + "\" y=\"" + number(row_top + bar_height * 0.65) +
-           "\" text-anchor=\"end\">Cycle " + html_escape(cycle.number) + "</text>";
-    out += "<rect class=\"t03-phase-streamon\" x=\"" + number(left) + "\" y=\"" + number(row_top) + "\" width=\"" +
-           number(streamon_width) + "\" height=\"" + number(bar_height) + "\" rx=\"2\"></rect>";
-    out += "<rect class=\"t03-phase-frame\" x=\"" + number(left + streamon_width) + "\" y=\"" + number(row_top) +
-           "\" width=\"" + number(frame_width) + "\" height=\"" + number(bar_height) + "\" rx=\"2\"></rect>";
-    out += "<text class=\"t03-bar-label\" x=\"" + number(left + 12.0) + "\" y=\"" +
-           number(row_top + bar_height * 0.65) + "\">STREAMON " + html_escape(cycle.streamon) + "</text>";
-    const std::string frame_note = "+" + cycle.first_frame;
-    const double frame_note_x = left + streamon_width + frame_width + 8.0;
-    out += "<text class=\"t03-bar-note\" x=\"" + number(frame_note_x) + "\" y=\"" +
-           number(row_top + bar_height * 0.65) + "\">" + html_escape(frame_note) + "</text>";
-    std::string tail = "Total " + cycle.total;
-    if (has_pulses && !cycle.pulses.empty()) {
-      tail += " &middot; " + cycle.pulses + " pulses";
-    }
-    // The tail sits right-aligned at the plot's end, EXCEPT when the bar is short enough
-    // that the "+first-frame" note (which trails the bar, left-aligned) would run into it:
-    // an approximate 6.2px/character monospace-ish estimate is enough to decide that, and
-    // erring toward moving the tail is safer than an unreadable overlap.
-    const double frame_note_end = frame_note_x + static_cast<double>(frame_note.size()) * 6.2;
-    const double tail_start_if_right_aligned = left + plot_width + 8.0 - static_cast<double>(tail.size()) * 6.0;
-    if (tail_start_if_right_aligned > frame_note_end + 6.0) {
-      out += "<text class=\"t03-bar-note\" x=\"" + number(left + plot_width + 8.0) + "\" y=\"" +
-             number(row_top + bar_height * 0.65) + "\" text-anchor=\"end\">" + tail + "</text>";
-    } else {
-      // Not enough room to the right of the note: the tail moves to its own line just
-      // below the bar instead of overlapping it.
-      out += "<text class=\"t03-bar-note t03-bar-note--below\" x=\"" + number(left + 12.0) + "\" y=\"" +
-             number(row_top + bar_height + 12.0) + "\">" + tail + "</text>";
-    }
-  }
-  out += "</svg>";
-  // 5.3.4's legend: which colour is which phase.
+  std::string out = item_label("Timing by cycle");
   out +=
-      "<div class=\"legend\"><span class=\"legend-item\"><i class=\"legend-swatch t03-phase-streamon\"></i>"
-      "STREAMON</span><span class=\"legend-item\"><i class=\"legend-swatch t03-phase-frame\"></i>"
-      "First frame after STREAMON</span></div>";
+      "<div class=\"chart-legend\"><span><span class=\"legend-dot legend-streamon\"></span>STREAMON</span>"
+      "<span><span class=\"legend-dot legend-ff\"></span>First frame after STREAMON</span></div>";
+  out += "<div class=\"chart-frame\"><div class=\"stacked-chart\">";
+  for (const auto &cycle : cycles) {
+    // Each segment is measured against the same scale, so the two segments of one row add
+    // up to that row's total and rows stay comparable to each other.
+    const double streamon_pct = cycle.streamon_ms / scale * 100.0;
+    const double first_frame_pct = cycle.first_frame_ms / scale * 100.0;
+    out += "<div class=\"cycle-row\"><div class=\"cycle-label\">Cycle " + html_escape(cycle.number) +
+           "</div><div class=\"bar-track\">";
+    out += "<i class=\"bar-streamon\" style=\"width:" + number(streamon_pct) + "%\">" +
+           html_escape(number(cycle.streamon_ms)) + "</i>";
+    out += "<i class=\"bar-firstframe\" style=\"width:" + number(first_frame_pct) + "%\">" +
+           html_escape(number(cycle.first_frame_ms)) + "</i>";
+    out += "</div><div class=\"cycle-info\">" + html_escape(number(cycle.total_ms)) + "</div></div>";
+  }
+  out += "</div></div>";
+  out += "<div class=\"scale-name\">Cycle timing (milliseconds)";
+  if (has_pulses) {
+    out += " \xC2\xB7 trigger pulses shown in the table below";
+  }
   out += "</div>";
-  // No section_close(): the caller already opened Measurement and this chart is an item
-  // inside it, not a section of its own.
   return out;
 }
 
@@ -1458,75 +1686,49 @@ std::string render_t05(const TestResult &test) {
   return out;
 }
 
-// review-plan 5.6.5: a threshold-banded horizontal bar -- <70 fail, 70-89 warn, 90+ pass --
-// with the bar's own colour independent of the card's overall status: a run can PASS
-// overall while one phase's reliability sits in the warn band.
-std::string render_t06_reliability_bar(const std::string &label, double percent) {
-  const char *tone = percent >= 90.0 ? "good" : percent >= 70.0 ? "warn" : "bad";
-  std::ostringstream out;
-  out << "<div class=\"reliability-bar\"><span class=\"reliability-bar-label\">" << html_escape(label)
-      << "</span><div class=\"reliability-bar-track\"><div class=\"reliability-bar-fill reliability-" << tone
-      << "\" style=\"width:" << number(std::min(100.0, std::max(0.0, percent))) << "%\"></div></div>"
-      << "<span class=\"reliability-bar-value\">" << number(percent) << "%</span></div>";
-  return out.str();
-}
-
 // review-plan 5.6.6: the Open + STREAMON trend, in full-cycle order. Reproduces the
 // approved preview's coordinate scheme (t06-stream-cycles-preview.html): a 42-416 plot
 // area with the cycle number on x and the timing value on y.
-std::string render_t06_trend_chart(const std::vector<std::pair<int, double>> &points) {
-  if (points.empty()) {
+// The approved preview shows CYCLE COMPLETION RATE, not a timing trend: one bar per
+// phase (full, rapid), width = share of attempted cycles that completed, coloured by the
+// same thresholds the verdict uses. Production plotted an SVG of per-cycle duration --
+// different data answering a question the card never asks.
+std::string render_t06_reliability_chart(const std::vector<std::pair<std::string, std::pair<double, double>>> &phases) {
+  bool any = false;
+  for (const auto &phase : phases) {
+    if (phase.second.second > 0.0) {
+      any = true;
+    }
+  }
+  if (!any) {
     return std::string();
   }
-  double max_value = 0.0;
-  for (const auto &point : points) {
-    max_value = std::max(max_value, point.second);
-  }
-  const std::vector<double> ticks = t03_axis_ticks(max_value);
-  const double axis_max = ticks.empty() ? 1.0 : ticks.back();
-  constexpr double left = 42.0;
-  constexpr double right = 416.0;
-  constexpr double top = 22.0;
-  constexpr double bottom = 132.0;
-  const auto x_for = [&](int cycle) {
-    if (points.size() == 1) {
-      return left;
+  std::string out = item_label("Cycle reliability");
+  out +=
+      "<div class=\"chart-legend\">"
+      "<span><span class=\"legend-dot\" style=\"background:#c55757\"></span>Fail &lt;70%</span>"
+      "<span><span class=\"legend-dot\" style=\"background:#b8860b\"></span>Warn 70\xE2\x80\x93"
+      "89%</span>"
+      "<span><span class=\"legend-dot\" style=\"background:#4b9b69\"></span>Pass \xE2\x89\xA5"
+      "90%</span></div>";
+  out += "<div class=\"chart-frame\"><div class=\"rel-chart\">";
+  for (const auto &phase : phases) {
+    const double done = phase.second.first;
+    const double attempted = phase.second.second;
+    if (attempted <= 0.0) {
+      continue;
     }
-    return left + (right - left) * static_cast<double>(cycle - points.front().first) /
-                      static_cast<double>(points.back().first - points.front().first);
-  };
-  const auto y_for = [&](double value) { return bottom - (axis_max > 0.0 ? value / axis_max : 0.0) * (bottom - top); };
-
-  std::string out =
-      "<div class=\"chart-frame\"><div class=\"metric-chart-title\">Open + STREAMON by full cycle "
-      "<span>ms</span></div><svg viewBox=\"0 0 906 180\" role=\"img\" aria-label=\"Open and STREAMON "
-      "timing by full cycle\">";
-  for (double tick : ticks) {
-    const double y = y_for(tick);
-    out += "<line class=\"chart-grid\" x1=\"" + number(left) + "\" y1=\"" + number(y) + "\" x2=\"" + number(right) +
-           "\" y2=\"" + number(y) + "\"></line>";
-    out += "<text class=\"axis-value\" text-anchor=\"end\" x=\"" + number(left - 8.0) + "\" y=\"" + number(y + 3.0) +
-           "\">" + html_escape(number(tick)) + "</text>";
+    const double pct = done / attempted * 100.0;
+    // The bar keeps a visible stub at 0% so an all-failed phase reads as a measured zero
+    // rather than as a missing row.
+    const double width = pct < 4.0 ? 4.0 : pct;
+    const char *tone = pct >= 90.0 ? "bar-pass" : (pct >= 70.0 ? "bar-warn" : "bar-fail");
+    out += "<div class=\"rel-row\"><div class=\"rel-label\">" + html_escape(phase.first) +
+           "</div><div class=\"bar-track\"><div class=\"" + tone + "\" style=\"width:" + number(width) + "%\">" +
+           number(pct) + "%</div></div><div class=\"rel-info\">" + number(done) + "/" + number(attempted) +
+           "</div></div>";
   }
-  out += "<line class=\"chart-axis\" x1=\"" + number(left) + "\" y1=\"" + number(bottom) + "\" x2=\"" + number(right) +
-         "\" y2=\"" + number(bottom) + "\"></line>";
-  out += "<line class=\"chart-axis\" x1=\"" + number(left) + "\" y1=\"" + number(top) + "\" x2=\"" + number(left) +
-         "\" y2=\"" + number(bottom) + "\"></line>";
-  std::string polyline_points;
-  for (const auto &point : points) {
-    const double x = x_for(point.first);
-    const double y = y_for(point.second);
-    if (!polyline_points.empty()) {
-      polyline_points += " ";
-    }
-    polyline_points += number(x) + "," + number(y);
-  }
-  out += "<polyline class=\"t06-trend-line\" points=\"" + polyline_points + "\"></polyline><g>";
-  for (const auto &point : points) {
-    out += "<circle class=\"t06-trend-point\" cx=\"" + number(x_for(point.first)) + "\" cy=\"" +
-           number(y_for(point.second)) + "\" r=\"3\"></circle>";
-  }
-  out += "</g></svg></div>";
+  out += "</div></div><div class=\"scale-name\">Cycle completion rate (percent)</div>";
   return out;
 }
 
@@ -1539,41 +1741,22 @@ std::string render_t06(const TestResult &test) {
   // above them, so the card said everything twice.
   std::string out = measurement_open();
 
-  // 5.6.5: the threshold-banded reliability bars, once per phase.
-  out += item_label("Cycle reliability");
+  // 5.6.5: the approved "Cycle reliability" chart -- both phases in one framed chart,
+  // width = completion share, colour banded by the same thresholds the verdict uses.
   const MetricValue *full_completed = find_metric(test, "full_cycles_success");
   const MetricValue *full_configured = find_metric(test, "full_cycles_attempted");
-  if (full_completed != nullptr && full_configured != nullptr && full_configured->value > 0.0) {
-    out += render_t06_reliability_bar("Full cycles", full_completed->value / full_configured->value * 100.0);
-  }
   const MetricValue *rapid_completed = find_metric(test, "rapid_cycles_ok");
   const MetricValue *rapid_configured = find_metric(test, "rapid_cycles_attempted") != nullptr
                                             ? find_metric(test, "rapid_cycles_attempted")
                                             : find_metric(test, "rapid_cycles_total");
-  if (rapid_completed != nullptr && rapid_configured != nullptr && rapid_configured->value > 0.0) {
-    out += render_t06_reliability_bar("Rapid cycles", rapid_completed->value / rapid_configured->value * 100.0);
+  std::vector<std::pair<std::string, std::pair<double, double>>> phases;
+  if (full_completed != nullptr && full_configured != nullptr) {
+    phases.push_back({"Full cycles", {full_completed->value, full_configured->value}});
   }
-
-  // 5.6.6: the trend chart, from the run's own per-cycle timing detail line
-  // ("full_cycle_timing: cycle|value|cycle|value|..."), in full-cycle order.
-  const std::string timing_line = detail_value(test, "full_cycle_timing");
-  if (!timing_line.empty()) {
-    std::vector<std::pair<int, double>> points;
-    std::vector<std::string> fields;
-    std::size_t start = 0;
-    while (start <= timing_line.size()) {
-      const std::size_t bar = timing_line.find('|', start);
-      fields.push_back(timing_line.substr(start, bar == std::string::npos ? std::string::npos : bar - start));
-      if (bar == std::string::npos) {
-        break;
-      }
-      start = bar + 1;
-    }
-    for (std::size_t i = 0; i + 1 < fields.size(); i += 2) {
-      points.push_back({std::atoi(fields[i].c_str()), std::strtod(fields[i + 1].c_str(), nullptr)});
-    }
-    out += render_t06_trend_chart(points);
+  if (rapid_completed != nullptr && rapid_configured != nullptr) {
+    phases.push_back({"Rapid cycles", {rapid_completed->value, rapid_configured->value}});
   }
+  out += render_t06_reliability_chart(phases);
 
   // 5.6.7: the renamed timing fields. "Open + STREAMON" because the measurement spans
   // device open, buffer setup and STREAMON, not STREAMON alone; T06's own capture figures
@@ -1723,134 +1906,6 @@ std::vector<T07Request> t07_requests(const TestResult &test) {
   return requests;
 }
 
-// review-plan 5.7.6: requested (reference line) vs allocated (bar) buffer counts, per
-// request. Distinct geometry for the two series, not just distinct colour.
-std::string render_t07_requested_vs_allocated(const std::vector<T07Request> &requests) {
-  if (requests.empty()) {
-    return std::string();
-  }
-  int max_value = 1;
-  for (const auto &request : requests) {
-    max_value = std::max({max_value, request.requested, request.allocated});
-  }
-  constexpr double left = 46.0;
-  constexpr double right = 425.0;
-  constexpr double top = 20.0;
-  constexpr double bottom = 160.0;
-  const double plot_width = right - left;
-  const double step = requests.size() > 1 ? plot_width / static_cast<double>(requests.size()) : plot_width;
-  const auto y_for = [&](double value) { return bottom - (value / static_cast<double>(max_value)) * (bottom - top); };
-
-  std::string out = item_label("Latency by buffer count") +
-                    "<div class=\"chart-frame\"><svg viewBox=\"0 0 906 205\" role=\"img\" "
-                    "aria-label=\"Requested versus allocated buffers\">";
-  out += "<line class=\"chart-axis\" x1=\"" + number(left) + "\" y1=\"" + number(bottom) + "\" x2=\"" + number(right) +
-         "\" y2=\"" + number(bottom) + "\"></line>";
-  out += "<line class=\"chart-axis\" x1=\"" + number(left) + "\" y1=\"" + number(top) + "\" x2=\"" + number(left) +
-         "\" y2=\"" + number(bottom) + "\"></line>";
-  std::string line_points;
-  for (std::size_t i = 0; i < requests.size(); ++i) {
-    const double x = left + step * (static_cast<double>(i) + 0.5);
-    const double bar_width = step * 0.5;
-    const double bar_top = y_for(static_cast<double>(requests[i].allocated));
-    // Allocated: a bar (5.7.6 rule 4 -- distinct geometry, not just colour).
-    out += "<rect class=\"t07-allocated-bar\" x=\"" + number(x - bar_width / 2.0) + "\" y=\"" + number(bar_top) +
-           "\" width=\"" + number(bar_width) + "\" height=\"" + number(bottom - bar_top) + "\" rx=\"2\"></rect>";
-    if (!line_points.empty()) {
-      line_points += " ";
-    }
-    line_points += number(x) + "," + number(y_for(static_cast<double>(requests[i].requested)));
-    out += "<text class=\"axis-value\" text-anchor=\"middle\" x=\"" + number(x) + "\" y=\"" + number(bottom + 14.0) +
-           "\">" + html_escape(number(requests[i].requested)) + "</text>";
-  }
-  // Requested: a reference line (5.7.6 rule 1/4), separate geometry from the bars.
-  out += "<polyline class=\"t07-requested-line\" points=\"" + line_points + "\"></polyline>";
-  out +=
-      "</svg><div class=\"legend\"><span class=\"legend-item\"><i class=\"legend-swatch "
-      "t07-legend-requested\"></i>Requested</span><span class=\"legend-item\"><i class=\"legend-swatch "
-      "t07-legend-allocated\"></i>Allocated</span></div></div>";
-  return out;
-}
-
-// review-plan 5.7.7: latency grouped by the ACTUAL allocated depth, not by the requested
-// count -- repeats that resolved to the same depth collapse into one point.
-std::string render_t07_latency_by_depth(const std::vector<T07Request> &requests) {
-  if (requests.empty()) {
-    return std::string();
-  }
-  std::map<int, std::vector<double>> by_depth;
-  std::vector<int> order;
-  for (const auto &request : requests) {
-    if (by_depth.find(request.allocated) == by_depth.end()) {
-      order.push_back(request.allocated);
-    }
-    by_depth[request.allocated].push_back(request.mean_ms);
-  }
-  double max_ms = 0.0;
-  for (const auto &entry : by_depth) {
-    for (double value : entry.second) {
-      max_ms = std::max(max_ms, value);
-    }
-  }
-  const std::vector<double> ticks = t03_axis_ticks(max_ms);
-  const double axis_max = ticks.empty() ? 1.0 : ticks.back();
-  constexpr double left = 46.0;
-  constexpr double right = 425.0;
-  constexpr double top = 20.0;
-  constexpr double bottom = 160.0;
-  const double step = order.size() > 1 ? (right - left) / static_cast<double>(order.size()) : (right - left);
-  const auto y_for = [&](double ms) { return bottom - (axis_max > 0.0 ? ms / axis_max : 0.0) * (bottom - top); };
-
-  std::string out =
-      "<div class=\"chart-frame\"><svg viewBox=\"0 0 906 205\" role=\"img\" "
-      "aria-label=\"Capture latency by allocated buffer depth\">";
-  for (double tick : ticks) {
-    const double y = y_for(tick);
-    out += "<line class=\"chart-grid\" x1=\"" + number(left) + "\" y1=\"" + number(y) + "\" x2=\"" + number(right) +
-           "\" y2=\"" + number(y) + "\"></line>";
-    out += "<text class=\"axis-value\" text-anchor=\"end\" x=\"" + number(left - 9.0) + "\" y=\"" + number(y + 3.0) +
-           "\">" + html_escape(number(tick)) + "</text>";
-  }
-  out += "<line class=\"chart-axis\" x1=\"" + number(left) + "\" y1=\"" + number(bottom) + "\" x2=\"" + number(right) +
-         "\" y2=\"" + number(bottom) + "\"></line>";
-  out += "<line class=\"chart-axis\" x1=\"" + number(left) + "\" y1=\"" + number(top) + "\" x2=\"" + number(left) +
-         "\" y2=\"" + number(bottom) + "\"></line>";
-  for (std::size_t i = 0; i < order.size(); ++i) {
-    const auto &values = by_depth[order[i]];
-    double min_v = values.front();
-    double max_v = values.front();
-    double sum_v = 0.0;
-    for (double v : values) {
-      min_v = std::min(min_v, v);
-      max_v = std::max(max_v, v);
-      sum_v += v;
-    }
-    const double mean_v = sum_v / static_cast<double>(values.size());
-    const double x = left + step * (static_cast<double>(i) + 0.5);
-    if (max_v > min_v) {
-      out += "<line class=\"t07-depth-range\" x1=\"" + number(x) + "\" y1=\"" + number(y_for(min_v)) + "\" x2=\"" +
-             number(x) + "\" y2=\"" + number(y_for(max_v)) + "\"></line>";
-    }
-    out += "<circle class=\"t07-depth-point\" cx=\"" + number(x) + "\" cy=\"" + number(y_for(mean_v)) +
-           "\" r=\"4\"></circle>";
-    out += "<text class=\"axis-value\" text-anchor=\"middle\" x=\"" + number(x) + "\" y=\"" + number(bottom + 14.0) +
-           "\">" + html_escape(number(static_cast<double>(order[i]))) + "</text>";
-    // review-plan 5.7.7: the mean and observed range are printed next to the point, not
-    // left for the reader to read off the axis.
-    out += "<text class=\"t07-depth-label\" x=\"" + number(x + 10.0) + "\" y=\"" + number(y_for(mean_v) - 6.0) +
-           "\">Mean " + html_escape(number(mean_v)) + "ms</text>";
-    if (max_v > min_v) {
-      out += "<text class=\"t07-depth-label\" x=\"" + number(x + 10.0) + "\" y=\"" + number(y_for(mean_v) + 10.0) +
-             "\">Range " + html_escape(number(min_v)) + "-" + html_escape(number(max_v)) + "ms</text>";
-    }
-  }
-  out +=
-      "</svg><div class=\"legend\"><span class=\"legend-item\"><i class=\"legend-swatch "
-      "t07-legend-range\"></i>Observed range</span><span class=\"legend-item\"><i class=\"legend-swatch "
-      "t07-legend-mean\"></i>Mean</span></div></div>";
-  return out;
-}
-
 std::string render_t07(const TestResult &test) {
   const std::vector<T07Request> requests = t07_requests(test);
 
@@ -1889,11 +1944,15 @@ std::string render_t07(const TestResult &test) {
            " frames captured</strong></p>";
   }
 
-  out += render_t07_requested_vs_allocated(requests);
-  out += render_t07_latency_by_depth(requests);
+  // No chart: T07's approved preview has none in any of its three cards. Production drew
+  // two SVGs here (requested-vs-allocated and latency-by-depth); both said what this
+  // table already states per row.
 
-  // 5.7.5: the five approved columns, one row per request.
-  out += item_label("Aggregate");
+  // 5.7.5: the five approved columns, one row per request. "Latency by buffer count"
+  // labels THIS table in the preview -- it was attached to the removed chart, and the
+  // table was labelled "Aggregate", a name the preview gives to the summary rows further
+  // down. Both labels now sit where the design puts them.
+  out += item_label("Latency by buffer count");
   out += table_open({"Requested", "Allocated", "Captured", "Mean latency", "Detail"});
   if (requests.empty()) {
     out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable", "Unavailable"});
@@ -1906,10 +1965,12 @@ std::string render_t07(const TestResult &test) {
   }
   out += table_close();
 
-  // The summary rows continue under the SAME "Aggregate" label: a second item_label here
-  // printed "Aggregate" twice, and the approved preview shows one. "Mean latency" is
-  // averaged from the per-request detail lines because the runner records no aggregate
-  // latency metric for this test.
+  // "Aggregate" labels THESE summary rows. The preview shows two item labels on this card
+  // -- "Latency by buffer count" over the per-request table above, "Aggregate" here -- and
+  // for a while both tables shared one label, because the first was attached to a chart
+  // that is not in the preview at all. "Mean latency" is averaged from the per-request
+  // detail lines because the runner records no aggregate latency metric for this test.
+  out += item_label("Aggregate");
   out += table_open({"Metric", "Type", "Unit", "Value", "Detail"});
   out += row({"Buffer counts tested", type_word("int"), unit_word(""),
               requests.empty() ? std::string("Unavailable") : std::to_string(requests.size()), "\xE2\x80\x94"});
@@ -2027,46 +2088,6 @@ std::vector<T08Variant> t08_variants(const TestResult &test) {
   return variants;
 }
 
-// review-plan 5.8.5: the two variants' trigger load, compared -- explicitly NOT on the
-// same linear axis as available-frame counts, because a trigger *rate* and a frame *count*
-// are different quantities.
-// The trigger rate out of a load label like "100 at 10/s": the number right before "/s".
-double t08_rate_of(const std::string &load_label) {
-  const std::size_t slash = load_label.find("/s");
-  if (slash == std::string::npos) {
-    return 0.0;
-  }
-  std::size_t start = slash;
-  while (start > 0 &&
-         (std::isdigit(static_cast<unsigned char>(load_label[start - 1])) || load_label[start - 1] == '.')) {
-    --start;
-  }
-  return std::strtod(load_label.substr(start, slash - start).c_str(), nullptr);
-}
-
-std::string render_t08_saturation_load(const std::vector<T08Variant> &variants) {
-  if (variants.empty()) {
-    return std::string();
-  }
-  double max_rate = 0.0;
-  for (const auto &variant : variants) {
-    max_rate = std::max(max_rate, t08_rate_of(variant.load_label));
-  }
-  std::string out = item_label("Saturation by variant") + "<div class=\"chart-frame\">";
-  for (const auto &variant : variants) {
-    const double width = max_rate > 0.0 ? t08_rate_of(variant.load_label) / max_rate * 100.0 : 0.0;
-    out += "<div class=\"load-row\"><strong>" + html_escape(variant.name) +
-           "</strong><div class=\"load-track\">"
-           "<div class=\"load-bar\" style=\"width:" +
-           number(width) + "%\"></div></div><div class=\"load-value\">" + html_escape(variant.load_label) +
-           "</div></div>";
-  }
-  out +=
-      "<p class=\"interpretation\">Each variant applied approximately 10 seconds of trigger load without "
-      "dequeuing.</p></div>";
-  return out;
-}
-
 // review-plan 5.8.6: the actual allocated buffer slots, ERROR/READY labelled in TEXT (not
 // colour alone), with the error slot naming its buffer index.
 std::string render_t08_queue_after_saturation(const std::vector<T08Variant> &variants,
@@ -2098,10 +2119,13 @@ std::string render_t08(const TestResult &test) {
   const std::vector<T08Variant> variants = t08_variants(test);
 
   std::string out = measurement_open();
-  out += render_t08_saturation_load(variants);
   out += render_t08_queue_after_saturation(variants, value_of_any(test, {"frames_available_A", "allocated_buffers"}));
 
   // 5.8.7: the six approved columns, observed/allocated for available and error-flagged.
+  // "Saturation by variant" labels this TABLE. It used to label a bar chart of trigger
+  // rate per variant, drawn just above it -- but T08's approved preview has no chart in
+  // any of its three cards, and puts these six columns under that heading instead.
+  out += item_label("Saturation by variant");
   out += table_open({"Variant", "Trigger load", "Allocated", "Available", "Error flagged", "Detail"});
   if (variants.empty()) {
     out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable", "Unavailable", "Unavailable"});
@@ -2539,9 +2563,6 @@ std::string render_t10(const TestResult &test) {
 
   // 5.10.8: the boundary against T21. A declared clock type is metadata the driver reports;
   // it is not evidence that timestamp VALUES never went backwards.
-  out +=
-      "<p class=\"boundary-note\">Declared clock type describes buffer metadata. Timestamp value monotonicity is "
-      "evaluated separately by T21.</p>";
   return out;
 }
 
@@ -2635,9 +2656,6 @@ std::string render_t11(const TestResult &test) {
   // buffer they were measured against afterwards, while the computation order below is
   // fixed (the chart reads figures the Aggregate block derives).
   std::string buffer_part = kv_items("Image buffer", buffer_rows);
-  buffer_part +=
-      "<p class=\"boundary-note\">Allocation overhead is driver, DMA or alignment padding. It does not mean the "
-      "sensor produced a larger frame.</p>";
 
   // 5.11.5: the derived end-user figures. Deliberately named per BUFFER, never "frames/s"
   // or FPS: this is how fast the CPU can copy a buffer, not how fast the camera delivers.
@@ -2774,10 +2792,6 @@ std::string render_t12(const TestResult &test) {
   const std::string tout_val = detail_value(test, "capture_timeout");
   const std::string buf_val = detail_value(test, "buffer_count");
 
-  out +=
-      "<p class=\"boundary-note\">DMA-BUF CPU access is validated inside SYNC_START / SYNC_END. Matching without sync "
-      "describes this run only and is not a portability guarantee.</p>";
-
   out += verdict_section(test, {{"Synchronized match", "frames", "mismatches", "Bytes identical after SYNC"},
                                 {"SYNC ioctl errors", "non_monotonic", "mismatches", "DMA_BUF_IOCTL_SYNC failures"},
                                 {"Capture failures", "delta_max", "sync_max_ms", nullptr}});
@@ -2812,16 +2826,34 @@ std::string render_t13(const TestResult &test) {
     // spelling the UTF-8 arrow inside R"RX(...)" looks for those characters literally and
     // never matches. Anything between the timeout and the ratio is skipped instead.
     const std::regex probe(R"RX((?:coarse|bsearch):\s*(\d+)ms[^0-9]+(\d+)/(\d+))RX");
-    std::vector<BarDatum> sweep;
+    std::vector<LinePoint> sweep;
     for (const std::string &detail : test.details) {
       std::smatch parts;
       if (std::regex_search(detail, parts, probe)) {
         const double hit = std::strtod(parts[2].str().c_str(), nullptr);
         const double of = std::strtod(parts[3].str().c_str(), nullptr);
-        sweep.push_back({parts[1].str() + " ms", of > 0.0 ? hit / of * 100.0 : 0.0, "ok"});
+        LinePoint point;
+        point.x = std::strtod(parts[1].str().c_str(), nullptr);
+        point.y = of > 0.0 ? hit / of * 100.0 : 0.0;
+        // The two decisive samples are marked, as in the preview: the first timeout that
+        // missed a frame, and the lowest one that captured every frame.
+        if (first_miss != nullptr && point.x == first_miss->value) {
+          point.flag = "miss";
+          point.value = parts[2].str() + "/" + parts[3].str();
+        } else if (cliff != nullptr && point.x == cliff->value) {
+          point.flag = "cliff";
+          point.value = parts[2].str() + "/" + parts[3].str();
+        }
+        sweep.push_back(point);
       }
     }
-    out += bar_chart("Capture success by poll timeout", {{"Capture success", "ok"}}, sweep, "percent", "");
+    // Sorted by timeout: the runner writes a coarse pass and then a binary search, so the
+    // detail lines arrive out of order and a line drawn in that order zig-zags backwards.
+    std::sort(sweep.begin(), sweep.end(), [](const LinePoint &lhs, const LinePoint &rhs) { return lhs.x < rhs.x; });
+    // The preview draws this as a LINE over the swept timeout, not as one bar per probe:
+    // the question is where success collapses, which is a shape, not a set of magnitudes.
+    out += line_chart("Capture success by poll timeout", "Capture success by poll timeout", sweep,
+                      "Poll timeout (milliseconds)", "Capture success (percent)", 100.0);
 
     // The three timeouts that bound the decision, on one scale.
     std::vector<BarDatum> budget;
@@ -2832,7 +2864,7 @@ std::string render_t13(const TestResult &test) {
         budget.push_back({entry.first, metric->value, "thr"});
       }
     }
-    out += bar_chart("Timeout budget", {{"Poll timeout", "thr"}}, budget, "ms", "");
+    out += bar_chart("Timeout budget", {{"Poll timeout", "thr"}}, budget, "ms");
   }
 
   out += item_label("Round evidence");
@@ -2900,10 +2932,6 @@ std::string render_t13(const TestResult &test) {
                     {"Backend memory",
                      detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
 
-  if (!test.notes.empty()) {
-    out += "<p class=\"boundary-note\">" + html_escape(test.notes.front()) + "</p>";
-  }
-
   return out;
 }
 
@@ -2913,19 +2941,25 @@ std::string render_t14(const TestResult &test) {
     out += result_block(test);
   }
 
-  // Approved chart: the latency statistics of one capture session, read against the max.
+  // Approved chart: the latency statistics of one capture session, as the VERTICAL COLUMN
+  // chart the preview draws -- four columns on a data-scaled axis, P95 tinted apart.
+  // Production drew horizontal CSS bars here, which is a different chart of the same four
+  // numbers.
   {
-    std::vector<BarDatum> bars;
+    std::vector<ColumnDatum> columns;
     for (const auto &entry : {std::make_pair("Min", "latency_min"), std::make_pair("Mean", "latency_mean"),
                               std::make_pair("P95", "latency_p95"), std::make_pair("Max", "latency_max")}) {
       const MetricValue *metric = find_metric(test, entry.second);
-      if (metric != nullptr) {
-        bars.push_back({entry.first, metric->value, "mean"});
-      }
+      ColumnDatum column;
+      column.label = entry.first;
+      column.measured = metric != nullptr;
+      column.value = metric != nullptr ? metric->value : 0.0;
+      column.highlight = std::string(entry.first) == "P95";
+      columns.push_back(column);
     }
     out += measurement_open();
-    out +=
-        bar_chart("Latency distribution", {{"Capture latency", "mean"}}, bars, "ms", "Capture latency (milliseconds)");
+    out += column_chart("Latency distribution", "Capture latency distribution", columns,
+                        "Capture latency (milliseconds)", "");
 
     // Approved chart: how much of the configured capture timeout the slowest frame
     // actually used. A latency figure alone does not say whether the run was close to
@@ -2940,7 +2974,7 @@ std::string render_t14(const TestResult &test) {
       headroom.push_back({"Remaining headroom", std::max(0.0, timeout_ms - worst->value), "ok"});
     }
     out += bar_chart("Capture timeout headroom", {{"Observed", "max"}, {"Timeout", "thr"}, {"Headroom", "ok"}},
-                     headroom, "ms", "");
+                     headroom, "ms");
   }
 
   // The trigger-to-DQBUF path used to be drawn as a three-step sequence diagram. Those
@@ -2961,10 +2995,6 @@ std::string render_t14(const TestResult &test) {
        {"Inter-sample delta variation", "latency_jitter", "latency_stddev_ms", "Between consecutive samples"},
        {"Min-max spread", "latency_max", "latency_max_ms", "Complete observed range"}});
   out += section_close();
-
-  if (!test.notes.empty()) {
-    out += "<p class=\"boundary-note\">" + html_escape(test.notes.front()) + "</p>";
-  }
 
   out += verdict_section(
       test, {{"Capture reliability", "latency_mean", "latency_mean_ms", "Triggers that delivered a frame"},
@@ -2993,8 +3023,7 @@ std::string render_t15(const TestResult &test) {
       }
     }
     out += measurement_open();
-    out += bar_chart("Latency by capture mode", {{"Non-blocking", "nonblock"}, {"Blocking", "block"}}, bars, "ms",
-                     "Capture latency (milliseconds)");
+    out += bar_chart("Latency by capture mode", {{"Non-blocking", "nonblock"}, {"Blocking", "block"}}, bars, "ms");
   }
 
   // Mode Evidence Table
@@ -3053,10 +3082,6 @@ std::string render_t15(const TestResult &test) {
 
   // Test Configuration
 
-  out +=
-      "<p class=\"boundary-note\">PASS means both capture methods produced samples. Non-blocking latency is not "
-      "automatically better when its CPU spin cost is high.</p>";
-
   out += verdict_section(
       test, {{"Non-block captures", "nonblock_latency_mean", "nonblock_mean_ms", nullptr},
              {"Blocking captures", "block_latency_mean", "block_mean_ms", nullptr},
@@ -3106,21 +3131,30 @@ std::string render_t16(const TestResult &test) {
   // Approved chart: the HIGH and LOW reference latency across the whole sweep, so the two
   // edges can be read against each other rather than one width at a time.
   {
-    std::vector<BarDatum> bars;
+    // The preview plots the two references as LINES over the swept pulse width, not as a
+    // column of bars: the point is how each edge behaves as the width changes, and the
+    // pairing at each width, which a bar list does not show.
+    std::vector<std::pair<double, double>> high_series;
+    std::vector<std::pair<double, double>> low_series;
     for (const auto &metric : test.metrics) {
       const std::string high("lat_high_avg_");
-      if (metric.name.rfind(high, 0) == 0) {
-        bars.push_back({metric.name.substr(high.size()) + " HIGH", metric.value, "high"});
-      }
-    }
-    for (const auto &metric : test.metrics) {
       const std::string low("lat_low_avg_");
-      if (metric.name.rfind(low, 0) == 0) {
-        bars.push_back({metric.name.substr(low.size()) + " LOW", metric.value, "low"});
+      if (metric.name.rfind(high, 0) == 0) {
+        high_series.push_back({std::strtod(metric.name.substr(high.size()).c_str(), nullptr), metric.value});
+      } else if (metric.name.rfind(low, 0) == 0) {
+        low_series.push_back({std::strtod(metric.name.substr(low.size()).c_str(), nullptr), metric.value});
       }
     }
-    out += bar_chart("Edge evidence across the sweep",
-                     {{"HIGH reference (measured)", "high"}, {"LOW reference (derived)", "low"}}, bars, "ms", "");
+    // Metric order follows the recorded run, not the sweep, so the widths have to be put
+    // back in order before they are joined by a line.
+    const auto by_width = [](const std::pair<double, double> &lhs, const std::pair<double, double> &rhs) {
+      return lhs.first < rhs.first;
+    };
+    std::sort(high_series.begin(), high_series.end(), by_width);
+    std::sort(low_series.begin(), low_series.end(), by_width);
+    out +=
+        dual_line_chart("Edge evidence across the sweep", "HIGH and LOW reference latency across the pulse width sweep",
+                        high_series, low_series, "Pulse width (microseconds)", "Reference latency (milliseconds)");
   }
 
   out += item_label("Edge evidence");
@@ -3141,10 +3175,6 @@ std::string render_t16(const TestResult &test) {
   out += section_close();
 
   // Test Configuration
-
-  out +=
-      "<p class=\"boundary-note\">A GPIO pulse width is swept independently from the profile's nominal pulse width. "
-      "The result describes the tested device and trigger path.</p>";
 
   out += verdict_section(test, {{"Sweep reliability", "hits_20ms", "hits_13ms", "Captures across every pulse width"},
                                 {"Samples per width", "hits_5ms", "hits_10ms", nullptr}});
@@ -3190,8 +3220,8 @@ std::string render_t17(const TestResult &test) {
       }
     }
     out += bar_chart("Capture latency by pixel format", {{"Mean latency", "mean"}, {"Maximum latency", "max"}}, latency,
-                     "ms", "");
-    out += bar_chart("Memcpy throughput by pixel format", {{"Throughput", "thr"}}, throughput, "MB/s", "");
+                     "ms");
+    out += bar_chart("Memcpy throughput by pixel format", {{"Throughput", "thr"}}, throughput, "MB/s");
   }
 
   out += item_label("Format evidence");
@@ -3237,10 +3267,6 @@ std::string render_t17(const TestResult &test) {
   out += table_close() + section_close();
 
   // Test Configuration
-
-  out +=
-      "<p class=\"boundary-note\">Throughput is shown in MiB/s because the calculation uses a binary MiB divisor. "
-      "Format names are the driver-negotiated FourCC values.</p>";
 
   out +=
       verdict_section(test, {{"UYVY mean latency", "uyvy_latency_mean", nullptr, "Mean capture latency in this format"},
@@ -3325,13 +3351,6 @@ std::string render_t18(const TestResult &test) {
   }
   out += table_close() + section_close();
 
-  out +=
-      "<p class=\"boundary-note\"><strong>Restored:</strong> All controls returned to the values captured before the "
-      "test. Restore was read-back verified.</p>";
-  out +=
-      "<p class=\"boundary-note\"><strong>Interpretation:</strong> Tested control values were applied and capture "
-      "remained available. The measured latency difference for the tested values was not practically significant.</p>";
-
   out += verdict_section(
       test, {{"HDR enable coverage", "control_count", nullptr, "Controls enumerated"},
              {"Bypass Mode coverage", "ll0_bp0_wi0_mean_ms", nullptr, "Mean latency for this combination"},
@@ -3372,7 +3391,7 @@ std::string render_t19(const TestResult &test) {
     }
     out += measurement_open();
     out += bar_chart("Capture performance at " + html_escape(resolution),
-                     {{"Mean latency", "mean"}, {"P95 latency", "p95"}}, bars, "ms", "");
+                     {{"Mean latency", "mean"}, {"P95 latency", "p95"}}, bars, "ms");
   }
 
   out += item_label("Resolution evidence");
@@ -3442,7 +3461,7 @@ std::string render_t20(const TestResult &test) {
     }
     out += measurement_open();
     out += bar_chart("Sequence continuity", {{"Observed sequences", "ok"}, {"Unobserved sequences", "miss"}}, bars,
-                     "frames", "");
+                     "frames");
   }
 
   const MetricValue *gaps = find_metric(test, "non_monotonic");
@@ -3482,10 +3501,6 @@ std::string render_t20(const TestResult &test) {
                             {"Backward events", "ts_non_monotonic", nullptr, "Timestamps that went backwards"}});
   out += table_close() + section_close();
 
-  out +=
-      "<p class=\"boundary-note\">Sequence gap does not prove camera or driver frame drop on its own. For buffer "
-      "timestamp ordering analysis, see <a href=\"#t21-timestamp-monotonicity\">T21 Buffer Timestamp "
-      "Monotonicity</a>.</p>";
   out += verdict_section(test,
                          {{"Continuity requirement", "dropped_frames", "max_gap", "Dropped frames against the limit"},
                           {"Duplicate sequences", "max_gap", nullptr, nullptr},
@@ -3511,7 +3526,7 @@ std::string render_t21(const TestResult &test) {
       }
     }
     out += measurement_open();
-    out += bar_chart("Sampled buffer timestamp delta", {{"Delta between read frames", "mean"}}, bars, "ms", "");
+    out += bar_chart("Sampled buffer timestamp delta", {{"Delta between read frames", "mean"}}, bars, "ms");
   }
 
   const MetricValue *reg = find_metric(test, "non_monotonic");
@@ -3548,9 +3563,6 @@ std::string render_t21(const TestResult &test) {
                             {"Sampled delta max", "delta_max", nullptr, "Largest observed spacing"}});
   out += table_close() + section_close();
 
-  out +=
-      "<p class=\"boundary-note\">Sampled buffer timestamp delta is an observed spacing value, not a direct "
-      "measurement of camera frame rate or trigger-to-receive latency.</p>";
   out += verdict_section(test, {{"Non-monotonic events", "non_monotonic", nullptr, "Timestamps that went backwards"}});
   out += test_configuration(test);
   return out;
@@ -3580,7 +3592,7 @@ std::string render_t22(const TestResult &test) {
       bars.push_back({"Identical pairs", identical->value, "ident"});
     }
     out += bar_chart("Content comparison coverage", {{"Unique pairs", "uniq"}, {"Identical pairs", "ident"}}, bars,
-                     "pairs", "");
+                     "pairs");
   }
   out += item_label("Comparison evidence");
   out += table_open({"Metric", "Type", "Unit", "Value", "Detail"});
@@ -3609,8 +3621,6 @@ std::string render_t22(const TestResult &test) {
                        {"Backend memory",
                         detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
 
-  out += "<p class=\"boundary-note\">Comparison is limited to the configured " + cmp_win +
-         " payload window. Static scenes may naturally produce identical byte prefixes without pipeline freezing.</p>";
   return out;
 }
 
@@ -3626,14 +3636,21 @@ std::string render_t23(const TestResult &test) {
   out += measurement_open();
   {
     const std::regex window_line(R"RX(Win\d+\s+([0-9]+-[0-9]+s):\s*n=\d+\s+mean=([0-9.]+))RX");
-    std::vector<BarDatum> windows;
+    std::vector<ColumnDatum> windows;
     for (const std::string &detail : test.details) {
       std::smatch parts;
       if (std::regex_search(detail, parts, window_line)) {
-        windows.push_back({parts[1].str(), std::strtod(parts[2].str().c_str(), nullptr), "mean"});
+        ColumnDatum column;
+        column.label = parts[1].str();
+        column.value = std::strtod(parts[2].str().c_str(), nullptr);
+        windows.push_back(column);
       }
     }
-    out += bar_chart("Mean capture latency by window", {{"Window mean", "mean"}}, windows, "ms", "");
+    // The column chart the preview draws, not horizontal CSS bars. A window the run never
+    // reported keeps its label and draws no column -- the preview leaves the last window
+    // empty for exactly that reason.
+    out += column_chart("Mean capture latency by window", "Mean capture latency by reported window", windows,
+                        "Elapsed test time (seconds)", "");
   }
 
   out += item_label("Window evidence");
@@ -3704,7 +3721,7 @@ std::string render_t24(const TestResult &test) {
         phases.push_back({std::get<0>(entry), metric->value, std::get<2>(entry)});
       }
     }
-    out += bar_chart("Capture latency by test phase", {{"Baseline", "base"}, {"CPU load", "load"}}, phases, "ms", "");
+    out += bar_chart("Capture latency by test phase", {{"Baseline", "base"}, {"CPU load", "load"}}, phases, "ms");
 
     // The verdict rests on the P95 delta alone, so it gets its own chart rather than
     // being read off the difference between two bars.
@@ -3718,7 +3735,7 @@ std::string render_t24(const TestResult &test) {
       const double delta = load_p95->value - base_p95->value;
       impact.push_back({delta < 0.0 ? "P95 delta (lower under load)" : "P95 delta", std::abs(delta), "delta"});
     }
-    out += bar_chart("P95 impact against verdict thresholds", {{"P95 delta", "delta"}}, impact, "ms", "");
+    out += bar_chart("P95 impact against verdict thresholds", {{"P95 delta", "delta"}}, impact, "ms");
   }
 
   // The approved preview names this table for what it holds -- one row per statistic --
@@ -3820,7 +3837,7 @@ std::string render_t25(const TestResult &test) {
         rounds.push_back({trim_of(parts[1].str()), std::strtod(parts[2].str().c_str(), nullptr), "ok"});
       }
     }
-    out += bar_chart("Round capture coverage", {{"Rounds captured", "ok"}}, rounds, "rounds", "");
+    out += bar_chart("Round capture coverage", {{"Rounds captured", "ok"}}, rounds, "rounds");
   }
 
   out += item_label("Camera evidence");
@@ -4081,19 +4098,15 @@ bool test_content_shows_result(const std::string &test_id, TestStatus status) {
 std::string render_test_content(const TestResult &test) {
   std::string out;
   if (test_content_shows_result(test.id, test.status)) {
+    // The single approved line for a non-PASS card, and nothing else. `test.notes` is
+    // deliberately not rendered: the approved previews give a card exactly one piece of
+    // explanatory prose -- this verdict line -- and every further note production used to
+    // print (.test-note here, .boundary-note in the per-test renderers) appeared in none
+    // of the 26 previews.
     out += result_block(test);
-    // Notes BEFORE the evidence: a note explains the data, so it has to precede it. Placed
-    // after, it reads as a footnote to a table the reader has already puzzled over.
-    // Shown only on non-PASS cards (review-plan §4.6): a passing card's header already
-    // says PASS, no extra prose is needed in the intro.
-    for (const auto &note : test.notes) {
-      out += "<div class=\"test-note\">" + html_escape(note) + "</div>";
-    }
   }
   const auto found = renderers().find(test.id);
   out += found != renderers().end() ? found->second(test) : render_generic(test);
-  // The raw observations, after the tables that summarise them. Appended here rather than
-  // in each renderer so no test can accidentally drop its own evidence.
   out += detail_lines(test);
   return out;
 }

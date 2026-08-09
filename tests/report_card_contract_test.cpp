@@ -912,8 +912,15 @@ int main() {
       const std::string after = card.substr(label_at, 900);
       check(after.find("chart-frame") != std::string::npos,
             entry.first + ": the \"" + entry.second + "\" chart is not in a .chart-frame");
-      check(after.find("bar-row") != std::string::npos,
-            entry.first + ": the \"" + entry.second + "\" chart draws no bars");
+      // Either spelling counts: the approved previews draw some of these charts as CSS
+      // bars (.bar-row) and others as SVG (a <rect>, <polyline> or <circle> inside the
+      // frame). This used to demand .bar-row alone, which reported T14's approved SVG
+      // column chart as "draws no bars". WHICH kind each card must use is compared
+      // against the previews themselves in preview_structure_test; here the question is
+      // only whether the frame has marks in it at all.
+      const bool has_marks = after.find("bar-row") != std::string::npos || after.find("<rect") != std::string::npos ||
+                             after.find("<polyline") != std::string::npos || after.find("<circle") != std::string::npos;
+      check(has_marks, entry.first + ": the \"" + entry.second + "\" chart draws nothing inside its frame");
     }
   }
 
@@ -998,12 +1005,15 @@ int main() {
   // modes -- 12 combinations, all with no document-level horizontal scroll, no clipped
   // chart, no overlapping header cell). These rules are what keep it that way.
   //
-  // The chart is the interesting case: it renders at a FIXED 906px so a declared 8px
-  // label really is 8px. Below ~1000px that no longer fits, and the box must SCROLL
-  // rather than shrink -- shrinking would scale every label with it, undoing the whole
-  // reason the width is fixed.
-  check(contains(html, ".chart-frame, .metric-chart { overflow-x: auto; max-width: 100%; }"),
-        "charts no longer scroll inside their box, so a narrow viewport clips or rescales them");
+  // The chart fills its container and holds its shape with aspect-ratio, exactly as the
+  // approved previews declare it. This assertion previously demanded the opposite --
+  // `overflow-x: auto` on a chart pinned to 906px -- reasoned from "a declared 8px label
+  // should really be 8px". The cost was visible and the previews had already rejected it:
+  // every card narrower than 906px grew a scrollbar under its chart. Inverted rather than
+  // deleted, so the scrollbar returning is a regression.
+  check(!contains(html, ".chart-frame, .metric-chart { overflow-x: auto; max-width: 100%; }"),
+        "the chart scrollbar came back; the previews size charts with width:100% + aspect-ratio");
+  check(contains(html, "aspect-ratio: 906/240"), "charts no longer keep the approved 906/240 proportion as they scale");
   check(contains(html, "@media (max-width: 700px)"), "the mobile breakpoint is gone");
   check(contains(html, ".test-header { grid-template-columns: 1fr; row-gap: 4px; }"),
         "the test header no longer stacks on mobile, so its three cells compete for one row");

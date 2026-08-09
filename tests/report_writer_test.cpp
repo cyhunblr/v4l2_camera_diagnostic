@@ -367,8 +367,11 @@ int main() {
   html_ok &=
       require(body_rule == std::string::npos || html.find("overflow-x: auto", body_rule) > html.find("}", body_rule),
               "the document itself scrolls horizontally");
-  html_ok &= require(html.find(".chart-frame, .metric-chart { overflow-x: auto") != std::string::npos,
-                     "charts no longer scroll inside their own box");
+  // The chart box does NOT scroll: it scales with its container through aspect-ratio, as
+  // the approved previews declare. The document-level rule above still stands -- that is
+  // the one that matters and it is unchanged.
+  html_ok &= require(html.find(".chart-frame, .metric-chart { overflow-x: auto") == std::string::npos,
+                     "the chart scrollbar came back");
   html_ok &= require(html.find("min-width: 620px") == std::string::npos, "chart minimum width still forces scrolling");
   // The generic chart selector is gone: it drew a dot chart per statistic family, outside
   // any section, alongside the approved chart the test's own renderer already produced.
@@ -550,15 +553,23 @@ int main() {
   html_ok &= require(html.find("/api/dmesg?download=1") == std::string::npos,
                      "the report still builds a live dmesg download URL");
 
-  // Notes render as their own callout, not as another monospace detail line.
-  html_ok &=
-      require(html.find("<div class=\"test-note\">") != std::string::npos, "notes are not rendered as a callout");
-  html_ok &= require(html.find("only one pixel format") != std::string::npos, "note text is missing from the HTML");
-  // The callout explains the data, so it has to come before the data it explains.
-  const auto note_pos = html.find("<div class=\"test-note\">This device offers only one");
-  const auto detail_pos = html.find("YUYV: sizeimage=4915200");
-  html_ok &= require(note_pos != std::string::npos && detail_pos != std::string::npos && note_pos < detail_pos,
-                     "the note callout should precede the detail list it explains");
+  // Notes are NOT rendered. This assertion used to demand the opposite -- a `.test-note`
+  // callout carrying the note text -- and it is inverted rather than deleted so the old
+  // behaviour returning counts as a regression.
+  //
+  // The approved previews give a card exactly one piece of explanatory prose: the verdict
+  // line on a non-PASS card. `.test-note` appears in none of the 26, and on the 2026-08-09
+  // device run production printed notes next to measurements on cards the user never
+  // approved them for.
+  html_ok &= require(html.find("<div class=\"test-note\">") == std::string::npos,
+                     "the unapproved .test-note callout came back");
+  html_ok &= require(html.find("only one pixel format") == std::string::npos,
+                     "note text is rendered again, outside the one approved verdict line");
+  // The ordering assertion that stood here (note before detail list) is gone with both of
+  // its operands: the note is no longer rendered, and neither is the raw detail list. What
+  // replaces it is the absence check above -- there is nothing left to order.
+  html_ok &= require(html.find("YUYV: sizeimage=4915200") == std::string::npos,
+                     "the raw detail list came back alongside the structured tables");
   // Genuine omissions still report: t17's YUYV and t19's 3840x2160 both failed
   // S_FMT while other categories charted successfully.
   // Counted by the callout's own wrapper, not by the words "Not measured": that phrase is
