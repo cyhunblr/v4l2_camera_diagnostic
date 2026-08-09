@@ -356,6 +356,8 @@ void run_no_streamon(const std::string &camera_path, MemoryBackend backend, Test
                      const TestThresholds &tp) {
   const int buffer_count = static_cast<int>(tpv(tp, "t04-no-streamon", "buffer_count"));
   const int poll_timeout_ms = static_cast<int>(tpv(tp, "t04-no-streamon", "poll_timeout_ms"));
+  r.details.push_back("buffers_requested: " + std::to_string(buffer_count));
+  r.details.push_back("poll_timeout_ms: " + std::to_string(poll_timeout_ms));
   emit(log, camera_path, "t04", "Opening device for STREAMON state check...");
   V4lSession s;
   std::string err;
@@ -435,6 +437,12 @@ void run_buffer_overwrite(const std::string &camera_path, MemoryBackend backend,
   const int VB_INTERVAL = static_cast<int>(tpv(tp, "t08-buffer-overwrite", "variant_b_interval_ms"));
   const int SETTLE = static_cast<int>(tpv(tp, "t08-buffer-overwrite", "settle_ms"));
   const int BUF_COUNT = static_cast<int>(tpv(tp, "t08-buffer-overwrite", "buffer_count"));
+  r.details.push_back("settle_time: " + std::to_string(SETTLE) + "ms");
+  r.details.push_back("variant_a: " + std::to_string(VA_TRIGGERS) + " triggers at " + std::to_string(VA_INTERVAL) +
+                      "ms");
+  r.details.push_back("variant_b: " + std::to_string(VB_TRIGGERS) + " triggers at " + std::to_string(VB_INTERVAL) +
+                      "ms");
+  r.details.push_back("allocated_buffers: " + std::to_string(BUF_COUNT));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   const int pulse_ms = static_cast<int>(pulse_ns / 1'000'000UL);
   struct Variant {
@@ -879,6 +887,8 @@ void run_poll_timeout_cliff(const std::string &camera_path, MemoryBackend backen
   const int STABILITY_ROUNDS = static_cast<int>(tpv(tp, "t13-poll-timeout-cliff", "stability_rounds"));
   const int STABILITY_FRAMES = static_cast<int>(tpv(tp, "t13-poll-timeout-cliff", "stability_frames"));
   const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t13-poll-timeout-cliff", "warmup_count"));
+  r.details.push_back("warmup_frames: " + std::to_string(WARMUP_COUNT));
+  r.details.push_back("probe_frames: " + std::to_string(PROBE_FRAMES));
   const double PROD_MS = thv(th, "t13-poll-timeout-cliff", "production_timeout_ms");
   const double SAFE_MARGIN_THRESHOLD = thv(th, "t13-poll-timeout-cliff", "safe_margin_ms");
   const uint64_t pulse_ns = pulse_ns_from(tp);
@@ -1180,6 +1190,9 @@ void run_sustained_capture(const std::string &camera_path, MemoryBackend backend
   const int INTERVAL_MS = static_cast<int>(tpv(tp, "t23-sustained-capture", "sample_interval_ms"));
   const int CAPTURE_TIMEOUT_MS = static_cast<int>(tpv(tp, "t23-sustained-capture", "capture_timeout_ms"));
   const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t23-sustained-capture", "warmup_count"));
+  r.details.push_back("warmup_frames: " + std::to_string(WARMUP_COUNT));
+  r.details.push_back("capture_timeout: " + std::to_string(CAPTURE_TIMEOUT_MS) + "ms");
+  r.details.push_back("sample_interval: " + std::to_string(INTERVAL_MS) + "ms");
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t23",
        "Sustained capture: " + std::to_string(DURATION_SEC) + " seconds @ windows of " + std::to_string(WINDOW_SEC) +
@@ -1279,6 +1292,11 @@ void run_multi_buffer(const std::string &camera_path, MemoryBackend backend, Tri
   const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t07-multi-buffer", "warmup_count"));
   const int CAPTURE_TIMEOUT_MS = static_cast<int>(tpv(tp, "t07-multi-buffer", "capture_timeout_ms"));
   const int SAMPLE_INTERVAL_MS = static_cast<int>(tpv(tp, "t07-multi-buffer", "sample_interval_ms"));
+  r.details.push_back("requested_range: 1 - " + std::to_string(MAX_BUFFERS));
+  r.details.push_back("samples_per_request: " + std::to_string(SAMPLES));
+  r.details.push_back("warmup: " + std::to_string(WARMUP_COUNT));
+  r.details.push_back("capture_timeout: " + std::to_string(CAPTURE_TIMEOUT_MS) + "ms");
+  r.details.push_back("sample_interval: " + std::to_string(SAMPLE_INTERVAL_MS) + "ms");
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t07",
        "Multi-buffer configurations: testing 1-" + std::to_string(MAX_BUFFERS) + " buffers...");
@@ -1450,6 +1468,9 @@ void run_stream_cycles(const std::string &camera_path, MemoryBackend backend, Tr
   const int RAPID_TIMEOUT_MS = static_cast<int>(tpv(tp, "t06-stream-cycles", "rapid_timeout_ms"));
   const int FULL_TIMEOUT_MS = static_cast<int>(tpv(tp, "t06-stream-cycles", "full_timeout_ms"));
   const int MAX_CONSEC_START_FAIL = static_cast<int>(tpv(tp, "t06-stream-cycles", "max_consecutive_start_failures"));
+  r.details.push_back("full_warmup: " + std::to_string(FULL_WARMUP));
+  r.details.push_back("rapid_warmup: " + std::to_string(RAPID_PACING_MS));
+  r.details.push_back("slow_start_guard: " + std::to_string(MAX_CONSEC_START_FAIL));
   const int MAX_START_FAILURES = static_cast<int>(tpv(tp, "t06-stream-cycles", "max_start_failures"));
   // A non-positive threshold would mark every STREAMON slow and abort healthy
   // hardware on the third cycle, so treat that as "watchdog disabled".
@@ -1994,6 +2015,8 @@ void run_pollerr_handling(const std::string &camera_path, MemoryBackend backend,
   const int RECOVERY_CAP = static_cast<int>(tpv(tp, "t05-pollerr-handling", "recovery_captures"));
   const int POLL_TIMEOUT = static_cast<int>(tpv(tp, "t05-pollerr-handling", "poll_timeout_ms"));
   const int WARMUP = static_cast<int>(tpv(tp, "t05-pollerr-handling", "warmup_count"));
+  r.details.push_back("warmup_frames: " + std::to_string(WARMUP));
+  r.details.push_back("poll_timeout_ms: " + std::to_string(POLL_TIMEOUT));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t05", "POLLERR/POLLHUP handling: testing STREAMOFF recovery...");
   V4lSession s;
@@ -2174,6 +2197,9 @@ void run_gpio_pulse_width(const std::string &camera_path, MemoryBackend backend,
   const int SAMPLES = static_cast<int>(tpv(tp, "t16-gpio-pulse-width", "samples_per_width"));
   const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t16-gpio-pulse-width", "warmup_count"));
   const int POLL_TIMEOUT_MS = static_cast<int>(tpv(tp, "t16-gpio-pulse-width", "poll_timeout_ms"));
+  r.details.push_back("samples_per_width: " + std::to_string(SAMPLES));
+  r.details.push_back("warmup_frames: " + std::to_string(WARMUP_COUNT));
+  r.details.push_back("poll_timeout_ms: " + std::to_string(POLL_TIMEOUT_MS));
   // Note: this test intentionally sweeps its own pulse-width values (pws[]) to
   // find the minimum reliable width, so it does not use the profile's
   // pulse_width_ms for the sweep captures — only for the initial warmup.

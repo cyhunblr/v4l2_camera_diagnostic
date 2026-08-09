@@ -143,5 +143,30 @@ int main() {
     std::cerr << "hardware-only test mode contract is incorrect\n";
     return 1;
   }
+
+  // The other two mode restrictions, which nothing checked. They explain why a report can
+  // legitimately be missing a card: measured on the 2026-08-08 hardware-trigger run, t09
+  // was absent because it is FreeRun-only, not because the renderer dropped it. Without
+  // this, silently widening a mask would go unnoticed and the test would run in a mode it
+  // cannot measure -- t09 times its own DQBUF-to-QBUF delay, which a trigger would drive.
+  v4l2diag::TestDefinition recycling;
+  if (!v4l2diag::find_test_definition("t09-buffer-recycling", &recycling) ||
+      v4l2diag::supports_trigger_mode(recycling, v4l2diag::TriggerMode::Hardware) ||
+      v4l2diag::supports_trigger_mode(recycling, v4l2diag::TriggerMode::Software) ||
+      !v4l2diag::supports_trigger_mode(recycling, v4l2diag::TriggerMode::FreeRun)) {
+    std::cerr << "t09-buffer-recycling is no longer FreeRun-only\n";
+    return 1;
+  }
+
+  for (const char *id : {"t08-buffer-overwrite", "t14-trigger-latency"}) {
+    v4l2diag::TestDefinition triggered;
+    if (!v4l2diag::find_test_definition(id, &triggered) ||
+        !v4l2diag::supports_trigger_mode(triggered, v4l2diag::TriggerMode::Hardware) ||
+        !v4l2diag::supports_trigger_mode(triggered, v4l2diag::TriggerMode::Software) ||
+        v4l2diag::supports_trigger_mode(triggered, v4l2diag::TriggerMode::FreeRun)) {
+      std::cerr << id << " is no longer restricted to the triggered modes\n";
+      return 1;
+    }
+  }
   return 0;
 }

@@ -78,7 +78,8 @@ export function DashboardPage({ onViewRun, onStartNewDiagnostic, isRunning }: Pr
             <h3>Diagnostic Flow</h3>
           </div>
           <p className="panel-hint">
-            Start a guided run, then move through Cameras, Profiles, Test Selection, and Test Configuration in order.
+            Start a guided run, then move through Camera Selection, Trigger Selection, Test Selection, and Test
+            Configuration in order.
           </p>
         </div>
         <div className="dashboard-flow-action">

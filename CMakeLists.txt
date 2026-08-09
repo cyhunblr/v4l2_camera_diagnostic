@@ -230,6 +230,18 @@ v4l2diag_apply_warnings(v4l2diag_metric_name_contract_test)
 add_test(NAME metric_name_contract COMMAND v4l2diag_metric_name_contract_test
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(v4l2diag_no_fabricated_values_test tests/no_fabricated_values_test.cpp)
+v4l2diag_apply_warnings(v4l2diag_no_fabricated_values_test)
+# Reads test_content.cpp, so it must run from the repository root.
+add_test(NAME no_fabricated_values COMMAND v4l2diag_no_fabricated_values_test
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(v4l2diag_run_metric_coverage_test tests/run_metric_coverage_test.cpp)
+v4l2diag_apply_warnings(v4l2diag_run_metric_coverage_test)
+# Reads test_content.cpp and the recorded device run, so it must run from the root.
+add_test(NAME run_metric_coverage COMMAND v4l2diag_run_metric_coverage_test
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(v4l2diag_export_toolbar_test tests/export_toolbar_test.cpp)
 target_include_directories(v4l2diag_export_toolbar_test PRIVATE ${JSONCPP_INCLUDE_DIRS})
 target_link_directories(v4l2diag_export_toolbar_test PRIVATE ${JSONCPP_LIBRARY_DIRS})

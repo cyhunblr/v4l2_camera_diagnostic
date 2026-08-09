@@ -588,7 +588,17 @@ std::vector<MetricChartGroup> group_metrics(const std::vector<MetricValue> &metr
         prefixes.push_back(prefix);
       }
     }
-    if (prefixes.size() >= 2) {
+    // A prefix sweep is only a sweep when the test is KNOWN to sweep something, or when
+    // every prefix reads as a resolution. Without this, any test whose metric names share
+    // two prefixes was charted as a format comparison: measured, t13, t16, t23 and t24
+    // each rendered a chart titled "... by format" against a "Format" axis while sweeping
+    // no pixel format at all -- baseline_/load_ (t24) and cliff/first_miss (t13) are
+    // phases and statistics, not formats.
+    bool all_resolution = !prefixes.empty();
+    for (const auto &prefix : prefixes) {
+      all_resolution = all_resolution && looks_like_resolution_label(prefix);
+    }
+    if (prefixes.size() >= 2 && (spec != nullptr || all_resolution)) {
       bool resolution_sweep = true;
       for (const auto &prefix : prefixes) {
         resolution_sweep = resolution_sweep && looks_like_resolution_label(prefix);
@@ -1761,8 +1771,6 @@ table.overview .status-cell { font-weight: 700; font-size: 12px; text-transform:
    Pinning the rendered width to the viewBox width makes one SVG unit exactly one CSS
    pixel everywhere, which is the property S8 actually asks for. The card body gives the
    chart 968px, so a 906px chart fits without a scrollbar -- measured, not assumed. */
-.metric-chart { padding: 14px 0; }
-.section .section { padding: 0; border-bottom: 0; }
 
 /* review-plan 5.3.4: T03's stacked two-phase timing bar, colours from the approved
    preview (docs/assets/previews/t03-unified-preview.html). */
@@ -1840,6 +1848,10 @@ table.overview .summary-text { color: #475569; }
 .grid-head, .grid-row { display: grid; gap: 0; padding: 6px 16px; }
 .grid-head { color: #52606d; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .3px; border-bottom: 1px solid #aeb9c5; }
 .grid-row { color: #2d3a47; font-size: 9px; border-bottom: 1px solid #f0f2f5; }
+/* The Test Configuration table lists inputs, not findings, and the approved previews
+   give it a tighter row rhythm than the measurement tables: 5px against 6px. One pixel
+   per row is invisible on its own and plainly visible down a stack of eight parameters. */
+.config-section .grid-head, .config-section .grid-row { padding-top: 5px; padding-bottom: 5px; }
 .grid-row:last-child { border-bottom: 0; }
 .cols-2 { grid-template-columns: repeat(2, 1fr); }
 .cols-3 { grid-template-columns: repeat(3, 1fr); }
@@ -1867,7 +1879,34 @@ table.overview .summary-text { color: #475569; }
    the SVG needs: 968 available - 48 indent = 920, which overflowed by 14px. Pulling the
    box out by the section padding restores the room while the left edge still lines up. */
 .has-items .chart-frame { padding-left: 48px; margin-right: -20px; }
-.metric-chart { margin: 0 -14px; }
+/* T26's warm-up column chart, verbatim from the approved preview. The gridline and the
+   two text classes are shared with the other SVG charts, so they are declared once here
+   rather than per test. */
+
+.col-stab, .legend-stab { fill: #4b9b69; background: #4b9b69; }
+.gridline { stroke: #e2e7ec; stroke-width: 1; }
+.svg-label { fill: #657382; font-size: 8px; }
+.svg-value { fill: #44515f; font-size: 9px; font-weight: 700; }
+.axis-title { fill: #44515f; font-size: 9px; font-weight: 600; }
+/* Horizontal bar charts, verbatim from the approved previews: one row is a fixed-width
+   label, a proportional track and the unit, and the axis under them repeats the same
+   three-column grid so the ticks line up with the tracks. The value rides INSIDE the
+   fill, which is what keeps a long row from pushing the unit column out of alignment. */
+.bar-row { display: grid; grid-template-columns: 120px 1fr 74px; gap: 10px; align-items: center; margin: 6px 0; }
+.bar-label { font-size: 10px; font-weight: 700; color: #52606d; }
+.bar-track { height: 20px; border-radius: 3px; background: #eef2f5; overflow: hidden; }
+
+.bar-fill { height: 100%; display: flex; align-items: center; padding: 0 6px; color: #fff; font-size: 9px; font-weight: 700; white-space: nowrap; }
+.bar-info { font-size: 10px; color: #44515f; font-variant-numeric: tabular-nums; text-align: right; }
+.bar-axis { display: grid; grid-template-columns: 120px 1fr 74px; gap: 10px; margin-top: 4px; }
+.scale-in { display: flex; justify-content: space-between; font-size: 9px; color: #7a8693; font-variant-numeric: tabular-nums; }
+.chart-axis-caption { margin: 6px 0 0; padding-left: 16px; color: #7a8693; font-size: 9px; }
+/* Series colours. A measured quantity and its upper statistic are the same family in two
+   weights, so mean/nonblock share one blue and max/p95/block share one grey. */
+.bar-mean, .legend-mean, .bar-nonblock, .legend-nonblock { background: #2563a6; }
+.bar-max, .legend-max, .bar-block, .legend-block, .bar-p95, .legend-p95 { background: #71879a; }
+.bar-ok, .legend-ok { background: #4b9b69; }
+.bar-miss, .legend-miss { background: #c83d4b; }
 .chart-legend { display: flex; gap: 16px; margin: 0 0 8px; padding-left: 16px; color: #52606d; font-size: 9px; }
 .legend-dot { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border-radius: 2px; vertical-align: middle; }
 /* Charts use a ~520-unit viewBox so one SVG unit renders at roughly one CSS
@@ -1875,7 +1914,10 @@ table.overview .summary-text { color: #475569; }
    down to about 7px. Wide charts (many categories, or horizontal rows) take the
    full row instead of being squeezed into a column. */
 .metric-visuals { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 12px; }
-.metric-chart { border: 1px solid #dbe4ee; border-radius: 6px; background: #fff; padding: 14px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
+/* Aligned with .chart-frame: the approved previews frame a chart with whitespace, not a
+   border and a shadow. These two classes are one shell drawn by two different renderers;
+   while they differed, the same chart looked boxed or unboxed depending on the caller. */
+.metric-chart { border: 0; background: transparent; padding: 14px 0; box-shadow: none; }
 .metric-chart--wide { grid-column: 1 / -1; }
 .metric-chart-title { color: #1e293b; font-size: 13px; font-weight: 750; margin-bottom: 8px; }
 .metric-chart-title span { color: #94a3b8; font-size: 10px; font-weight: 600; margin-left: 4px; }

@@ -398,17 +398,34 @@ int main() {
 
   // No chart for a test whose preview has none. Named individually so a regression says
   // which one came back.
+  // t17 DOES have an approved chart ("Capture latency by pixel format"), drawn by its own
+  // renderer. What must not come back is the GENERIC selector's version, which labelled an
+  // SVG axis "Pixel format"; the approved chart is CSS bars and has no such axis text.
   html_ok &= require(html.find(">Pixel format</text>") == std::string::npos,
-                     "t17 renders a chart its approved preview does not have");
+                     "t17 renders the generic sweep chart instead of its approved bar chart");
   html_ok &= require(html.find("metric-bars") == std::string::npos,
                      "t18 renders a horizontal bar chart its approved preview does not have");
   html_ok &= require(html.find(">Mean capture latency (ms)</text>") == std::string::npos,
                      "t18's unapproved chart axis survived");
-  // The legacy CSS class names must stay gone regardless. Matched as a standalone class
-  // name (with a boundary before it), since T06's approved ".reliability-bar-fill"
-  // (review-plan 5.6.5) legitimately contains the substring "bar-fill".
-  html_ok &= require(html.find(" bar-fill") == std::string::npos && html.find("\"bar-fill") == std::string::npos,
-                     "legacy CSS horizontal bar fills remain");
+  // .bar-fill is NOT legacy: it is the class the approved previews use for the horizontal
+  // bar charts on t14, t15, t17, t19, t20 and t21, which are now drawn by their own
+  // renderers (test_content.cpp). What must stay gone is the GENERIC selector emitting
+  // one for a test whose preview has none -- that is what the per-test assertions above
+  // check. A bar fill must therefore always sit inside a chart frame, never loose in a
+  // card.
+  {
+    std::size_t at = 0;
+    std::size_t loose = 0;
+    while ((at = html.find("\"bar-fill", at)) != std::string::npos) {
+      const std::size_t frame = html.rfind("chart-frame", at);
+      const std::size_t card = html.rfind("<article class=\"test-card", at);
+      if (frame == std::string::npos || (card != std::string::npos && frame < card)) {
+        ++loose;
+      }
+      at += 1;
+    }
+    html_ok &= require(loose == 0, "a CSS bar fill is rendered outside any chart frame");
+  }
   html_ok &= require(html.find("horizontal-y-axis") == std::string::npos, "legacy CSS horizontal axis remains");
   html_ok &= require(html.find("horizontal-bar-plot") == std::string::npos, "legacy CSS horizontal plot remains");
 

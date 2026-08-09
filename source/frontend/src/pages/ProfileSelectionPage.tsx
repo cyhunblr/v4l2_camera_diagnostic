@@ -76,7 +76,6 @@ type Props = {
   triggerMode: TriggerMode;
   onTriggerModeChange: (mode: TriggerMode) => void;
   assignmentMode?: "single" | "per-camera";
-  onAssignmentModeChange?: (mode: "single" | "per-camera") => void;
   singleProfileId: string;
   onSingleProfileChange: (id: string) => void;
   /** Cameras selected for the run, each with the role the topology gave it. */
@@ -124,7 +123,6 @@ export function ProfileSelectionPage({
   triggerMode,
   onTriggerModeChange,
   assignmentMode,
-  onAssignmentModeChange,
   singleProfileId,
   onSingleProfileChange,
   assignments,
@@ -547,7 +545,7 @@ export function ProfileSelectionPage({
   return (
     <div className="page">
       <header className="topbar">
-        <div><p className="eyebrow">Configure</p><h2>Trigger Routing</h2></div>
+        <div><p className="eyebrow">Configure</p><h2>Trigger Selection</h2></div>
         <div className="toolbar-row">
           <div className="segmented-control" role="group" aria-label="Trigger mode">
             {(["hardware", "software", "free-run"] as TriggerMode[]).map((mode) => (

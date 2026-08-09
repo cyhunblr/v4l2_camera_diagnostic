@@ -8,8 +8,9 @@ import logoMark from "../assets/logo-mark.png";
 type NavItem = { id: PageId; label: string; icon: React.ReactNode; lockedTitle: string };
 
 const CONFIGURE_ITEMS: NavItem[] = [
-  { id: "cameras", label: "Cameras", icon: <Camera size={16} />, lockedTitle: "Complete the previous step first." },
-  { id: "profiles", label: "Profiles", icon: <SlidersHorizontal size={16} />, lockedTitle: "Complete the previous step first." },
+  // Labels match each page's own <h2> exactly; nav_label_contract.test.tsx locks the pair.
+  { id: "cameras", label: "Camera Selection", icon: <Camera size={16} />, lockedTitle: "Complete the previous step first." },
+  { id: "profiles", label: "Trigger Selection", icon: <SlidersHorizontal size={16} />, lockedTitle: "Complete the previous step first." },
   { id: "tests", label: "Test Selection", icon: <ListChecks size={16} />, lockedTitle: "Complete the previous step first." },
   // No Report Formats step: v5 removed the format choice, every run writes HTML,
   // JSON and Markdown (plan 2.10).

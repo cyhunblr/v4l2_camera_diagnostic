@@ -66,7 +66,7 @@ describe("DashboardPage guided-run copy", () => {
 
     await waitFor(() => expect(document.body.textContent).not.toContain("Loading"));
     const text = document.body.textContent!;
-    const steps = ["Cameras", "Profiles", "Test Selection", "Test Configuration"];
+    const steps = ["Camera Selection", "Trigger Selection", "Test Selection", "Test Configuration"];
     const positions = steps.map((step) => text.indexOf(step));
     for (const [i, position] of positions.entries()) {
       expect(position, `${steps[i]} is missing from the walkthrough`).toBeGreaterThan(-1);

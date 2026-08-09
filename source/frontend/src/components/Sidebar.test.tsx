@@ -83,7 +83,7 @@ describe("Sidebar", () => {
   it("navigates on click", async () => {
     const user = userEvent.setup();
     const { onNavigate } = renderSidebar();
-    await user.click(screen.getByRole("button", { name: /Cameras/ }));
+    await user.click(screen.getByRole("button", { name: /Camera Selection/ }));
     expect(onNavigate).toHaveBeenCalledWith("cameras");
   });
 
@@ -120,7 +120,7 @@ describe("Report Formats navigation is gone", () => {
     renderSidebar();
 
     const configure = configureLabels();
-    expect(configure).toEqual(["Cameras", "Profiles", "Test Selection", "Test Configuration"]);
+    expect(configure).toEqual(["Camera Selection", "Trigger Selection", "Test Selection", "Test Configuration"]);
     expect(configure).not.toContain("Report Formats");
   });
 
@@ -131,7 +131,7 @@ describe("Report Formats navigation is gone", () => {
     expect(options).not.toContain("Report Formats");
     // The mobile select mirrors the same item lists, so this also proves the desktop
     // nav and the select cannot drift apart.
-    expect(options).toEqual(["Dashboard", "Cameras", "Profiles", "Test Selection", "Test Configuration",
+    expect(options).toEqual(["Dashboard", "Camera Selection", "Trigger Selection", "Test Selection", "Test Configuration",
                              "Live Output", "Result Output"]);
   });
 

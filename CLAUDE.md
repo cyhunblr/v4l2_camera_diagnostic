@@ -28,9 +28,8 @@ gorsel onayi** varsa tamamlandi denmez. Dogru ara statu kullanilir.
 
 ### 4. "Preview degismedi" implementation tamamlandi demek degildir
 
-Production renderer'dan artifact ve screenshot uretilmeden gorsel uygulama
-dogrulanmis sayilmaz. Onaylı preview dosyalarinin degismemesi, canli
-renderer'in o icerigi urettigini **kanitlamaz**.
+Onaylı preview dosyalarinin degismemesi, canli renderer'in o icerigi urettigini
+**kanitlamaz**. Uygulama, production `write_reports()` ciktisi uzerinde olculur.
 
 Kanit manifesti **iki yonlu** dogrulanir: README'nin adlandirdigi her dosya var
 mi, ve dizindeki her dosya adlandirilmis mi. Tek yonlu kontrol, tabloda yazili
@@ -61,8 +60,8 @@ bulunmasi anlamina gelir.
 ### 6. Karar otoritesi sirasi zorunludur
 
 1. Kullanicinin en son acik karari
-2. `docs/report-ui-review-plan.md`
-3. `docs/web-ui-audit-fix-plan.md`
+2. `docs/report-ui-design-spec.md`
+3. `docs/implementation-plan.md`
 4. Preview artifact'leri
 5. Mevcut kaynak kod
 
@@ -93,12 +92,18 @@ kullanilmayan fonksiyon/parametre hatasi cok kolay olusur; `&& false` / `|| true
 gibi derlenebilir formlar kullanilir. `tail -1` gibi bir pipeline `$?`'yi
 bozar — build exit kodu ayrica olculur.
 
-### 10. Gorsel is dort seviyede kapanir
+### 10. Gorsel is iki seviyede kapanir, ucuncusu kullanicidadir
 
 1. DOM sozlesmesi
-2. Production HTML
-3. Ekran screenshot'i
-4. Print screenshot / PDF emulasyonu
+2. Production HTML — `write_reports()` ciktisi uzerinde olcum
+
+**Ajan PNG, screenshot veya PDF uretmez** (kullanici karari, 2026-08-08).
+Gorsel dogrulamanin ucuncu seviyesi kullanicinin **gercek cihazda** aldigi
+kosum sonucudur: kullanici raporu paylasir, kontrol o zaman yapilir.
+
+Bu, 1 ve 2'yi gevsetmez. Bir madde ancak DOM sozlesmesi testle kilitlenmis
+**ve** production HTML uzerinde olculmusse `UYGULANDI` olur; cihaz kosumu
+gelene kadar `DOGRULANDI` denmez.
 
 ### 11. Soru sorma esigi yuksektir
 
@@ -107,7 +112,7 @@ olarak farkli ise yol acacaksa sorulur.
 
 ## Karar Koruma Protokolu (P1-P8)
 
-`docs/web-ui-audit-fix-plan.md` icindeki "Calisma ve Karar Koruma Protokolu"
+`docs/implementation-plan.md` icindeki "Calisma ve Karar Koruma Protokolu"
 bolumu gecerlidir. Ozetle:
 
 - **P1** Her adim oncesi Decision Lock yazilir.
@@ -126,13 +131,13 @@ bolumu gecerlidir. Ozetle:
 
 ## Sabit kisitlar
 
-- `docs/report-ui-review-plan.md` **kullanicinin belgesidir**. Degistirmeden
+- `docs/report-ui-design-spec.md` **kullanicinin belgesidir**. Degistirmeden
   once sorulur; celiski cozulmez, yuzeye cikarilir.
 - Onaylı test icerigi preview'lerde degistirilmez.
 - Korlemesine toplu replace yapilmaz. Gercek PDF referanslari
   (`Export PDF`, `.pdf` dosya adlari, browser-print metni) korunur.
 - markdownlint: MD012 global olarak kapatilmaz;
-  `report-ui-review-plan.md` `.markdownlintignore`'a eklenmez.
+  `report-ui-design-spec.md` `.markdownlintignore`'a eklenmez.
 - Teknik test id'leri ve dosya slug'lari degismez.
 - Her davranis degistiren madde **once** testle kilitlenir (test-first) ve her
   guard gecici geri alma ile yuk tasidigi kanitlanir.
@@ -160,6 +165,13 @@ CI'nin **gercek** komutlari kullanilir, filtre eklenmez:
 cpplint --recursive source/backend/            # CPPLINT.cfg otomatik uygulanir
 find source/backend \( -name "*.cpp" -o -name "*.hpp" \) -print0 \
   | xargs -0 clang-format-18 --dry-run --Werror
+
+# DIKKAT: yukaridaki clang-format komutu CI'nin komutudur ve yalnizca
+# source/backend'e bakar. pre-commit hook DAHA GENIS: staged olan HER .cpp/.hpp.
+# Yani tests/ altinda birakilan bir format ihlali CI komutundan gecer, commit'te
+# patlar. Hook'un kendi komutuyla dogrulanir:
+git diff --cached --name-only --diff-filter=ACM | grep -E '\.(cpp|hpp)$' \
+  | xargs clang-format-18 --dry-run --Werror
 npx markdownlint '**/*.md'                     # repo kokunden
 # eslint: --max-warnings=0 with an equals sign; the space form is rejected here
 cd source/frontend && npx tsc --noEmit && npx eslint src --max-warnings=0 && npx vitest run
@@ -178,6 +190,12 @@ python3 docs/assets/source-render/manifest_check.py
 ```
 
 ## Kanit dizini tazeligi
+
+> **Durum 2026-08-08:** `docs/assets/source-render/` su an **arac dizinidir**;
+> uretilmis PNG/PDF/txt yoktur. Eski artifact'ler `docs/assets/previews/`
+> setine karsi olculmustu, o dizin artik yok. Yeni hedef
+> `docs/assets/refactored_previews/`; artifact'ler Faz 3b'de uretilecek.
+> Asagidaki kural o uretimden itibaren yeniden yururluge girer.
 
 `docs/assets/source-render/` icindeki her PNG/PDF/txt, **committed** kod
 tarafindan uretilmis olmali — ara denemeler icin `/tmp` kullanilir, bu dizin
