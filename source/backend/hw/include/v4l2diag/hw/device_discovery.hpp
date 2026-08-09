@@ -39,4 +39,19 @@ std::vector<DeviceInfo> discover_video_devices(const std::string &dev_root = "/d
 bool query_device(const std::string &path, DeviceInfo *info);
 std::vector<MemoryBackendProbe> probe_memory_backends(const std::string &path);
 
+// Append `candidate` unless an entry with the same fourcc AND buffer type is already listed.
+//
+// A driver may advertise one fourcc at several VIDIOC_ENUM_FMT indices: the tegra isx021
+// reports UYVY at index 0 and again at index 2, both single-plane. Listing it twice made T01
+// publish "3 formats" while T17, which skipped repeats when building its own list, measured
+// 2 on the same device.
+//
+// The key includes the buffer type on purpose -- the same fourcc under single-plane and
+// under multi-plane is two real capture configurations, and query_device() enumerates both
+// types into one vector.
+//
+// Exposed (rather than left inside the enumeration loop) so the rule is testable without a
+// V4L2 device: the loop around it needs a real ioctl, this decision does not.
+bool append_distinct_format(const V4L2FormatInfo &candidate, std::vector<V4L2FormatInfo> *formats);
+
 }  // namespace v4l2diag

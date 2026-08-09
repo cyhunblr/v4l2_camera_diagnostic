@@ -38,6 +38,8 @@ int video_index(const std::string &path) {
   return std::atoi(path.c_str() + pos + 1);
 }
 
+// One entry per distinct pixel format per buffer type; the rule itself lives in
+// append_distinct_format() so it can be tested without a V4L2 device.
 void enumerate_formats(int fd, uint32_t type, const std::string &type_name, std::vector<V4L2FormatInfo> *formats) {
   for (uint32_t index = 0; index < 128; ++index) {
     v4l2_fmtdesc desc;
@@ -51,7 +53,7 @@ void enumerate_formats(int fd, uint32_t type, const std::string &type_name, std:
     info.fourcc = fourcc_to_string(desc.pixelformat);
     info.description = reinterpret_cast<const char *>(desc.description);
     info.buffer_type = type_name;
-    formats->push_back(info);
+    append_distinct_format(info, formats);
   }
 }
 
@@ -124,6 +126,20 @@ bool probe_dmabuf_export(int fd, std::string *detail) {
 }
 
 }  // namespace
+
+bool append_distinct_format(const V4L2FormatInfo &candidate, std::vector<V4L2FormatInfo> *formats) {
+  if (formats == nullptr) {
+    return false;
+  }
+  const bool already_listed = std::any_of(formats->begin(), formats->end(), [&candidate](const V4L2FormatInfo &seen) {
+    return seen.fourcc == candidate.fourcc && seen.buffer_type == candidate.buffer_type;
+  });
+  if (already_listed) {
+    return false;
+  }
+  formats->push_back(candidate);
+  return true;
+}
 
 std::string fourcc_to_string(uint32_t fourcc) {
   char chars[5];

@@ -232,6 +232,14 @@ v4l2diag::RunResult css_run() {
   t06.metrics.push_back(metric_of("full_cycles_attempted", 20, ""));
   t06.metrics.push_back(metric_of("rapid_cycles_ok", 0, ""));
   t06.metrics.push_back(metric_of("rapid_cycles_attempted", 50, ""));
+  // Whole-millisecond aggregates, read through value_of_any() -- the same path the
+  // fractional latencies take, so 6.10 observes the integer branch of the ms formatter
+  // rather than passing because no such value was rendered. The approved t06 preview shows
+  // these as "1132" and "1140"; an unconditional %.3f would print "1,132.000".
+  t06.metrics.push_back(metric_of("streamon_ms_mean", 1132.0, "milliseconds"));
+  t06.metrics.push_back(metric_of("streamon_ms_max", 1140.0, "milliseconds"));
+  // ...and a fractional one beside them, so both branches are exercised in one card.
+  t06.metrics.push_back(metric_of("first_frame_latency_mean", 44.812345, "milliseconds"));
   camera.tests.push_back(t06);
 
   // T11 -- PASS, and the source of the >=1000 values the separator contract needs: a
@@ -578,6 +586,43 @@ int main() {
     ok &= check(wrong.empty(), "millisecond latencies not printed at 3 decimals: " + joined);
     ok &=
         check(checked > 0, "no fractional millisecond value was rendered; the precision contract would pass vacuously");
+  }
+
+  // --- 6.10: a WHOLE millisecond value keeps no decimals ------------------
+  // 45 of the 55 millisecond cells in the approved set are integers, and all of them are
+  // Test Configuration inputs: "Capture timeout 500", "Poll timeout 50", "Slow-start guard
+  // 2000". An unconditional %.3f turned those into "500.000 milliseconds", which states a
+  // microsecond-resolution setting nobody made. Losing precision is a display bug;
+  // inventing it is a truthfulness bug, which is why this direction is asserted too.
+  {
+    std::vector<std::string> fabricated;
+    const std::string row_open = "<div class=\"grid-row";
+    for (std::size_t at = markup.find(row_open); at != std::string::npos; at = markup.find(row_open, at + 1)) {
+      const std::size_t end = markup.find("</div>", at);
+      const std::string row = markup.substr(at, end == std::string::npos ? std::string::npos : end - at);
+      if (row.find("<span>milliseconds</span>") == std::string::npos) {
+        continue;
+      }
+      const std::string cell_open = "<span>";
+      for (std::size_t c = row.find(cell_open); c != std::string::npos; c = row.find(cell_open, c + 1)) {
+        const std::size_t cs = c + cell_open.size();
+        const std::size_t ce = row.find("</span>", cs);
+        if (ce == std::string::npos) {
+          break;
+        }
+        const std::string cell = row.substr(cs, ce - cs);
+        // Only ".000" is a fabricated decimal: any other trailing digits are a real
+        // sub-millisecond reading.
+        if (cell.size() > 4 && cell.compare(cell.size() - 4, 4, ".000") == 0) {
+          fabricated.push_back(cell);
+        }
+      }
+    }
+    std::string joined;
+    for (const auto &f : fabricated) {
+      joined += (joined.empty() ? "" : ", ") + f;
+    }
+    ok &= check(fabricated.empty(), "whole millisecond values printed with fabricated decimals: " + joined);
   }
 
   // --- 6.1c: the result block palette is the approved one ------------------

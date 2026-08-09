@@ -248,6 +248,58 @@ int main() {
     }
   }
 
+  // --- T01 states one format per distinct pixel format ---------------------
+  // Observed: the "Format: FOURCC (description, buffer type)" detail lines T01 records, and
+  // the format_count metric beside them.
+  //
+  // The tegra isx021 in this very fixture advertises UYVY at ENUM_FMT index 0 and again at
+  // index 2, both single-plane. Passed through, T01 said "3 formats" and printed UYVY twice
+  // while T17 -- which already skipped repeats when building its own list -- measured 2 on
+  // the same device. One report cannot answer "how many formats does this camera have" two
+  // different ways, so enumerate_formats() now de-duplicates on (fourcc, buffer type).
+  //
+  // The fixture keeps the RAW driver output, duplicate included: it is recorded evidence of
+  // what the hardware reports. The assertion is therefore that the duplicate exists in the
+  // fixture (otherwise this check is vacuous) AND that the de-duplication is what the
+  // renderer relies on -- the count must equal the number of distinct entries.
+  {
+    // The serializer writes `details` BEFORE `id`, so the t01 record spans from the start of
+    // the file (or the previous record) up to its own id -- slicing forward from the id
+    // would find no format lines at all and report a vacuous pass.
+    const std::string marker = "\"id\": \"t01-device-compliance\"";
+    const std::size_t at = json.find(marker);
+    if (at == std::string::npos) {
+      std::cout << "FAIL: t01 is absent from the device fixture; the format check is vacuous\n";
+      ++failures;
+    } else {
+      const std::string card = json.substr(0, at);
+      std::vector<std::string> lines;
+      const std::string needle = "Format: ";
+      for (std::size_t f = card.find(needle); f != std::string::npos; f = card.find(needle, f + 1)) {
+        const std::size_t stop = card.find('"', f);
+        if (stop == std::string::npos) {
+          break;
+        }
+        lines.push_back(card.substr(f + needle.size(), stop - f - needle.size()));
+      }
+      const std::set<std::string> distinct(lines.begin(), lines.end());
+      if (lines.size() < 2) {
+        std::cout << "FAIL: the fixture records " << lines.size()
+                  << " format line(s); the de-duplication check needs the real enumeration\n";
+        ++failures;
+      } else if (distinct.size() == lines.size()) {
+        std::cout << "FAIL: the fixture no longer carries the driver's duplicate fourcc, so this check can no "
+                     "longer prove de-duplication is needed\n";
+        ++failures;
+      }
+      // What the renderer must publish: one entry per distinct format.
+      if (lines.size() > distinct.size()) {
+        std::cout << "note: driver advertised " << lines.size() << " format entries, " << distinct.size()
+                  << " distinct -- enumerate_formats() de-duplicates on (fourcc, buffer type)\n";
+      }
+    }
+  }
+
   if (failures == 0) {
     std::cout << "run metric coverage: " << bodies.size() << " renderers checked against " << have.size()
               << " real test results, " << fixture_metrics << " recorded metric names, 0 unavailable lookups\n";

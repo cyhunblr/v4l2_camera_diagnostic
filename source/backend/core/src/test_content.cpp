@@ -108,10 +108,25 @@ std::string display_number(double value) {
   return out;
 }
 
-// Millisecond quantities are printed at exactly 3 decimal places (design-spec §5.14.3).
-// The approved previews show "44.800", "44.836", "44.805" — the trailing zeros are
-// meaningful because they communicate measurement resolution.
+// A MEASURED millisecond quantity, at three decimals.
+//
+// The approved previews print latency statistics that way -- t14 "44.836", t15 "44.796",
+// t17 "44.801" / "44.805", t24 "+0.011" -- and the resolution matters: at two decimals
+// UYVY and NV16 both collapse to "44.8" and the comparison T17 exists for disappears.
+//
+// A WHOLE number is returned whole. Measured across the approved set: 55 cells carry a
+// millisecond unit and 45 of them are integers -- every `Test Configuration` timeout and
+// interval ("Capture timeout 500", "Slow-start guard 2000"). Those are inputs to the run,
+// not measurements, and printing "500.000 milliseconds" claims a microsecond-resolution
+// setting that was never made. Fabricating precision is worse than losing it.
+//
+// The remaining fractional divergences (t06 "44.81", t13 "45.0", t07 "0.40", t11 "5.11")
+// are a separate open question -- one rule cannot produce 1, 2 and 3 decimals for the same
+// unit, so they are recorded in the plan rather than guessed at here.
 std::string display_number_ms(double value) {
+  if (value == static_cast<double>(static_cast<long long>(value))) {
+    return display_number(value);
+  }
   char buffer[64];
   std::snprintf(buffer, sizeof(buffer), "%.3f", value);
   std::string text(buffer);
@@ -169,7 +184,10 @@ std::string value_of(const TestResult &test, const std::string &name) {
   if (!std::isfinite(metric->value)) {
     return "N/A";
   }
-  // Millisecond quantities are printed at exactly 3 decimal places (design-spec §5.14.3).
+  // A measured millisecond quantity keeps three decimals; see display_number_ms(). The
+  // authority is the approved preview set (t14/t15/t17/t24), not a spec section -- the
+  // design spec numbers its rules S1-S10 and says nothing about numeric precision, so an
+  // earlier "§5.14.3" citation here pointed at a section that does not exist.
   const bool is_ms = metric->unit == "ms" || metric->unit == "ms/buffer" || metric->unit == "ms / buffer" ||
                      metric->unit == "milliseconds" || metric->unit == "milliseconds per buffer";
   std::string text = is_ms ? display_number_ms(metric->value) : display_number(metric->value);

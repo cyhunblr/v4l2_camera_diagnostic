@@ -836,11 +836,8 @@ ucuncu seviyesi kullanicinin cihaz kosumunu paylasmasini bekliyor.
 | 6.3 SKIP govdesi | Kapi statuye degil **bosluga** bagli: `Skipped && metrics.empty() && details.empty()`. Kanit kaydetmis bir skipped test govdesini korur |
 | 6.4 binlik ayirici | `display_number()` eklendi. `number()` **degistirilmedi**: 52 cagri yeri SVG koordinati ve CSS genisligi besliyor, virgul orada geometriyi bozar |
 
-**6.4'un kapsami daraltildi (kullanici karari, secenek C):** yalnizca ayirici.
-Ondalik hassasiyet **dokunulmadi** — onaylı set ayni `float / milliseconds`
-turunu 0, 1, 2 ve 3 ondalikla basiyor (t06 `1132`, t13 `45.0`, t06 `44.81`,
-t14 `55.164`), yani tek bir hassasiyet kurali bunu uretemiyor. 408 sayisal
-hucrenin 101'i hala uretimden farkli; bu **acik madde**.
+**6.4 ilk turda ayiriciyla sinirliydi** (kullanici karari, secenek C). Ondalik
+hassasiyet sonraki turda ele alindi; asagidaki 6.9/6.10 gecerli durumdur.
 
 Ayirici sorusu koddan cozuldu, tahminle degil: `grouped_bytes()` zaten vardi ve
 tamsayi byte sayilarini grupluyordu (`5,439,744`), kesirli degerlerin ise hic
@@ -906,6 +903,100 @@ anahtar sozcugu de icerdigi icin stylesheet metninde substring aramasi
 sabotajdan sonra da yesil kaldi. Assertion `body` **bildirimine** cevrildi ve
 sabotaj tekrarlandi; ikinci turda yakalandi. Kural 2'nin tarif ettigi durum:
 test adi degil, assertion'in gercekte gozledigi sey kanittir.
+
+### 6.9/6.10. Milisaniye hassasiyeti
+
+Durum: `UYGULANDI` (2026-08-10).
+
+**6.9 — olculen ms degeri 3 ondalik.** Onaylı set latency istatistiklerini oyle
+basiyor (t14 `44.836`, t15 `44.796`, t17 `44.801`/`44.805`, t24 `+0.011`).
+Uretim global bir `%.2f` uyguladigi icin `44.801` ile `44.805` ikisi de `44.8`
+oluyordu; T17'nin var olma sebebi olan format karsilastirmasi kayboluyordu.
+Kural birime baglidir (`ms`, `ms/buffer`, `milliseconds`, ...), buyukluge degil:
+throughput 1dp, mebibytes 2dp, spin sayisi 1dp, percent 2dp kalir.
+
+**6.10 — tam sayi ms degeri ondalik almaz.** Ilk uygulama kosulsuz `%.3f`
+uyguluyordu ve `Aggregate` tablosundaki tam sayilari `1,132.000` /`1,140.000`
+yapiyordu. Onaylı t06 preview'i `1132` ve `1140` gosterir. Hassasiyet
+kaybetmek bir gosterim hatasi, **uydurmak** bir dogruluk hatasidir; bu yuzden
+iki yon de testte kilitli.
+
+**Iki olcum hatam duzeltildi (kayit icin):**
+
+1. Ilk raporumda "45 hucre bozulacak, 39'u `Test Configuration`" demistim.
+   **Yanlisti.** `config_items()` degerleri `detail_value()`'dan **metin**
+   olarak alir ve formatter'a hic ugramaz; o timeout parametreleri hicbir zaman
+   risk altinda degildi. Dogru kapsam `value_of()` yolundan gecen
+   `Aggregate`/`Measurement Result` hucreleridir. Hata kalibi: "birim ms" dar
+   kanitindan "45 hucre bozulur" genis iddiasini kurmak (Kural 1).
+2. Ilk sabotaj turu **gecersizdi**: tamsayi guard'i kaldirildiginda test yesil
+   kaldi (`build_exit=0, test_exit=0`), cunku fixture'da `value_of` yolundan
+   gecen tam sayili bir ms metrigi yoktu — guard vacuous'tu. Fixture'a t06'nin
+   gercek metrik adlari (`streamon_ms_mean`, `streamon_ms_max`) eklendi.
+   Ikinci sabotaj turu `1,132.000, 1,140.000` yakaladi.
+
+Ayrica kaynak kodda `design-spec §5.14.3` diye **var olmayan** bir bolume atif
+yapiliyordu (spec S1-S10 numaralandirmasi kullanir ve sayi bicimlendirmesi
+hakkinda hukum icermez). Atif, gercek dayanak olan onaylı preview setiyle
+degistirildi.
+
+Sabotaj kaniti (`build_exit` ayrica olculdu):
+
+| sabotaj | yakalayan |
+| --- | --- |
+| tamsayi guard'i kaldirildi | 6.10 — `1,132.000, 1,140.000` |
+| `is_ms` daima false yapildi (derlenebilir form) | 6.9 — `44.81 (2dp), 44.8 (1dp) x4` |
+
+**Acik kalan:** yedi kesirli hucre hala onaylı degerden farkli — t06
+`44.81`→`44.810`, t07 `44.00`→`44.000` ve `0.40`→`0.400`, t11 `5.11`→`5.110`,
+t13 `3.5`→`3.500`, `45.0`→`45.000`, `48.5`→`48.500`. Ayni birim icin 1, 2 ve 3
+ondalik isteyen bu kume tek kuralla uretilemez; metrik basina tablo gerektirir
+ve kullanici karari bekler.
+
+### 6.11. T01 format sayimi tekillestirildi
+
+Durum: `UYGULANDI` (2026-08-10). Kullanici karari: "tekillestir".
+
+**Bulgu kullanicidan geldi:** "t01'de NV16 gozukuyor" gozlemi baska bir yere
+cikti. Ayni rapor "bu kamerada kac format var" sorusuna **iki farkli cevap**
+veriyordu:
+
+| test | format sayisi | nasil |
+| --- | --- | --- |
+| T01 | **3** (UYVY, NV16, UYVY) | `enumerate_formats()` ham enumerasyonu yaziyordu |
+| T17 | **2** | kendi listesini kurarken tekrarlari atliyordu (satir ~774) |
+
+Kok neden: tegra isx021 surucusu UYVY'yi `VIDIOC_ENUM_FMT` index 0 **ve**
+index 2'de bildiriyor, ikisi de single-plane. Yani iki buffer type cagrisi
+degil, tek enumerasyon yurumesi icindeki tekrar.
+
+**Uygulama.** Kural `append_distinct_format()` icine alindi ve `(fourcc, buffer
+type)` cifti uzerinden tekillestiriyor. Buffer type anahtara **dahil**: ayni
+fourcc'nin single-plane ve multi-plane altinda listelenmesi iki gercek capture
+konfigurasyonudur ve `query_device()` ikisini ayni vektore yaziyor. Yalniz
+fourcc'ye bakmak gercek bir modu dusururdu — ilk hatanin tersi.
+
+Kural ayri bir fonksiyona cikarildi cunku `enumerate_formats()` gercek bir
+`ioctl` gerektiriyor; **karar** gerektirmiyor. Boylece donanimsiz test edilebilir
+(`tests/format_enumeration_test.cpp`).
+
+**Fixture ham cikti olarak kaliyor.** `tests/data/device-run-2026-08-09.json`
+surucunun bildirdigi duplikeyi **korur** — o, donanimin ne rapor ettiginin
+kaydidir. `run_metric_coverage_test` iki sey birden dogrular: duplikenin
+fixture'da hala var oldugu (yoksa kontrol vacuous olur) ve 3 girdinin 2 tekile
+karsilik geldigi.
+
+Sabotaj kaniti (`build_exit=0`, uc yon):
+
+| sabotaj | yakalayan |
+| --- | --- |
+| duplike kontrolu devre disi | tekrar eklendi, 3 girdi |
+| anahtar yalniz `fourcc` | multi-plane UYVY dusuruldu |
+| anahtara `description` eklendi | duplike geri girdi |
+
+Bir olcum hatasi daha duzeltildi: ilk assertion `"id": "t01..."` isaretinden
+**ileriye** dilimliyordu ve 0 format satiri buluyordu — serializer `details`'i
+`id`'den **once** yaziyor. Vacuous gecmek yerine FAIL verdigi icin yakalandi.
 
 ### 6.7. T11 grafigi onaylı konvansiyona cevrildi
 
