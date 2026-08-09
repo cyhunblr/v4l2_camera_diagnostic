@@ -83,7 +83,7 @@ const Expectation kApproved[] = {
     {"t09-buffer-recycling", {"Delay", "Available", "Mean wait", "Detail", nullptr}},
     {"t10-buffer-flags", {"Group", "Flag", "Observed", "Meaning", "Detail", nullptr}},
     {"t11-memory-throughput", {"Copy region", "Bytes per copy", "Throughput", "Relative to full", nullptr}},
-    {"t12-dmabuf-cache-sync", {"Check", "Observed", "Meaning", nullptr}},
+    {"t12-dmabuf-cache-sync", {"Metric", "Type", "Unit", "Value", "Detail", nullptr}},
     {"t13-poll-timeout-cliff", {"Round", "Detail", nullptr}},
     {"t14-trigger-latency", {"Metric", "Type", "Unit", "Value", "Detail", nullptr}},
     {"t15-nonblock-vs-block", {"Metric", "Type", "Unit", "Non-block", "Block", nullptr}},
@@ -91,9 +91,9 @@ const Expectation kApproved[] = {
     {"t17-format-comparison", {"Format", "Resolution", "Sizeimage", "Mean latency", "Max latency", nullptr}},
     {"t18-control-sweep", {"Control", "Current", "Default", "Access", nullptr}},
     {"t19-resolution-sweep", {"Resolution", "Pixel format", "Mean latency", "P95 latency", "Throughput", nullptr}},
-    {"t20-sequence-continuity", {"Check", "Value", "Detail", nullptr}},
+    {"t20-sequence-continuity", {"Metric", "Type", "Unit", "Value", "Detail", nullptr}},
     {"t21-timestamp-monotonicity", {"Metric", "Value", "Detail", nullptr}},
-    {"t22-stuck-frame", {"Metric", "Meaning", "Detail", nullptr}},
+    {"t22-stuck-frame", {"Metric", "Type", "Unit", "Value", "Detail", nullptr}},
     {"t23-sustained-capture", {"Window", "Captured", "Mean", "Stddev", "Miss", nullptr}},
     {"t24-latency-under-load", {"Statistic", "Baseline", "CPU load", "Delta", nullptr}},
     {"t25-multi-camera", {"Camera", "Role", "Captures", "Mean delivery", "Max delivery", "Sync samples", nullptr}},
@@ -376,12 +376,12 @@ int main() {
     }
     ok &= check(!contains(html, "class=\"detail-list\""), "T02 still emits the monospace detail list");
 
-    // 5.2.5: the hex id sits under the control name, at lower visual weight.
-    ok &= check(contains(html, "class=\"control-id\">0x00980900<"),
-                "the control's hexadecimal id is not shown beneath its name");
+    // The approved preview gives the id its own column rather than tucking it under the
+    // name, so it is read as data alongside Access, Range and Step.
+    ok &= check(contains(html, "<span>0x00980900</span>"), "the control's hexadecimal id is not its own cell");
 
     // 5.2.3: a class record is a full-width group heading with no current value read.
-    ok &= check(contains(html, "class=\"group-row\""), "T02 does not render class records as group headings");
+    ok &= check(contains(html, "group-row"), "T02 does not render class records as group headings");
     ok &=
         check(contains(html, "User Controls") && contains(html, "Camera Controls"), "T02 lost a control-class heading");
 
@@ -673,8 +673,15 @@ int main() {
 
     // 5.7.6: requested-vs-allocated chart, and 5.7.7: latency grouped by allocated depth,
     // with repeats collapsing into one point (all five requests share depth 2).
-    ok &= check(contains(html, "Requested vs allocated"), "T07 has no requested-vs-allocated chart");
-    ok &= check(contains(html, "Capture latency by allocated depth"), "T07 has no allocated-depth latency chart");
+    // The charts now take their name from the item label above the frame, as the approved
+    // preview shows, so they are found by their accessible name rather than by an
+    // in-frame heading that no longer exists.
+    ok &= check(contains(html, "aria-label=\"Requested versus allocated buffers\""),
+                "T07 has no requested-vs-allocated chart");
+    ok &= check(contains(html, "aria-label=\"Capture latency by allocated buffer depth\""),
+                "T07 has no allocated-depth latency chart");
+    ok &= check(contains(html, "<h4 class=\"item-label\">Latency by buffer count</h4>"),
+                "T07's charts are not named by the approved item label");
     ok &= check(count_of(html, "t07-depth-point") == 1,
                 "T07's latency chart does not collapse repeated allocated depths into one point");
 
@@ -714,8 +721,8 @@ int main() {
     const std::string html = v4l2diag::render_test_content(t08);
 
     // 5.8.5: the saturation-load comparison, both variants named with their rate.
-    ok &= check(contains(html, "Saturation Load") || contains(html, "Saturation load"),
-                "T08 has no Saturation Load chart");
+    ok &= check(contains(html, "<h4 class=\"item-label\">Saturation by variant</h4>"),
+                "T08 has no Saturation by variant chart");
     ok &= check(contains(html, "100 at 10/s") || contains(html, "100"),
                 "T08's load chart does not name Variant A's trigger rate");
     ok &= check(contains(html, "200 at 20/s") || contains(html, "200"),

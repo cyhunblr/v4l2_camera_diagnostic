@@ -350,6 +350,42 @@ v4l2diag::TestResult test_of(const std::string &id, const std::string &name, v4l
   // T26 reads its per-cycle warm-up counts from these lines, in the runner's own wording
   // (diagnostic_runner.cpp writes "cycle N: warmup=M frames"). Without them the approved
   // column chart has nothing to draw.
+  test.details.push_back("backend_memory: mmap");
+  // The configuration parameters, in the runner's own wording (verified against the
+  // 2026-08-09 device run). Test Configuration reads these, so a fixture without them
+  // renders rows that say "Unavailable" for a parameter that did have a value.
+
+  test.details.push_back("buffers_requested: 2");
+  test.details.push_back("poll_timeout_ms: 100");
+  test.details.push_back("warmup_frames: 5");
+  test.details.push_back("min_recovery_frames: 2");
+  test.details.push_back("full_warmup: 3");
+  test.details.push_back("rapid_warmup: 10");
+  test.details.push_back("slow_start_guard: 3");
+  test.details.push_back("full_cycles_configured: 20");
+  test.details.push_back("rapid_cycles_configured: 50");
+  test.details.push_back("slow_start_guard_limit: 3");
+  test.details.push_back("requested_range: 1 - 5");
+  test.details.push_back("warmup: 3");
+  test.details.push_back("capture_timeout: 100ms");
+  test.details.push_back("sample_interval: 200ms");
+  test.details.push_back("settle_time: 500ms");
+  test.details.push_back("allocated_buffers: 2");
+  test.details.push_back("variant_a_config: 100 triggers at 100ms");
+  test.details.push_back("variant_b_config: 200 triggers at 50ms");
+  test.details.push_back("error_threshold: 0");
+  test.details.push_back("samples_per_width: 8");
+  test.details.push_back("identical_run_threshold: 2");
+  test.details.push_back("compare_bytes: 4096 B");
+  test.details.push_back("repetitions_per_delay: 5");
+  test.details.push_back("inter_repetition_interval: 20ms");
+  test.details.push_back("requested_samples: 50");
+  test.details.push_back("repetitions: 100");
+  test.details.push_back("warmup_copies: 10");
+  test.details.push_back("timer: CLOCK_REALTIME");
+  test.details.push_back("samples_per_format: 20");
+  test.details.push_back("memcpy_reps: 100");
+  test.details.push_back("sizeimage: 4915200");
   test.details.push_back("cycle 1: warmup=1 frames");
   test.details.push_back("cycle 2: warmup=2 frames");
   test.details.push_back("cycle 3: warmup=1 frames");
@@ -817,7 +853,15 @@ int main() {
         ".bar-row", ".bar-label", ".bar-track", ".bar-fill", ".bar-info", ".bar-axis", ".scale-in", ".legend-mean",
         ".legend-max", ".legend-nonblock", ".legend-block", ".legend-ok", ".legend-miss", ".legend-p95",
         // T26's SVG column chart draws with these.
-        ".col-stab", ".svg-label", ".svg-value", ".axis-title", ".gridline", ".legend-stab"};
+        ".col-stab", ".svg-label", ".svg-value", ".axis-title", ".gridline", ".legend-stab",
+        // T22's coverage chart.
+        ".bar-uniq", ".legend-uniq", ".bar-ident", ".legend-ident",
+        // T16 edge sweep.
+        ".bar-high", ".legend-high", ".bar-low", ".legend-low",
+        // T24 phase comparison.
+        ".bar-base", ".legend-base", ".bar-load", ".legend-load", ".bar-delta", ".legend-delta",
+        // T14 timeout headroom, T17 throughput.
+        ".bar-thr", ".legend-thr"};
     for (const std::string &name : kBarClasses) {
       check(contains(html, name + " ") || contains(html, name + ",") || contains(html, name + "{"),
             "the bar charts emit " + name + " but no CSS rule defines it");
@@ -893,6 +937,47 @@ int main() {
         check(after.find("<rect") != std::string::npos, "t26's warm-up chart draws no columns");
       }
     }
+  }
+
+  // --- a configuration row never reads Unavailable ------------------------
+  // Test Configuration states the inputs a run used. A row there reading "Unavailable" is
+  // not an honest gap in a measurement -- the parameter DID have a value, the run simply
+  // never recorded it, so the reader cannot reproduce the run. Measured on the
+  // 2026-08-09 device report: 16 of the 33 remaining Unavailable cells were configuration
+  // rows, "Backend memory" among them on six different cards.
+  {
+    std::size_t at = 0;
+    std::size_t blank = 0;
+    std::vector<std::string> names;
+    const std::string open_tag = "<section class=\"section config-section\">";
+    while ((at = cards.find(open_tag, at)) != std::string::npos) {
+      const std::size_t end = cards.find("</section>", at);
+      const std::string section = cards.substr(at, end == std::string::npos ? std::string::npos : end - at);
+      std::size_t row_at = 0;
+      while ((row_at = section.find("<div class=\"grid-row", row_at)) != std::string::npos) {
+        const std::size_t row_end = section.find("</div>", row_at);
+        const std::string one =
+            section.substr(row_at, row_end == std::string::npos ? std::string::npos : row_end - row_at);
+        if (one.find("Unavailable") != std::string::npos) {
+          ++blank;
+          const std::size_t label_at = one.find("<span>");
+          if (label_at != std::string::npos) {
+            const std::size_t label_end = one.find("</span>", label_at);
+            names.push_back(one.substr(label_at + 6, label_end - label_at - 6));
+          }
+        }
+        row_at += 1;
+      }
+      at += 1;
+    }
+    std::string listed;
+    for (std::size_t i = 0; i < names.size() && i < 8; ++i) {
+      listed += (i ? ", " : "") + names[i];
+    }
+    check(blank == 0, std::to_string(blank) +
+                          " Test Configuration row(s) read Unavailable, so the run cannot be "
+                          "reproduced from the report: " +
+                          listed);
   }
 
   // --- no fabricated measurements -----------------------------------------

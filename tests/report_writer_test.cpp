@@ -556,9 +556,13 @@ int main() {
                      "the note callout should precede the detail list it explains");
   // Genuine omissions still report: t17's YUYV and t19's 3840x2160 both failed
   // S_FMT while other categories charted successfully.
-  html_ok &= require(occurrence_count(html, "Not measured") == 2,
+  // Counted by the callout's own wrapper, not by the words "Not measured": that phrase is
+  // also legitimate table text -- t24's validity table states "Observed CPU utilization:
+  // Not measured" -- and counting the raw string made an honest row look like a third
+  // omission callout.
+  html_ok &= require(occurrence_count(html, "class=\"chart-omissions\"") == 2,
                      "expected two Not measured callouts (t17's YUYV and t19's 3840x2160), found " +
-                         std::to_string(occurrence_count(html, "Not measured")));
+                         std::to_string(occurrence_count(html, "class=\"chart-omissions\"")));
   html_ok &= require(html.find("S_FMT failed") != std::string::npos, "a genuine omission reason went missing");
   // Regression: the single-format sweep charts nothing, so the heuristic has no
   // measured set to contrast against and must stay silent rather than flag the

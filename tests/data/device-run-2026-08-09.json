@@ -1,0 +1,1779 @@
+{
+   "cameras": [
+      {
+         "camera_path": "/dev/video4",
+         "memory_backends": [
+            "mmap"
+         ],
+         "role": "master",
+         "tests": [
+            {
+               "category": "discovery",
+               "details": [
+                  "mmap: supported (VIDIOC_REQBUFS accepted)",
+                  "dmabuf: supported (VIDIOC_EXPBUF accepted for MMAP buffer export)",
+                  "userptr: supported (VIDIOC_REQBUFS accepted)",
+                  "Driver: tegra-video",
+                  "Card: vi-output, tier4_isx021 41-001b",
+                  "Bus: platform:tegra-capture-vi:4",
+                  "Selected backend: mmap",
+                  "Format: UYVY (UYVY 4:2:2, single-plane)",
+                  "Format: NV16 (Y/CbCr 4:2:2, single-plane)",
+                  "Format: UYVY (UYVY 4:2:2, single-plane)"
+               ],
+               "duration_ms": 31.578375,
+               "id": "t01-device-compliance",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "VIDIOC_REQBUFS accepted",
+                     "name": "backend_mmap",
+                     "unit": "bool",
+                     "value": 1
+                  },
+                  {
+                     "description": "VIDIOC_EXPBUF accepted for MMAP buffer export",
+                     "name": "backend_dmabuf",
+                     "unit": "bool",
+                     "value": 1
+                  },
+                  {
+                     "description": "VIDIOC_REQBUFS accepted",
+                     "name": "backend_userptr",
+                     "unit": "bool",
+                     "value": 1
+                  },
+                  {
+                     "description": "Whether the device reports V4L2 capture support.",
+                     "name": "supports_capture",
+                     "unit": "bool",
+                     "value": 1
+                  },
+                  {
+                     "description": "Whether the device reports V4L2 streaming support.",
+                     "name": "supports_streaming",
+                     "unit": "bool",
+                     "value": 1
+                  },
+                  {
+                     "description": "Number of enumerated V4L2 pixel formats.",
+                     "name": "format_count",
+                     "unit": "count",
+                     "value": 3
+                  },
+                  {
+                     "description": "Whether the selected memory backend is accepted by VIDIOC_REQBUFS.",
+                     "name": "selected_backend_supported",
+                     "unit": "bool",
+                     "value": 1
+                  }
+               ],
+               "name": "V4L2 Device Compliance",
+               "notes": [],
+               "status": "pass",
+               "summary": "Device exposes capture, streaming, and selected memory backend.",
+               "warnings": []
+            },
+            {
+               "category": "discovery",
+               "details": [
+                  "Camera Controls [0x009a0001] min=0 max=0 step=0 default=0 current=0 [RO]",
+                  "Group Hold [0x009a2003] min=0 max=1 step=1 default=0 current=0",
+                  "HDR enable [0x009a2004] min=0 max=1 step=1 default=0 current=1",
+                  "Gain [0x009a2009] min=0 max=0 step=0 default=0 current=0",
+                  "Exposure [0x009a200a] min=0 max=0 step=0 default=0 current=0",
+                  "Frame Rate [0x009a200b] min=0 max=0 step=0 default=0 current=0",
+                  "Exposure Short [0x009a200c] min=0 max=0 step=0 default=0 current=0",
+                  "Bypass Mode [0x009a2064] min=0 max=1 step=1 default=0 current=0",
+                  "Override Enable [0x009a2065] min=0 max=1 step=1 default=0 current=0",
+                  "Height Align [0x009a2066] min=1 max=16 step=1 default=1 current=1",
+                  "Size Align [0x009a2067] min=0 max=2 step=1 default=0 current=0",
+                  "Write ISP format [0x009a2068] min=1 max=1 step=1 default=1 current=1",
+                  "Low Latency Mode [0x009a206d] min=0 max=1 step=1 default=0 current=1",
+                  "Preferred Stride [0x009a206e] min=0 max=65535 step=1 default=0 current=0",
+                  "Sensor Modes [0x009a2082] min=0 max=30 step=1 default=30 current=1 [RO]"
+               ],
+               "duration_ms": 0.190914,
+               "id": "t02-control-inventory",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Total controls.",
+                     "name": "control_count",
+                     "unit": "count",
+                     "value": 15
+                  },
+                  {
+                     "description": "Writable controls.",
+                     "name": "writable_count",
+                     "unit": "count",
+                     "value": 13
+                  },
+                  {
+                     "description": "Out-of-range controls.",
+                     "name": "out_of_range_count",
+                     "unit": "count",
+                     "value": 0
+                  }
+               ],
+               "name": "V4L2 Control Inventory",
+               "notes": [],
+               "status": "pass",
+               "summary": "Enumerated 15 controls (13 writable).",
+               "warnings": []
+            },
+            {
+               "category": "stream-state",
+               "details": [
+                  "cycle 1: STREAMON=1133ms, first frame=145ms, pulses=2",
+                  "cycle 2: STREAMON=1126ms, first frame=145ms, pulses=2",
+                  "cycle 3: STREAMON=1127ms, first frame=145ms, pulses=2"
+               ],
+               "duration_ms": 11703.048602,
+               "id": "t03-pipeline-ready",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Mean first_frame_ms",
+                     "name": "first_frame_ms_mean",
+                     "unit": "ms",
+                     "value": 145.14829666666665
+                  },
+                  {
+                     "description": "Max first_frame_ms",
+                     "name": "first_frame_ms_max",
+                     "unit": "ms",
+                     "value": 145.151622
+                  },
+                  {
+                     "description": "Mean streamon_ms",
+                     "name": "streamon_ms_mean",
+                     "unit": "ms",
+                     "value": 1129.2400246666666
+                  },
+                  {
+                     "description": "Max streamon_ms",
+                     "name": "streamon_ms_max",
+                     "unit": "ms",
+                     "value": 1133.060401
+                  },
+                  {
+                     "description": "Most STREAMON attempts needed in a cycle; >1 means the driver retried and streamon_ms includes its backoff.",
+                     "name": "streamon_attempts_max",
+                     "unit": "count",
+                     "value": 1
+                  },
+                  {
+                     "description": "Mean trigger pulses spent before the first frame arrived.",
+                     "name": "trigger_pulses_to_first_frame",
+                     "unit": "count",
+                     "value": 2
+                  },
+                  {
+                     "description": "Mean EAGAIN spins on DQBUF before the first frame arrived.",
+                     "name": "eagain_spins_to_first_frame",
+                     "unit": "count",
+                     "value": 245518.33333333334
+                  },
+                  {
+                     "description": "Cycles actually measured.",
+                     "name": "cycles_completed",
+                     "unit": "count",
+                     "value": 3
+                  },
+                  {
+                     "description": "Cycles where no frame arrived within the deadline.",
+                     "name": "first_frame_timeouts",
+                     "unit": "count",
+                     "value": 0
+                  }
+               ],
+               "name": "Pipeline Readiness after STREAMON",
+               "notes": [],
+               "status": "pass",
+               "summary": "Pipeline ready 145ms after STREAMON (STREAMON 1133ms).",
+               "warnings": []
+            },
+            {
+               "category": "stream-state",
+               "details": [
+                  "buffers_requested: 2",
+                  "poll_timeout_ms: 50",
+                  "poll(50ms) returned 1 (expected 0)",
+                  "DQBUF returned -1, errno=22 (Invalid argument)"
+               ],
+               "duration_ms": 32.453008,
+               "id": "t04-no-streamon",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "poll(50ms) return value without STREAMON; expected 0.",
+                     "name": "poll_returned",
+                     "unit": "count",
+                     "value": 1
+                  },
+                  {
+                     "description": "Whether DQBUF correctly failed without STREAMON.",
+                     "name": "dqbuf_failed",
+                     "unit": "bool",
+                     "value": 1
+                  },
+                  {
+                     "description": "errno from DQBUF without STREAMON; expected EAGAIN(11) or EINVAL(22).",
+                     "name": "dqbuf_errno",
+                     "unit": "errno",
+                     "value": 22
+                  }
+               ],
+               "name": "Frame Capture without STREAMON",
+               "notes": [],
+               "status": "warn",
+               "summary": "DQBUF correctly fails, but poll returned non-zero without STREAMON.",
+               "warnings": []
+            },
+            {
+               "category": "stream-state",
+               "details": [
+                  "warmup_frames: 3",
+                  "poll_timeout_ms: 100",
+                  "poll ret=1 POLLERR",
+                  "DQBUF after STREAMOFF: failed errno=22 (Invalid argument)"
+               ],
+               "duration_ms": 6612.3591,
+               "id": "t05-pollerr-handling",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Baseline frames.",
+                     "name": "baseline_ok",
+                     "unit": "count",
+                     "value": 3
+                  },
+                  {
+                     "description": "POLLERR after STREAMOFF.",
+                     "name": "pollerr_raised",
+                     "unit": "bool",
+                     "value": 1
+                  },
+                  {
+                     "description": "POLLHUP after STREAMOFF.",
+                     "name": "pollhup_raised",
+                     "unit": "bool",
+                     "value": 0
+                  },
+                  {
+                     "description": "DQBUF correctly failed after STREAMOFF.",
+                     "name": "dqbuf_failed",
+                     "unit": "bool",
+                     "value": 1
+                  },
+                  {
+                     "description": "Re-STREAMON succeeded.",
+                     "name": "restreamon_ok",
+                     "unit": "bool",
+                     "value": 1
+                  },
+                  {
+                     "description": "Recovery frames.",
+                     "name": "recovery_ok",
+                     "unit": "count",
+                     "value": 0
+                  }
+               ],
+               "name": "STREAMOFF Error Handling and Recovery",
+               "notes": [
+                  "What this checks: after streaming is stopped, asking the driver for a frame must fail rather than hand back a stale one. So in the evidence below a failed dequeue is the correct, expected result \u2014 not an error. The test then restarts streaming and confirms frames flow again, which is what the recovery count reports."
+               ],
+               "status": "warn",
+               "summary": "DQBUF failed correctly but recovery partial (0/3).",
+               "warnings": []
+            },
+            {
+               "category": "stream-state",
+               "details": [
+                  "full_warmup: 3",
+                  "rapid_warmup: 10",
+                  "slow_start_guard: 3"
+               ],
+               "duration_ms": 289392.627334,
+               "id": "t06-stream-cycles",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Full cycles OK.",
+                     "name": "full_cycles_success",
+                     "unit": "count",
+                     "value": 20
+                  },
+                  {
+                     "description": "Full cycles actually run.",
+                     "name": "full_cycles_attempted",
+                     "unit": "count",
+                     "value": 20
+                  },
+                  {
+                     "description": "Full cycle failures.",
+                     "name": "full_cycle_failures",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "Rapid cycles with frame.",
+                     "name": "rapid_cycles_ok",
+                     "unit": "count",
+                     "value": 50
+                  },
+                  {
+                     "description": "Rapid capture timeouts.",
+                     "name": "rapid_capture_timeouts",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "Total rapid cycles.",
+                     "name": "rapid_cycles_total",
+                     "unit": "count",
+                     "value": 50
+                  },
+                  {
+                     "description": "Rapid cycles actually run.",
+                     "name": "rapid_cycles_attempted",
+                     "unit": "count",
+                     "value": 50
+                  },
+                  {
+                     "description": "Rapid cycles where open/STREAMON failed.",
+                     "name": "rapid_start_failures",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "Rapid loop stopped early to protect the hardware.",
+                     "name": "rapid_aborted",
+                     "unit": "bool",
+                     "value": 0
+                  },
+                  {
+                     "description": "Full loop stopped early to protect the hardware.",
+                     "name": "full_aborted",
+                     "unit": "bool",
+                     "value": 0
+                  },
+                  {
+                     "description": "Rapid loop not run because STREAMON was already slow.",
+                     "name": "rapid_skipped",
+                     "unit": "bool",
+                     "value": 0
+                  },
+                  {
+                     "description": "open/STREAMON failures across both loops.",
+                     "name": "start_failures_total",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "Slowest open+STREAMON. Seconds here means a shared camera group is being re-initialised on every cycle.",
+                     "name": "streamon_ms_max",
+                     "unit": "ms",
+                     "value": 1140.313017
+                  },
+                  {
+                     "description": "Mean open+STREAMON duration.",
+                     "name": "streamon_ms_mean",
+                     "unit": "ms",
+                     "value": 1132.1439612142856
+                  },
+                  {
+                     "description": "Mean first_frame_latency",
+                     "name": "first_frame_latency_mean",
+                     "unit": "ms",
+                     "value": 44.81463544999999
+                  },
+                  {
+                     "description": "Max first_frame_latency",
+                     "name": "first_frame_latency_max",
+                     "unit": "ms",
+                     "value": 44.839013
+                  }
+               ],
+               "name": "STREAMON/STREAMOFF Cycle Reliability",
+               "notes": [
+                  "This test starts and stops the camera stream over and over, in two phases. A \"full\" cycle opens the device, captures several frames, then closes it \u2014 the normal pattern an application uses. A \"rapid\" cycle opens and closes as fast as possible with a single frame in between, to see whether back-to-back restarts break the pipeline. Both ratios are cycles that delivered frames out of cycles attempted."
+               ],
+               "status": "pass",
+               "summary": "Full: 20/20 OK. Rapid: 50/50 captured.",
+               "warnings": []
+            },
+            {
+               "category": "buffering",
+               "details": [
+                  "requested_range: 1 - 5",
+                  "samples_per_request: 20",
+                  "warmup: 3",
+                  "capture_timeout: 100ms",
+                  "sample_interval: 200ms",
+                  "count=1 granted=1 mean=44ms miss=0/20",
+                  "count=2 granted=2 mean=44ms miss=0/20",
+                  "count=3 granted=3 mean=44ms miss=0/20",
+                  "count=4 granted=4 mean=44ms miss=0/20",
+                  "count=5 granted=5 mean=44ms miss=0/20"
+               ],
+               "duration_ms": 47009.545335,
+               "id": "t07-multi-buffer",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Buffers granted when 1 requested.",
+                     "name": "granted_for_1",
+                     "unit": "count",
+                     "value": 1
+                  },
+                  {
+                     "description": "Buffers granted when 2 requested.",
+                     "name": "granted_for_2",
+                     "unit": "count",
+                     "value": 2
+                  },
+                  {
+                     "description": "Buffers granted when 3 requested.",
+                     "name": "granted_for_3",
+                     "unit": "count",
+                     "value": 3
+                  },
+                  {
+                     "description": "Buffers granted when 4 requested.",
+                     "name": "granted_for_4",
+                     "unit": "count",
+                     "value": 4
+                  },
+                  {
+                     "description": "Buffers granted when 5 requested.",
+                     "name": "granted_for_5",
+                     "unit": "count",
+                     "value": 5
+                  }
+               ],
+               "name": "Multi-buffer Configurations",
+               "notes": [],
+               "status": "pass",
+               "summary": "Buffer count probe complete. See details for granted counts and capture latency.",
+               "warnings": []
+            },
+            {
+               "category": "buffering",
+               "details": [
+                  "settle_time: 500ms",
+                  "variant_a: 100 triggers at 100ms",
+                  "variant_b: 200 triggers at 50ms",
+                  "allocated_buffers: 2",
+                  "Variant A: buffers=2 triggers=100 available=2 errors=1",
+                  "Variant B: buffers=2 triggers=200 available=2 errors=1",
+                  "Error flag buffers: variant A buffer_index=0 sequence=0 flags=0x2041",
+                  "Error flag buffers: variant B buffer_index=0 sequence=0 flags=0x2041"
+               ],
+               "duration_ms": 23369.230891,
+               "id": "t08-buffer-overwrite",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Variant A",
+                     "name": "triggers_A",
+                     "unit": "count",
+                     "value": 100
+                  },
+                  {
+                     "description": "Frames available after all triggers in variant A.",
+                     "name": "frames_available_A",
+                     "unit": "count",
+                     "value": 2
+                  },
+                  {
+                     "description": "Variant B",
+                     "name": "triggers_B",
+                     "unit": "count",
+                     "value": 200
+                  },
+                  {
+                     "description": "Frames available after all triggers in variant B.",
+                     "name": "frames_available_B",
+                     "unit": "count",
+                     "value": 2
+                  },
+                  {
+                     "description": "Frames with V4L2_BUF_FLAG_ERROR across both variants.",
+                     "name": "error_flag_total",
+                     "unit": "count",
+                     "value": 2
+                  }
+               ],
+               "name": "Buffer Saturation Behavior",
+               "notes": [],
+               "status": "warn",
+               "summary": "Buffer saturation test completed; 2 frames had V4L2_BUF_FLAG_ERROR.",
+               "warnings": []
+            },
+            {
+               "category": "metadata",
+               "details": [
+                  "combined_mask: 0x00002001",
+                  "Combined flags OR: 0x00002001",
+                  "declared_clock_type: V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC (CLOCK_MONOTONIC)",
+                  "timestamp_point: V4L2_BUF_FLAG_TSTAMP_SRC_EOF (End of Frame)",
+                  "source_consistency: Consistent across all captured frames",
+                  "Timestamp source consistent: yes",
+                  "requested_samples: 50",
+                  "warmup: 5",
+                  "backend_memory: mmap",
+                  "capture_timeout: 100 ms",
+                  "sample_interval: 100 ms",
+                  "error_threshold: 0",
+                  "flag: Data Integrity|V4L2_BUF_FLAG_ERROR|0|Hardware or transmission error|CLEAR",
+                  "flag: Frame Type|V4L2_BUF_FLAG_KEYFRAME|0|Keyframe / IDR frame|NOT SET",
+                  "flag: Timestamp Clock|V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC|50|Monotonic clock type|ACTIVE",
+                  "flag: Timestamp Clock|V4L2_BUF_FLAG_TIMESTAMP_COPY|0|Timestamp copy mode|NOT SET",
+                  "flag: Timestamp Source|V4L2_BUF_FLAG_TSTAMP_SRC_SOE|0|Start of exposure timestamp|NOT SET",
+                  "flag: Timestamp Source|V4L2_BUF_FLAG_TSTAMP_SRC_EOF|50|End of frame timestamp|ACTIVE"
+               ],
+               "duration_ms": 12410.216754,
+               "id": "t10-buffer-flags",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Requested sample count.",
+                     "name": "requested",
+                     "unit": "count",
+                     "value": 50
+                  },
+                  {
+                     "description": "Captured sample count.",
+                     "name": "captured",
+                     "unit": "count",
+                     "value": 50
+                  },
+                  {
+                     "description": "Frames captured.",
+                     "name": "frames_captured",
+                     "unit": "count",
+                     "value": 50
+                  },
+                  {
+                     "description": "V4L2_BUF_FLAG_ERROR.",
+                     "name": "flag_error",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "KEYFRAME.",
+                     "name": "flag_keyframe",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "TIMESTAMP_MONOTONIC.",
+                     "name": "flag_ts_monotonic",
+                     "unit": "count",
+                     "value": 50
+                  },
+                  {
+                     "description": "TIMESTAMP_COPY.",
+                     "name": "flag_ts_copy",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "TSTAMP_SRC_SOE.",
+                     "name": "flag_soe",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "TSTAMP_SRC_EOF.",
+                     "name": "flag_eof",
+                     "unit": "count",
+                     "value": 50
+                  }
+               ],
+               "name": "V4L2 Buffer Flag Analysis",
+               "notes": [],
+               "status": "pass",
+               "summary": "No error flags. Timestamp source consistent across 50 frames.",
+               "warnings": []
+            },
+            {
+               "category": "memory",
+               "details": [
+                  "Buffer size: 5439744 bytes",
+                  "repetitions: 100",
+                  "warmup_copies: 10",
+                  "timer: CLOCK_REALTIME",
+                  "backend_memory: mmap",
+                  "mmap_full: 1004 MB/s",
+                  "copy: mmap_full|5439744|1004.181857|full",
+                  "mmap_4k: 1033 MB/s",
+                  "copy: mmap_4k|4096|1033.257330|cache",
+                  "mmap_64k: 1012 MB/s",
+                  "copy: mmap_64k|65536|1012.649204|cache"
+               ],
+               "duration_ms": 559.095656,
+               "id": "t11-memory-throughput",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Device buffer size.",
+                     "name": "frame_size_bytes",
+                     "unit": "bytes",
+                     "value": 5439744
+                  },
+                  {
+                     "description": "Active image payload size.",
+                     "name": "sizeimage_bytes",
+                     "unit": "bytes",
+                     "value": 4915200
+                  },
+                  {
+                     "description": "Mapped buffer capacity.",
+                     "name": "mapped_capacity_bytes",
+                     "unit": "bytes",
+                     "value": 5439744
+                  },
+                  {
+                     "description": "mmap_full memcpy throughput.",
+                     "name": "mmap_full_mbps",
+                     "unit": "MB/s",
+                     "value": 1004.1818573036061
+                  },
+                  {
+                     "description": "mmap_4k memcpy throughput.",
+                     "name": "mmap_4k_mbps",
+                     "unit": "MB/s",
+                     "value": 1033.2573296795151
+                  },
+                  {
+                     "description": "mmap_64k memcpy throughput.",
+                     "name": "mmap_64k_mbps",
+                     "unit": "MB/s",
+                     "value": 1012.6492037336782
+                  }
+               ],
+               "name": "Memory Access Throughput",
+               "notes": [],
+               "status": "pass",
+               "summary": "Memory throughput benchmark complete on device-mapped buffers.",
+               "warnings": []
+            },
+            {
+               "category": "polling",
+               "details": [
+                  "warmup_frames: 10",
+                  "probe_frames: 10",
+                  "coarse: 150ms \u2192 10/10",
+                  "coarse: 100ms \u2192 10/10",
+                  "coarse:  80ms \u2192 10/10",
+                  "coarse:  60ms \u2192 10/10",
+                  "coarse:  50ms \u2192 10/10",
+                  "coarse:  40ms \u2192 0/10",
+                  "bsearch:  45ms \u2192 10/10",
+                  "bsearch:  42ms \u2192 0/10",
+                  "bsearch:  43ms \u2192 0/10",
+                  "bsearch:  44ms \u2192 0/10",
+                  "stability round 1: @45ms=10/10, @44ms=0/10 \u2713",
+                  "stability round 2: @45ms=10/10, @44ms=0/10 \u2713",
+                  "stability round 3: @45ms=10/10, @44ms=0/10 \u2713",
+                  "stability round 4: @45ms=10/10, @44ms=0/10 \u2713",
+                  "stability round 5: @45ms=10/10, @44ms=0/10 \u2713"
+               ],
+               "duration_ms": 61630.742379,
+               "id": "t13-poll-timeout-cliff",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Shortest poll(2) timeout that still catches every frame, measured from the trigger's rising edge \u2014 this is already the full trigger-to-frame budget.",
+                     "name": "cliff_ms",
+                     "unit": "ms",
+                     "value": 45
+                  },
+                  {
+                     "description": "Highest timeout with misses.",
+                     "name": "first_miss_ms",
+                     "unit": "ms",
+                     "value": 44
+                  },
+                  {
+                     "description": "Production timeout - cliff timeout.",
+                     "name": "safety_margin_ms",
+                     "unit": "ms",
+                     "value": 3.5
+                  },
+                  {
+                     "description": "Whether cliff was stable over 5 rounds.",
+                     "name": "stability_confirmed",
+                     "unit": "bool",
+                     "value": 1
+                  },
+                  {
+                     "description": "Rounds that confirmed the cliff (out of 5).",
+                     "name": "stability_rounds_passed",
+                     "unit": "count",
+                     "value": 5
+                  }
+               ],
+               "name": "Poll Timeout Reliability Boundary",
+               "notes": [
+                  "How this number is measured: the 5.0 ms trigger pulse is fired without waiting for it to finish, and poll() starts immediately on the rising edge. So cliff_ms is timed from the rising edge and already covers the whole path from trigger to frame. Use it directly as the minimum poll timeout \u2014 do not add the pulse width on top, which would double-count time the poll already overlapped."
+               ],
+               "status": "warn",
+               "summary": "Cliff at 45ms; only 3ms margin (threshold: 5ms).",
+               "warnings": []
+            },
+            {
+               "category": "latency",
+               "details": [
+                  "capture_timeout: 100ms",
+                  "warmup_frames: 5",
+                  "backend_memory: mmap"
+               ],
+               "duration_ms": 17271.091173,
+               "id": "t14-trigger-latency",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Frames successfully captured.",
+                     "name": "frames_captured",
+                     "unit": "count",
+                     "value": 50
+                  },
+                  {
+                     "description": "Frames missed.",
+                     "name": "frames_missed",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "Mean latency",
+                     "name": "latency_mean",
+                     "unit": "ms",
+                     "value": 44.809148879999995
+                  },
+                  {
+                     "description": "Std-dev latency",
+                     "name": "latency_stddev",
+                     "unit": "ms",
+                     "value": 0.027573602961366676
+                  },
+                  {
+                     "description": "Min latency",
+                     "name": "latency_min",
+                     "unit": "ms",
+                     "value": 44.78266
+                  },
+                  {
+                     "description": "Max latency",
+                     "name": "latency_max",
+                     "unit": "ms",
+                     "value": 44.975622
+                  },
+                  {
+                     "description": "95th-percentile latency",
+                     "name": "latency_p95",
+                     "unit": "ms",
+                     "value": 44.834661
+                  },
+                  {
+                     "description": "Jitter latency",
+                     "name": "latency_jitter",
+                     "unit": "ms",
+                     "value": 0.038805106948458845
+                  }
+               ],
+               "name": "Trigger-to-Frame Delivery Latency",
+               "notes": [],
+               "status": "pass",
+               "summary": "Captured 50/50 frames. mean=44ms p95=44ms.",
+               "warnings": []
+            },
+            {
+               "category": "io-mode",
+               "details": [],
+               "duration_ms": 23671.19271,
+               "id": "t15-nonblock-vs-block",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Mean nonblock_latency",
+                     "name": "nonblock_latency_mean",
+                     "unit": "ms",
+                     "value": 44.80192520000001
+                  },
+                  {
+                     "description": "Std-dev nonblock_latency",
+                     "name": "nonblock_latency_stddev",
+                     "unit": "ms",
+                     "value": 0.008506646782130145
+                  },
+                  {
+                     "description": "Min nonblock_latency",
+                     "name": "nonblock_latency_min",
+                     "unit": "ms",
+                     "value": 44.78202
+                  },
+                  {
+                     "description": "Max nonblock_latency",
+                     "name": "nonblock_latency_max",
+                     "unit": "ms",
+                     "value": 44.82198500000004
+                  },
+                  {
+                     "description": "95th-percentile nonblock_latency",
+                     "name": "nonblock_latency_p95",
+                     "unit": "ms",
+                     "value": 44.815588
+                  },
+                  {
+                     "description": "Jitter nonblock_latency",
+                     "name": "nonblock_latency_jitter",
+                     "unit": "ms",
+                     "value": 0.013288098344838259
+                  },
+                  {
+                     "description": "Avg EAGAIN spins per frame.",
+                     "name": "avg_eagain_spins",
+                     "unit": "count",
+                     "value": 86169.7
+                  },
+                  {
+                     "description": "NON_BLOCK captures.",
+                     "name": "nonblock_captures",
+                     "unit": "count",
+                     "value": 30
+                  },
+                  {
+                     "description": "Mean block_latency",
+                     "name": "block_latency_mean",
+                     "unit": "ms",
+                     "value": 44.80591133333334
+                  },
+                  {
+                     "description": "Std-dev block_latency",
+                     "name": "block_latency_stddev",
+                     "unit": "ms",
+                     "value": 0.030850458220856025
+                  },
+                  {
+                     "description": "Min block_latency",
+                     "name": "block_latency_min",
+                     "unit": "ms",
+                     "value": 44.780035
+                  },
+                  {
+                     "description": "Max block_latency",
+                     "name": "block_latency_max",
+                     "unit": "ms",
+                     "value": 44.957476
+                  },
+                  {
+                     "description": "95th-percentile block_latency",
+                     "name": "block_latency_p95",
+                     "unit": "ms",
+                     "value": 44.825252
+                  },
+                  {
+                     "description": "Jitter block_latency",
+                     "name": "block_latency_jitter",
+                     "unit": "ms",
+                     "value": 0.04279969573610827
+                  },
+                  {
+                     "description": "BLOCK captures.",
+                     "name": "block_captures",
+                     "unit": "count",
+                     "value": 30
+                  }
+               ],
+               "name": "Non-blocking Spin vs Blocking DQBUF",
+               "notes": [],
+               "status": "pass",
+               "summary": "NON_BLOCK 30/30 OK; BLOCK 30/30 OK.",
+               "warnings": []
+            },
+            {
+               "category": "trigger",
+               "details": [
+                  "samples_per_width: 8",
+                  "warmup_frames: 5",
+                  "poll_timeout_ms: 500",
+                  "1ms: hits=8/8 lat_HIGH=44ms lat_LOW=43ms",
+                  "2ms: hits=8/8 lat_HIGH=44ms lat_LOW=42ms",
+                  "3ms: hits=8/8 lat_HIGH=44ms lat_LOW=41ms",
+                  "5ms: hits=8/8 lat_HIGH=44ms lat_LOW=39ms",
+                  "7ms: hits=8/8 lat_HIGH=44ms lat_LOW=37ms",
+                  "10ms: hits=8/8 lat_HIGH=44ms lat_LOW=34ms",
+                  "13ms: hits=8/8 lat_HIGH=44ms lat_LOW=31ms",
+                  "15ms: hits=8/8 lat_HIGH=44ms lat_LOW=29ms",
+                  "20ms: hits=8/8 lat_HIGH=44ms lat_LOW=24ms",
+                  "25ms: hits=8/8 lat_HIGH=44ms lat_LOW=19ms",
+                  "30ms: hits=8/8 lat_HIGH=44ms lat_LOW=14ms",
+                  "Edge detection: rising"
+               ],
+               "duration_ms": 9589.69323,
+               "id": "t16-gpio-pulse-width",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Hits at 1ms.",
+                     "name": "hits_1ms",
+                     "unit": "count",
+                     "value": 8
+                  },
+                  {
+                     "description": "Mean lat from HIGH at 1ms.",
+                     "name": "lat_high_avg_1ms",
+                     "unit": "ms",
+                     "value": 44.788755125
+                  },
+                  {
+                     "description": "Mean lat from LOW at 1ms.",
+                     "name": "lat_low_avg_1ms",
+                     "unit": "ms",
+                     "value": 43.788755125
+                  },
+                  {
+                     "description": "Hits at 2ms.",
+                     "name": "hits_2ms",
+                     "unit": "count",
+                     "value": 8
+                  },
+                  {
+                     "description": "Mean lat from HIGH at 2ms.",
+                     "name": "lat_high_avg_2ms",
+                     "unit": "ms",
+                     "value": 44.791799125
+                  },
+                  {
+                     "description": "Mean lat from LOW at 2ms.",
+                     "name": "lat_low_avg_2ms",
+                     "unit": "ms",
+                     "value": 42.791799125
+                  },
+                  {
+                     "description": "Hits at 3ms.",
+                     "name": "hits_3ms",
+                     "unit": "count",
+                     "value": 8
+                  },
+                  {
+                     "description": "Mean lat from HIGH at 3ms.",
+                     "name": "lat_high_avg_3ms",
+                     "unit": "ms",
+                     "value": 44.791346125000004
+                  },
+                  {
+                     "description": "Mean lat from LOW at 3ms.",
+                     "name": "lat_low_avg_3ms",
+                     "unit": "ms",
+                     "value": 41.791346125
+                  },
+                  {
+                     "description": "Hits at 5ms.",
+                     "name": "hits_5ms",
+                     "unit": "count",
+                     "value": 8
+                  },
+                  {
+                     "description": "Mean lat from HIGH at 5ms.",
+                     "name": "lat_high_avg_5ms",
+                     "unit": "ms",
+                     "value": 44.79301
+                  },
+                  {
+                     "description": "Mean lat from LOW at 5ms.",
+                     "name": "lat_low_avg_5ms",
+                     "unit": "ms",
+                     "value": 39.79301
+                  },
+                  {
+                     "description": "Hits at 7ms.",
+                     "name": "hits_7ms",
+                     "unit": "count",
+                     "value": 8
+                  },
+                  {
+                     "description": "Mean lat from HIGH at 7ms.",
+                     "name": "lat_high_avg_7ms",
+                     "unit": "ms",
+                     "value": 44.799414875
+                  },
+                  {
+                     "description": "Mean lat from LOW at 7ms.",
+                     "name": "lat_low_avg_7ms",
+                     "unit": "ms",
+                     "value": 37.799414875
+                  },
+                  {
+                     "description": "Hits at 10ms.",
+                     "name": "hits_10ms",
+                     "unit": "count",
+                     "value": 8
+                  },
+                  {
+                     "description": "Mean lat from HIGH at 10ms.",
+                     "name": "lat_high_avg_10ms",
+                     "unit": "ms",
+                     "value": 44.79220725
+                  },
+                  {
+                     "description": "Mean lat from LOW at 10ms.",
+                     "name": "lat_low_avg_10ms",
+                     "unit": "ms",
+                     "value": 34.79220725
+                  },
+                  {
+                     "description": "Hits at 13ms.",
+                     "name": "hits_13ms",
+                     "unit": "count",
+                     "value": 8
+                  },
+                  {
+                     "description": "Mean lat from HIGH at 13ms.",
+                     "name": "lat_high_avg_13ms",
+                     "unit": "ms",
+                     "value": 44.787383625000004
+                  },
+                  {
+                     "description": "Mean lat from LOW at 13ms.",
+                     "name": "lat_low_avg_13ms",
+                     "unit": "ms",
+                     "value": 31.787383624999997
+                  },
+                  {
+                     "description": "Hits at 15ms.",
+                     "name": "hits_15ms",
+                     "unit": "count",
+                     "value": 8
+                  },
+                  {
+                     "description": "Mean lat from HIGH at 15ms.",
+                     "name": "lat_high_avg_15ms",
+                     "unit": "ms",
+                     "value": 44.8029525
+                  },
+                  {
+                     "description": "Mean lat from LOW at 15ms.",
+                     "name": "lat_low_avg_15ms",
+                     "unit": "ms",
+                     "value": 29.802952500000004
+                  },
+                  {
+                     "description": "Hits at 20ms.",
+                     "name": "hits_20ms",
+                     "unit": "count",
+                     "value": 8
+                  },
+                  {
+                     "description": "Mean lat from HIGH at 20ms.",
+                     "name": "lat_high_avg_20ms",
+                     "unit": "ms",
+                     "value": 44.788448249999995
+                  },
+                  {
+                     "description": "Mean lat from LOW at 20ms.",
+                     "name": "lat_low_avg_20ms",
+                     "unit": "ms",
+                     "value": 24.78844825
+                  },
+                  {
+                     "description": "Hits at 25ms.",
+                     "name": "hits_25ms",
+                     "unit": "count",
+                     "value": 8
+                  },
+                  {
+                     "description": "Mean lat from HIGH at 25ms.",
+                     "name": "lat_high_avg_25ms",
+                     "unit": "ms",
+                     "value": 44.790071875
+                  },
+                  {
+                     "description": "Mean lat from LOW at 25ms.",
+                     "name": "lat_low_avg_25ms",
+                     "unit": "ms",
+                     "value": 19.790071875
+                  },
+                  {
+                     "description": "Hits at 30ms.",
+                     "name": "hits_30ms",
+                     "unit": "count",
+                     "value": 8
+                  },
+                  {
+                     "description": "Mean lat from HIGH at 30ms.",
+                     "name": "lat_high_avg_30ms",
+                     "unit": "ms",
+                     "value": 44.78753987500001
+                  },
+                  {
+                     "description": "Mean lat from LOW at 30ms.",
+                     "name": "lat_low_avg_30ms",
+                     "unit": "ms",
+                     "value": 14.787539875000002
+                  },
+                  {
+                     "description": "Smallest pulse width with 100% capture success.",
+                     "name": "min_reliable_width_ms",
+                     "unit": "ms",
+                     "value": 1
+                  },
+                  {
+                     "description": "Avg within-level range of lat_HIGH.",
+                     "name": "range_h",
+                     "unit": "ms",
+                     "value": 0.03941527272727412
+                  },
+                  {
+                     "description": "Avg within-level range of lat_LOW.",
+                     "name": "range_l",
+                     "unit": "ms",
+                     "value": 0.039415272727272015
+                  },
+                  {
+                     "description": "Spread of lat_HIGH across swept widths. Near zero when the sensor latches on the rising edge; grows with the sweep range when it latches on the falling edge.",
+                     "name": "spread_h",
+                     "unit": "ms",
+                     "value": 0.015568874999999593
+                  },
+                  {
+                     "description": "Spread of lat_LOW across swept widths. Mirrors spread_h: the larger of the two identifies the non-latching edge, so a value near the sweep range is expected.",
+                     "name": "spread_l",
+                     "unit": "ms",
+                     "value": 29.00121525
+                  }
+               ],
+               "name": "Trigger Pulse Width and Edge Detection",
+               "notes": [
+                  "The shortest pulse this sensor latched reliably was 1 ms. Set pulse_width_ms in the device profile to that or higher; shorter pulses risk frames the sensor never sees."
+               ],
+               "status": "pass",
+               "summary": "GPIO pulse width sweep complete. Trigger edge: rising.",
+               "warnings": []
+            },
+            {
+               "category": "format",
+               "details": [
+                  "UYVY: sizeimage=4915200",
+                  "NV16: sizeimage=4915200"
+               ],
+               "duration_ms": 19831.482946,
+               "id": "t17-format-comparison",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Mean uyvy_latency",
+                     "name": "uyvy_latency_mean",
+                     "unit": "ms",
+                     "value": 44.80321415
+                  },
+                  {
+                     "description": "Max uyvy_latency",
+                     "name": "uyvy_latency_max",
+                     "unit": "ms",
+                     "value": 44.824994
+                  },
+                  {
+                     "description": "UYVY memcpy throughput.",
+                     "name": "uyvy_throughput_mbps",
+                     "unit": "MB/s",
+                     "value": 1054.465852859428
+                  },
+                  {
+                     "description": "Mean nv16_latency",
+                     "name": "nv16_latency_mean",
+                     "unit": "ms",
+                     "value": 44.81326564999999
+                  },
+                  {
+                     "description": "Max nv16_latency",
+                     "name": "nv16_latency_max",
+                     "unit": "ms",
+                     "value": 44.838434
+                  },
+                  {
+                     "description": "NV16 memcpy throughput.",
+                     "name": "nv16_throughput_mbps",
+                     "unit": "MB/s",
+                     "value": 1059.7063013643037
+                  },
+                  {
+                     "description": "Formats enumerated.",
+                     "name": "format_count",
+                     "unit": "count",
+                     "value": 2
+                  },
+                  {
+                     "description": "Formats successfully tested.",
+                     "name": "formats_tested",
+                     "unit": "count",
+                     "value": 2
+                  }
+               ],
+               "name": "Pixel Format Performance Comparison",
+               "notes": [],
+               "status": "pass",
+               "summary": "Format comparison complete. Tested 2/2 formats.",
+               "warnings": []
+            },
+            {
+               "category": "controls",
+               "details": [
+                  "Camera Controls [0x009a0001] min=0 max=0 step=0 def=0 cur=43690 [RO]",
+                  "Group Hold [0x009a2003] min=0 max=1 step=1 def=0 cur=0",
+                  "HDR enable [0x009a2004] min=0 max=1 step=1 def=0 cur=1",
+                  "Gain [0x009a2009] min=0 max=0 step=0 def=0 cur=1",
+                  "Exposure [0x009a200a] min=0 max=0 step=0 def=0 cur=1",
+                  "Frame Rate [0x009a200b] min=0 max=0 step=0 def=0 cur=1",
+                  "Exposure Short [0x009a200c] min=0 max=0 step=0 def=0 cur=1",
+                  "Bypass Mode [0x009a2064] min=0 max=1 step=1 def=0 cur=0",
+                  "Override Enable [0x009a2065] min=0 max=1 step=1 def=0 cur=0",
+                  "Height Align [0x009a2066] min=1 max=16 step=1 def=1 cur=1",
+                  "Size Align [0x009a2067] min=0 max=2 step=1 def=0 cur=0",
+                  "Write ISP format [0x009a2068] min=1 max=1 step=1 def=1 cur=1",
+                  "Low Latency Mode [0x009a206d] min=0 max=1 step=1 def=0 cur=1",
+                  "Preferred Stride [0x009a206e] min=0 max=65535 step=1 def=0 cur=0",
+                  "Sensor Modes [0x009a2082] min=0 max=30 step=1 def=30 cur=1 [RO]",
+                  "ll0_bp0_wi0: n=20 mean=44.787564ms",
+                  "ll0_bp0_wi1: n=20 mean=44.793389ms",
+                  "ll1_bp0_wi0: n=20 mean=44.787801ms",
+                  "ll1_bp0_wi1: n=20 mean=44.790431ms"
+               ],
+               "duration_ms": 54325.737321,
+               "id": "t18-control-sweep",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Total controls.",
+                     "name": "control_count",
+                     "unit": "count",
+                     "value": 15
+                  },
+                  {
+                     "description": "Writable controls.",
+                     "name": "writable_count",
+                     "unit": "count",
+                     "value": 13
+                  },
+                  {
+                     "description": "ISX021-specific controls found.",
+                     "name": "isx021_found",
+                     "unit": "bool",
+                     "value": 1
+                  },
+                  {
+                     "description": "ll0_bp0_wi0 latency mean.",
+                     "name": "ll0_bp0_wi0_mean_ms",
+                     "unit": "ms",
+                     "value": 44.7875639
+                  },
+                  {
+                     "description": "ll0_bp0_wi1 latency mean.",
+                     "name": "ll0_bp0_wi1_mean_ms",
+                     "unit": "ms",
+                     "value": 44.7933886
+                  },
+                  {
+                     "description": "ll1_bp0_wi0 latency mean.",
+                     "name": "ll1_bp0_wi0_mean_ms",
+                     "unit": "ms",
+                     "value": 44.787801249999994
+                  },
+                  {
+                     "description": "ll1_bp0_wi1 latency mean.",
+                     "name": "ll1_bp0_wi1_mean_ms",
+                     "unit": "ms",
+                     "value": 44.79043145000001
+                  }
+               ],
+               "name": "V4L2 Control Value Impact Analysis",
+               "notes": [],
+               "status": "pass",
+               "summary": "ISX021 control sweep complete. 15 total controls.",
+               "warnings": []
+            },
+            {
+               "category": "format",
+               "details": [
+                  "1920x1280: mean=44ms p95=44ms throughput=1053MB/s"
+               ],
+               "duration_ms": 8120.911295,
+               "id": "t19-resolution-sweep",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Resolutions tested.",
+                     "name": "resolution_count",
+                     "unit": "count",
+                     "value": 1
+                  },
+                  {
+                     "description": "Mean latency at 1920x1280",
+                     "name": "1920x1280_latency_mean",
+                     "unit": "ms",
+                     "value": 44.79935526666667
+                  },
+                  {
+                     "description": "P95 latency at 1920x1280",
+                     "name": "1920x1280_latency_p95",
+                     "unit": "ms",
+                     "value": 44.83040200000005
+                  },
+                  {
+                     "description": "Memcpy throughput at 1920x1280",
+                     "name": "1920x1280_throughput_mbps",
+                     "unit": "MB/s",
+                     "value": 1053.240247841642
+                  }
+               ],
+               "name": "Resolution Capability and Performance",
+               "notes": [
+                  "This device enumerates only one frame size for the tested format, so there was nothing to sweep across. The latency and throughput figures below are still valid measurements of that resolution \u2014 the warning is about the sweep being impossible, not about the camera misbehaving."
+               ],
+               "status": "warn",
+               "summary": "Measured 1 resolution, but a sweep needs at least two \u2014 nothing to compare against.",
+               "warnings": []
+            },
+            {
+               "category": "sequence",
+               "details": [
+                  "Sequence range: 4 \u2192 103 (99 frames produced in 15338ms)"
+               ],
+               "duration_ms": 20341.657799,
+               "id": "t20-sequence-continuity",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Frames captured.",
+                     "name": "frames_captured",
+                     "unit": "count",
+                     "value": 100
+                  },
+                  {
+                     "description": "Sequence gaps.",
+                     "name": "dropped_frames",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "Largest single gap.",
+                     "name": "max_gap",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "Duplicate sequences.",
+                     "name": "duplicates",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "Non-monotonic timestamps.",
+                     "name": "ts_non_monotonic",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "Camera's own frame rate, from sequence numbers advanced per elapsed time \u2014 independent of how often this test read a frame.",
+                     "name": "frame_rate_hz",
+                     "unit": "Hz",
+                     "value": 6.454376781350946
+                  },
+                  {
+                     "description": "Mean interval between frames the camera produced.",
+                     "name": "frame_interval_ms",
+                     "unit": "ms",
+                     "value": 154.93362626262626
+                  }
+               ],
+               "name": "Frame Sequence Continuity",
+               "notes": [],
+               "status": "pass",
+               "summary": "All 100 frames continuous; no anomalies.",
+               "warnings": []
+            },
+            {
+               "category": "metadata",
+               "details": [],
+               "duration_ms": 20087.125628,
+               "id": "t21-timestamp-monotonicity",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Mean delta",
+                     "name": "delta_mean",
+                     "unit": "ms",
+                     "value": 154.9317777777779
+                  },
+                  {
+                     "description": "Std-dev delta",
+                     "name": "delta_stddev",
+                     "unit": "ms",
+                     "value": 0.019050714034272147
+                  },
+                  {
+                     "description": "Min delta",
+                     "name": "delta_min",
+                     "unit": "ms",
+                     "value": 154.921
+                  },
+                  {
+                     "description": "Max delta",
+                     "name": "delta_max",
+                     "unit": "ms",
+                     "value": 154.968
+                  },
+                  {
+                     "description": "95th-percentile delta",
+                     "name": "delta_p95",
+                     "unit": "ms",
+                     "value": 154.968
+                  },
+                  {
+                     "description": "Jitter delta",
+                     "name": "delta_jitter",
+                     "unit": "ms",
+                     "value": 0.027556063408459456
+                  },
+                  {
+                     "description": "Mean wall_buf_offset",
+                     "name": "wall_buf_offset_mean",
+                     "unit": "ms",
+                     "value": -163258.3619116211
+                  },
+                  {
+                     "description": "Std-dev wall_buf_offset",
+                     "name": "wall_buf_offset_stddev",
+                     "unit": "ms",
+                     "value": 0.04268284048809903
+                  },
+                  {
+                     "description": "Min wall_buf_offset",
+                     "name": "wall_buf_offset_min",
+                     "unit": "ms",
+                     "value": -163258.43969726562
+                  },
+                  {
+                     "description": "Max wall_buf_offset",
+                     "name": "wall_buf_offset_max",
+                     "unit": "ms",
+                     "value": -163258.27392578125
+                  },
+                  {
+                     "description": "95th-percentile wall_buf_offset",
+                     "name": "wall_buf_offset_p95",
+                     "unit": "ms",
+                     "value": -163258.29223632812
+                  },
+                  {
+                     "description": "Jitter wall_buf_offset",
+                     "name": "wall_buf_offset_jitter",
+                     "unit": "ms",
+                     "value": 0.011906746725923567
+                  },
+                  {
+                     "description": "Non-monotonic count.",
+                     "name": "non_monotonic",
+                     "unit": "count",
+                     "value": 0
+                  }
+               ],
+               "name": "Buffer Timestamp Monotonicity",
+               "notes": [
+                  "The delta values above are the gaps between the frames this test read, not the camera's frame rate. Frames that arrive while the test is between samples are discarded, so these gaps reflect how often the test sampled. For the camera's actual frame rate see frame_rate_hz in t20-sequence-continuity, which derives it from sequence numbers and so counts every frame the camera produced."
+               ],
+               "status": "pass",
+               "summary": "Timestamps monotonic across 100 frames.",
+               "warnings": []
+            },
+            {
+               "category": "quality",
+               "details": [],
+               "duration_ms": 9847.050632,
+               "id": "t22-stuck-frame",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Frames compared.",
+                     "name": "frames_tested",
+                     "unit": "count",
+                     "value": 50
+                  },
+                  {
+                     "description": "Identical consecutive pairs.",
+                     "name": "identical_pairs",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "Max identical run length.",
+                     "name": "max_identical_run",
+                     "unit": "count",
+                     "value": 0
+                  }
+               ],
+               "name": "Consecutive Frame Content Stability",
+               "notes": [],
+               "status": "pass",
+               "summary": "All 50 frames unique. No stuck frame.",
+               "warnings": []
+            },
+            {
+               "category": "stability",
+               "details": [
+                  "warmup_frames: 5",
+                  "capture_timeout: 100ms",
+                  "sample_interval: 100ms",
+                  "Win0 0-10s: n=65 mean=44ms stddev=0 miss=0",
+                  "Win1 10-20s: n=65 mean=44ms stddev=0 miss=0",
+                  "Win2 20-30s: n=64 mean=44ms stddev=0 miss=0",
+                  "Win3 30-40s: n=65 mean=44ms stddev=0 miss=0",
+                  "Win4 40-50s: n=64 mean=44ms stddev=0 miss=0"
+               ],
+               "duration_ms": 64887.273588,
+               "id": "t23-sustained-capture",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Total frames.",
+                     "name": "frames_captured",
+                     "unit": "count",
+                     "value": 388
+                  },
+                  {
+                     "description": "Success rate.",
+                     "name": "success_rate_pct",
+                     "unit": "%",
+                     "value": 100
+                  },
+                  {
+                     "description": "Max consecutive miss.",
+                     "name": "max_consecutive_miss",
+                     "unit": "count",
+                     "value": 0
+                  },
+                  {
+                     "description": "Mean latency",
+                     "name": "latency_mean",
+                     "unit": "ms",
+                     "value": 44.79792154896911
+                  },
+                  {
+                     "description": "95th-percentile latency",
+                     "name": "latency_p95",
+                     "unit": "ms",
+                     "value": 44.826309
+                  },
+                  {
+                     "description": "Second half mean - first half mean.",
+                     "name": "latency_drift_ms",
+                     "unit": "ms",
+                     "value": -0.0017619556089698563
+                  }
+               ],
+               "name": "Sustained Capture Stability",
+               "notes": [],
+               "status": "pass",
+               "summary": "388/388 frames (100%) drift=-0.001762ms.",
+               "warnings": []
+            },
+            {
+               "category": "stability",
+               "details": [],
+               "duration_ms": 24439.818856,
+               "id": "t24-latency-under-load",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Mean baseline_latency",
+                     "name": "baseline_latency_mean",
+                     "unit": "ms",
+                     "value": 44.806251466666666
+                  },
+                  {
+                     "description": "Std-dev baseline_latency",
+                     "name": "baseline_latency_stddev",
+                     "unit": "ms",
+                     "value": 0.012627207053879456
+                  },
+                  {
+                     "description": "Min baseline_latency",
+                     "name": "baseline_latency_min",
+                     "unit": "ms",
+                     "value": 44.791043
+                  },
+                  {
+                     "description": "Max baseline_latency",
+                     "name": "baseline_latency_max",
+                     "unit": "ms",
+                     "value": 44.832548
+                  },
+                  {
+                     "description": "95th-percentile baseline_latency",
+                     "name": "baseline_latency_p95",
+                     "unit": "ms",
+                     "value": 44.831875999999966
+                  },
+                  {
+                     "description": "Jitter baseline_latency",
+                     "name": "baseline_latency_jitter",
+                     "unit": "ms",
+                     "value": 0.01799666079675582
+                  },
+                  {
+                     "description": "Baseline frames.",
+                     "name": "baseline_captures",
+                     "unit": "count",
+                     "value": 30
+                  },
+                  {
+                     "description": "Mean load_latency",
+                     "name": "load_latency_mean",
+                     "unit": "ms",
+                     "value": 44.799858699999994
+                  },
+                  {
+                     "description": "Std-dev load_latency",
+                     "name": "load_latency_stddev",
+                     "unit": "ms",
+                     "value": 0.012461263707294966
+                  },
+                  {
+                     "description": "Min load_latency",
+                     "name": "load_latency_min",
+                     "unit": "ms",
+                     "value": 44.773446
+                  },
+                  {
+                     "description": "Max load_latency",
+                     "name": "load_latency_max",
+                     "unit": "ms",
+                     "value": 44.831714
+                  },
+                  {
+                     "description": "95th-percentile load_latency",
+                     "name": "load_latency_p95",
+                     "unit": "ms",
+                     "value": 44.828227
+                  },
+                  {
+                     "description": "Jitter load_latency",
+                     "name": "load_latency_jitter",
+                     "unit": "ms",
+                     "value": 0.018136731099090597
+                  },
+                  {
+                     "description": "Under-load frames.",
+                     "name": "load_captures",
+                     "unit": "count",
+                     "value": 30
+                  },
+                  {
+                     "description": "Mean latency increase under load.",
+                     "name": "delta_mean_ms",
+                     "unit": "ms",
+                     "value": -0.0063927666666714345
+                  },
+                  {
+                     "description": "p95 latency increase under load.",
+                     "name": "delta_p95_ms",
+                     "unit": "ms",
+                     "value": -0.003648999999967373
+                  }
+               ],
+               "name": "CPU Load Impact on Capture Latency",
+               "notes": [],
+               "status": "pass",
+               "summary": "CPU load impact minimal: p95 delta=-0.003649ms.",
+               "warnings": []
+            },
+            {
+               "category": "stability",
+               "details": [],
+               "duration_ms": 0.041568,
+               "id": "t25-multi-camera",
+               "memory_backend": "mmap",
+               "metrics": [],
+               "name": "Multi-camera Capture and Synchronization",
+               "notes": [],
+               "status": "skipped",
+               "summary": "Multi-camera test requires at least one slave camera selected.",
+               "warnings": []
+            },
+            {
+               "category": "stability",
+               "details": [
+                  "cycle 1: warmup=1 frames",
+                  "cycle 2: warmup=1 frames",
+                  "cycle 3: warmup=1 frames",
+                  "cycle 4: warmup=1 frames",
+                  "cycle 5: warmup=1 frames",
+                  "cycle 6: warmup=1 frames",
+                  "cycle 7: warmup=1 frames",
+                  "cycle 8: warmup=1 frames",
+                  "cycle 9: warmup=1 frames",
+                  "cycle 10: warmup=1 frames"
+               ],
+               "duration_ms": 87021.61773,
+               "id": "t26-cold-start",
+               "memory_backend": "mmap",
+               "metrics": [
+                  {
+                     "description": "Mean frames to reach steady-state latency, over MEASURED cycles only.",
+                     "name": "warmup_mean_frames",
+                     "unit": "count",
+                     "value": 1
+                  },
+                  {
+                     "description": "Worst-case measured warmup frames.",
+                     "name": "warmup_max_frames",
+                     "unit": "count",
+                     "value": 1
+                  },
+                  {
+                     "description": "Cycles that yielded a value.",
+                     "name": "cycles_completed",
+                     "unit": "count",
+                     "value": 10
+                  },
+                  {
+                     "description": "Cycles with no warm-up measurement.",
+                     "name": "censored_cycles",
+                     "unit": "count",
+                     "value": 0
+                  }
+               ],
+               "name": "Post-STREAMON Latency Stabilization",
+               "notes": [],
+               "status": "pass",
+               "summary": "Fast warm-up: mean=1 frames, max=1.",
+               "warnings": []
+            }
+         ],
+         "trigger_description": "gpiochip0 line 108 (PR.00)"
+      }
+   ],
+   "finished_at_utc": "2026-08-09T01:23:35Z",
+   "host_name": "ice00",
+   "kernel_release": "5.10.120-tegra",
+   "kernel_version": "#1 SMP PREEMPT Wed Oct 8 10:32:19 +03 2025",
+   "output_directory": "/home/ice00/.local/share/v4l2-camera-diagnostic/reports/web-run-1786237688-73808",
+   "project_name": "v4l2-camera-diagnostic",
+   "pulse_width_ms": 5,
+   "result_schema_version": 1,
+   "role_bindings": [
+      {
+         "role": "master",
+         "trigger_channel_id": "gpio-0"
+      }
+   ],
+   "run_mode": "sequential",
+   "started_at_utc": "2026-08-09T01:08:08Z",
+   "trigger_mode": "hardware",
+   "trigger_profile_id": "anvil",
+   "trigger_rate_hz": 10
+}

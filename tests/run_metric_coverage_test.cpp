@@ -3,7 +3,7 @@
 // Why this exists even though metric_name_contract_test.cpp already compares names:
 // that test scans diagnostic_runner.cpp for metric("...") call sites, so a name counts
 // as "emitted" if the source mentions it ANYWHERE. It passed green while the report
-// produced on real hardware on 2026-08-08 rendered 118 of its 314 table rows as
+// produced on real hardware on 2026-08-09 rendered 118 of its 314 table rows as
 // "Unavailable" -- 20 of 24 cards affected. A source scan cannot see which metrics a
 // given test actually records at run time; only a run can.
 //
@@ -168,7 +168,7 @@ std::map<std::string, std::set<std::string>> recorded(const std::string &json) {
 
 int main() {
   const std::string src = read_file("source/backend/core/src/test_content.cpp");
-  const std::string json = read_file("tests/data/device-run-2026-08-08.json");
+  const std::string json = read_file("tests/data/device-run-2026-08-09.json");
   if (src.empty() || json.empty()) {
     std::cout << "run this from the repository root\n";
     return 1;

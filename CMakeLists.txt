@@ -230,6 +230,13 @@ v4l2diag_apply_warnings(v4l2diag_metric_name_contract_test)
 add_test(NAME metric_name_contract COMMAND v4l2diag_metric_name_contract_test
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(v4l2diag_preview_structure_test tests/preview_structure_test.cpp)
+target_link_libraries(v4l2diag_preview_structure_test PRIVATE v4l2diag_core)
+v4l2diag_apply_warnings(v4l2diag_preview_structure_test)
+# Reads docs/assets/refactored_previews/, so it must run from the repository root.
+add_test(NAME preview_structure COMMAND v4l2diag_preview_structure_test
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(v4l2diag_no_fabricated_values_test tests/no_fabricated_values_test.cpp)
 v4l2diag_apply_warnings(v4l2diag_no_fabricated_values_test)
 # Reads test_content.cpp, so it must run from the repository root.

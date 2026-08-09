@@ -1906,6 +1906,20 @@ table.overview .summary-text { color: #475569; }
 .bar-mean, .legend-mean, .bar-nonblock, .legend-nonblock { background: #2563a6; }
 .bar-max, .legend-max, .bar-block, .legend-block, .bar-p95, .legend-p95 { background: #71879a; }
 .bar-ok, .legend-ok { background: #4b9b69; }
+/* T22 contrasts unique against identical payload pairs; the approved preview colours the
+   identical bar as the finding, not as an error. */
+.bar-uniq, .legend-uniq { background: #8fbcdb; }
+/* T16 reads the two trigger edges against each other: the HIGH reference is measured,
+   the LOW one derived, so they take the same two colours the preview uses. */
+.bar-high, .legend-high { background: #2563a6; }
+/* T24 sets the idle baseline against the loaded phase, and shows the delta the verdict
+   is drawn from on its own. */
+.bar-thr, .legend-thr { background: #8fbcdb; }
+.bar-base, .legend-base { background: #2563a6; }
+.bar-load, .legend-load { background: #b8860b; }
+.bar-delta, .legend-delta { background: #2563a6; }
+.bar-low, .legend-low { background: #b8860b; }
+.bar-ident, .legend-ident { background: #c55757; }
 .bar-miss, .legend-miss { background: #c83d4b; }
 .chart-legend { display: flex; gap: 16px; margin: 0 0 8px; padding-left: 16px; color: #52606d; font-size: 9px; }
 .legend-dot { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border-radius: 2px; vertical-align: middle; }
