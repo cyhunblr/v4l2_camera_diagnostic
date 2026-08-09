@@ -53,6 +53,11 @@ std::string category_of(const std::string &name, const std::string &prefix) {
 }
 
 // A number as the report shows it: no trailing zeros, no false precision.
+//
+// Deliberately WITHOUT thousands separators: this same function feeds SVG coordinates
+// (x=, y=, cx=, points=) and CSS widths (style="width:...%") in 52 places, where a comma
+// would break the geometry rather than read it. Grouping belongs to the display wrapper
+// below, which the value cells use.
 std::string number(double value) {
   std::ostringstream out;
   if (value == static_cast<double>(static_cast<long long>(value))) {
@@ -70,6 +75,63 @@ std::string number(double value) {
     out << text;
   }
   return out.str();
+}
+
+// number(), with thousands separators in the integer part: the form the approved previews
+// use for a displayed value ("1,014.5" MiB/s in t11, "87,325.9" spins in t15, "1,016.6" in
+// t17, "1,049.1" in t19). The 2026-08-09 device report printed all four ungrouped.
+//
+// Only the grouping is added. Decimal precision stays exactly as number() computes it: the
+// approved set prints the same declared float/milliseconds type with 0, 1, 2 and 3 decimals
+// (t06 "1132", t13 "45.0", t06 "44.81", t14 "55.164"), so no single precision rule
+// reproduces it and that question is still open (user decision, option C).
+//
+// Integer byte counts already had grouped_bytes(); this covers the fractional values it
+// cannot express, and the two agree digit-for-digit on whole numbers.
+std::string display_number(double value) {
+  const std::string text = number(value);
+  const std::size_t dot = text.find('.');
+  const std::size_t int_end = dot == std::string::npos ? text.size() : dot;
+  const std::size_t first_digit = (!text.empty() && (text[0] == '-' || text[0] == '+')) ? 1 : 0;
+  const std::size_t digits = int_end - first_digit;
+  if (digits < 4) {
+    return text;
+  }
+  std::string out = text.substr(0, first_digit);
+  for (std::size_t i = 0; i < digits; ++i) {
+    if (i > 0 && (digits - i) % 3 == 0) {
+      out += ',';
+    }
+    out += text[first_digit + i];
+  }
+  out += text.substr(int_end);
+  return out;
+}
+
+// Millisecond quantities are printed at exactly 3 decimal places (design-spec §5.14.3).
+// The approved previews show "44.800", "44.836", "44.805" — the trailing zeros are
+// meaningful because they communicate measurement resolution.
+std::string display_number_ms(double value) {
+  char buffer[64];
+  std::snprintf(buffer, sizeof(buffer), "%.3f", value);
+  std::string text(buffer);
+  // Apply thousands separator to the integer part (same logic as display_number).
+  const std::size_t dot = text.find('.');
+  const std::size_t int_end = dot == std::string::npos ? text.size() : dot;
+  const std::size_t first_digit = (!text.empty() && (text[0] == '-' || text[0] == '+')) ? 1 : 0;
+  const std::size_t digits = int_end - first_digit;
+  if (digits < 4) {
+    return text;
+  }
+  std::string out = text.substr(0, first_digit);
+  for (std::size_t i = 0; i < digits; ++i) {
+    if (i > 0 && (digits - i) % 3 == 0) {
+      out += ',';
+    }
+    out += text[first_digit + i];
+  }
+  out += text.substr(int_end);
+  return out;
 }
 
 std::string trim_of(const std::string &value) {
@@ -107,7 +169,10 @@ std::string value_of(const TestResult &test, const std::string &name) {
   if (!std::isfinite(metric->value)) {
     return "N/A";
   }
-  std::string text = number(metric->value);
+  // Millisecond quantities are printed at exactly 3 decimal places (design-spec §5.14.3).
+  const bool is_ms = metric->unit == "ms" || metric->unit == "ms/buffer" || metric->unit == "ms / buffer" ||
+                     metric->unit == "milliseconds" || metric->unit == "milliseconds per buffer";
+  std::string text = is_ms ? display_number_ms(metric->value) : display_number(metric->value);
   if (!metric->unit.empty()) {
     text += " " + metric->unit;
   }
@@ -2670,7 +2735,7 @@ std::string render_t11(const TestResult &test) {
   if (full != nullptr && full->mib_s > 0.0) {
     char gib[64];
     std::snprintf(gib, sizeof(gib), "%.2f GiB/s", full->mib_s / 1024.0);
-    derived.push_back({"Full-frame throughput", number(full->mib_s) + " MiB/s / " + gib});
+    derived.push_back({"Full-frame throughput", display_number(full->mib_s) + " MiB/s / " + gib});
     if (full->bytes > 0.0) {
       const double buffer_mib = full->bytes / 1048576.0;
       char copy_time[64];
@@ -2684,20 +2749,32 @@ std::string render_t11(const TestResult &test) {
   buffer_part += kv_items("Aggregate", derived);
 
   // 5.11.7: one bar per measurement, with the cache-sized ones visibly a different series.
+  //
+  // Drawn with the shared horizontal-bar vocabulary the approved preview uses --
+  // chart-legend / chart-frame / thr-chart, then bar-row > bar-label + bar-track >
+  // bar-fill.bar-full|bar-cache + bar-info, closed by a scale-name caption. Production
+  // used T08's saturation family (load-row / load-track / load-bar) borrowed for this
+  // chart, which put the reading in a differently-sized column, dropped the legend and
+  // the axis caption, and left `t11-copy-bar` without a rule. The convention is the
+  // preview's (user decision, 2026-08-09).
   if (!copies.empty()) {
     double max_mib = 0.0;
     for (const auto &copy : copies) {
       max_mib = std::max(max_mib, copy.mib_s);
     }
     out += item_label("Throughput by copy size");
+    out +=
+        "<div class=\"chart-legend\"><span><span class=\"legend-dot legend-full\"></span>Full frame "
+        "(primary)</span><span><span class=\"legend-dot legend-cache\"></span>Cache-sized reads</span></div>";
+    out += "<div class=\"chart-frame\"><div class=\"thr-chart\">";
     for (const auto &copy : copies) {
       const double width = max_mib > 0.0 ? copy.mib_s / max_mib * 100.0 : 0.0;
-      out += "<div class=\"load-row\"><strong>" + html_escape(copy.label) +
-             "</strong><div class=\"load-track\">"
-             "<div class=\"load-bar t11-copy-bar " +
-             std::string(copy.cache_sized ? "t11-cache-bar" : "t11-full-bar") + "\" style=\"width:" + number(width) +
-             "%\"></div></div><div class=\"load-value\">" + number(copy.mib_s) + " MiB/s</div></div>";
+      out += "<div class=\"bar-row\"><div class=\"bar-label\">" + html_escape(copy.label) +
+             "</div><div class=\"bar-track\"><div class=\"bar-fill " +
+             std::string(copy.cache_sized ? "bar-cache" : "bar-full") + "\" style=\"width:" + number(width) +
+             "%\"></div></div><div class=\"bar-info\">" + display_number(copy.mib_s) + "</div></div>";
     }
+    out += "</div></div><div class=\"scale-name\">Copy throughput (mebibytes per second)</div>";
   }
 
   // 5.11.4: the results table, with the full-frame row as the 1.00x reference. The
@@ -2715,7 +2792,7 @@ std::string render_t11(const TestResult &test) {
       } else {
         std::snprintf(relative, sizeof(relative), "Unavailable");
       }
-      out += row({html_escape(copy.label), grouped_bytes(copy.bytes), number(copy.mib_s) + " MiB/s", relative,
+      out += row({html_escape(copy.label), grouped_bytes(copy.bytes), display_number(copy.mib_s) + " MiB/s", relative,
                   "\xE2\x80\x94"});
     }
   }
@@ -2807,9 +2884,6 @@ std::string render_t12(const TestResult &test) {
 
 std::string render_t13(const TestResult &test) {
   std::string out;
-  if (test.status != TestStatus::Pass) {
-    out += result_block(test);
-  }
 
   const MetricValue *cliff = find_metric(test, "cliff_ms");
   const MetricValue *first_miss = find_metric(test, "first_miss_ms");
@@ -2937,9 +3011,6 @@ std::string render_t13(const TestResult &test) {
 
 std::string render_t14(const TestResult &test) {
   std::string out;
-  if (test.status != TestStatus::Pass) {
-    out += result_block(test);
-  }
 
   // Approved chart: the latency statistics of one capture session, as the VERTICAL COLUMN
   // chart the preview draws -- four columns on a data-scaled axis, P95 tinted apart.
@@ -3006,9 +3077,6 @@ std::string render_t14(const TestResult &test) {
 
 std::string render_t15(const TestResult &test) {
   std::string out;
-  if (test.status != TestStatus::Pass) {
-    out += result_block(test);
-  }
 
   // Approved chart: the two capture modes side by side, mean and P95 for each.
   {
@@ -3069,8 +3137,8 @@ std::string render_t15(const TestResult &test) {
   if (eagain != nullptr) {
     out += item_label("CPU spin cost");
     out += table_open({"Metric", "Type", "Unit", "Value", "Detail"});
-    out += row({"Average EAGAIN spins / frame", type_word(number(eagain->value)), unit_word(""), number(eagain->value),
-                "Spins the non-blocking mode paid per frame"});
+    out += row({"Average EAGAIN spins / frame", type_word(number(eagain->value)), unit_word(""),
+                display_number(eagain->value), "Spins the non-blocking mode paid per frame"});
     out += table_close();
   }
   // Outside the conditional for the same reason as T09: no EAGAIN metric must not leave
@@ -3101,9 +3169,6 @@ std::string render_t15(const TestResult &test) {
 
 std::string render_t16(const TestResult &test) {
   std::string out;
-  if (test.status != TestStatus::Pass) {
-    out += result_block(test);
-  }
 
   // Pulse Width Evidence Table
   out += measurement_open() + item_label("Pulse width evidence");
@@ -3192,9 +3257,6 @@ std::string render_t16(const TestResult &test) {
 
 std::string render_t17(const TestResult &test) {
   std::string out;
-  if (test.status != TestStatus::Pass) {
-    out += result_block(test);
-  }
 
   // Approved charts: the per-format latency pair, then the throughput on its own scale --
   // MB/s and ms cannot share an axis without one of them becoming unreadable.
@@ -3285,9 +3347,6 @@ std::string render_t17(const TestResult &test) {
 
 std::string render_t18(const TestResult &test) {
   std::string out;
-  if (test.status != TestStatus::Pass) {
-    out += result_block(test);
-  }
 
   const auto combos = metrics_with_prefix(test, "ll");
 
@@ -3362,9 +3421,6 @@ std::string render_t18(const TestResult &test) {
 
 std::string render_t19(const TestResult &test) {
   std::string out;
-  if (test.status != TestStatus::Pass) {
-    out += result_block(test);
-  }
 
   // Approved chart: the latency statistics at the resolution the run actually measured.
   // The resolution is part of the metric name, so the title names it too.
@@ -3443,9 +3499,6 @@ std::string render_t19(const TestResult &test) {
 
 std::string render_t20(const TestResult &test) {
   std::string out;
-  if (test.status != TestStatus::Pass) {
-    out += result_block(test);
-  }
 
   // Approved chart: how much of the observed sequence span actually arrived. Dropped
   // frames are the complement, so the two bars add up to the span the driver produced.
@@ -3511,9 +3564,6 @@ std::string render_t20(const TestResult &test) {
 
 std::string render_t21(const TestResult &test) {
   std::string out;
-  if (test.status != TestStatus::Pass) {
-    out += result_block(test);
-  }
 
   // Approved chart: the spread of the sampled buffer-timestamp delta.
   {
@@ -3570,9 +3620,6 @@ std::string render_t21(const TestResult &test) {
 
 std::string render_t22(const TestResult &test) {
   std::string out;
-  if (test.status != TestStatus::Pass) {
-    out += result_block(test);
-  }
 
   const MetricValue *stuck = find_metric(test, "identical_pairs");
   const std::string stuck_str = stuck != nullptr ? number(stuck->value) : "0";
@@ -3626,9 +3673,6 @@ std::string render_t22(const TestResult &test) {
 
 std::string render_t23(const TestResult &test) {
   std::string out;
-  if (test.status != TestStatus::Pass) {
-    out += result_block(test);
-  }
 
   // Approved chart: the mean latency of each reported window, so drift is read as a shape
   // rather than inferred from a single drift figure. Parsed from the same detail lines the
@@ -3703,9 +3747,6 @@ std::string render_t23(const TestResult &test) {
 
 std::string render_t24(const TestResult &test) {
   std::string out;
-  if (test.status != TestStatus::Pass) {
-    out += result_block(test);
-  }
 
   // Approved charts: the two phases side by side, then the single number the verdict is
   // actually drawn from. Both read metrics the runner records for every load run.
@@ -3820,9 +3861,6 @@ std::string render_t24(const TestResult &test) {
 
 std::string render_t25(const TestResult &test) {
   std::string out;
-  if (test.status != TestStatus::Pass) {
-    out += result_block(test);
-  }
 
   // Approved chart: how many rounds each camera contributed to. Built from the per-camera
   // detail lines the runner writes; with nothing recorded it draws nothing rather than an
@@ -3894,9 +3932,6 @@ std::string render_t25(const TestResult &test) {
 
 std::string render_t26(const TestResult &test) {
   std::string out;
-  if (test.status != TestStatus::Pass) {
-    out += result_block(test);
-  }
 
   // The per-cycle warm-up counts live in the detail lines the runner writes --
   //   "cycle 1: warmup=1 frames"
@@ -4093,6 +4128,10 @@ bool test_content_shows_result(const std::string &test_id, TestStatus status) {
   (void)test_id;
   // Uniform across tests: a passing card's header already says PASS.
   return status != TestStatus::Pass;
+}
+
+std::string render_test_result_block(const TestResult &test) {
+  return result_block(test);
 }
 
 std::string render_test_content(const TestResult &test) {

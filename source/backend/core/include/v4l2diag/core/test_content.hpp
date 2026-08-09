@@ -43,4 +43,13 @@ std::string render_test_content(const TestResult &test);
 // card's header already states the verdict.
 bool test_content_shows_result(const std::string &test_id, TestStatus status);
 
+// The verdict line alone -- `<div class="result-warn">Warned: ...</div>` and friends --
+// with no measurement content after it.
+//
+// A skipped test measured nothing, so its card is this line and nothing else: that is what
+// all seven SKIP cards in the approved previews show. The caller uses this instead of
+// render_test_content() rather than in addition to it; render_test_content() emits the same
+// block itself for a non-PASS card.
+std::string render_test_result_block(const TestResult &test);
+
 }  // namespace v4l2diag

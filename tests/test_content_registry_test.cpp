@@ -1025,7 +1025,14 @@ int main() {
     // 5.11.7: the throughput-by-copy-size chart, one bar per measurement.
     ok &= check(contains(html, "Throughput by Copy Size") || contains(html, "Throughput by copy size"),
                 "T11 has no throughput-by-copy-size chart");
-    ok &= check(count_of(html, "t11-copy-bar") == 3, "T11's chart does not show all three copy sizes");
+    // One bar per measurement, counted on the shared bar vocabulary the approved
+    // t11-preview.html uses. This counted `t11-copy-bar` until 2026-08-09; that class was a
+    // T11-only hook on T08's borrowed load-* geometry and no longer exists, so the old
+    // assertion would have gone silently green on a chart that renders nothing.
+    ok &= check(count_of(html, "class=\"bar-fill bar-full\"") + count_of(html, "class=\"bar-fill bar-cache\"") == 3,
+                "T11's chart does not show all three copy sizes");
+    ok &= check(count_of(html, "class=\"bar-fill bar-cache\"") == 2,
+                "T11 does not mark both cache-sized reads as the secondary series");
 
     // 5.11.7: the five approved result columns.
     for (const char *column : {"Copy region", "Bytes per copy", "Throughput", "Relative to full", "Detail"}) {

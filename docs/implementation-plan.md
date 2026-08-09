@@ -766,6 +766,190 @@ de olabilirdi 500 de. Dahasi bu 30, ortalamaya ve verdict'e giriyordu.
 referanssiz, kacan frame'li, cok kisa pencere. Sabotajla dogrulandi — "hic
 oturmadi" dalini `stabilized = true` yapinca build exit 0, test yakaladi.
 
+## Faz 6 — Cihaz kosumu bulgulari: stilsiz sinif ailesi ve SKIP govdesi
+
+Durum: `ACIK`. Kaynak: kullanicinin 2026-08-09 cihaz kosumu
+(`hardware-trigger_anvil_default`, run `1786271499-87889`) ve o rapor uzerinde
+yapilan olcum. Kural 10'un ucuncu seviyesi ilk kez veri uretti.
+
+### 6.1. Decision Lock (P1)
+
+```text
+DECISION LOCK
+- Degistirilecek:
+  (a) report_writer.cpp CSS: markup'ta kullanilan ama kurali OLMAYAN 12 sinif
+      icin kural eklenir — result-warn / result-fail / result-skip,
+      T03 ailesi (stacked-chart, cycle-row, cycle-label, cycle-info,
+      bar-streamon, bar-firstframe, legend-streamon, legend-ff),
+      T06 ailesi (rel-chart, rel-row, rel-label, rel-info,
+      bar-pass, bar-warn, bar-fail), ortak scale-name.
+  (b) SKIP statulu kart govde uretmez; yalnizca result-skip banner'i tasir.
+- Aynen korunacak: mevcut bar-row/bar-label/bar-track/bar-fill ailesi (T17 vb.
+  dogru render ediyor); test id'leri; dosya slug'lari; JSON/MD ciktisi;
+  legend'in inline renkleri (#c55757 / #b8860b / #4b9b69).
+- Yerlesim sirasi: banner kart header'indan HEMEN sonra, section'lardan once.
+- Zorunlu metinler: prefix statuye bagli — "Failed:" / "Warned:" / "Skipped:".
+- Zorunlu palet (design-spec S "Result blogu", degistirilemez):
+  result-fail #6e2424 / #fff7f7 · result-warn #6e4f00 / #fffdf5 ·
+  result-skip #596776 / #f8f9fa · ortak padding:12px 16px; font-size:12px;
+  font-weight:600.
+- Yasaklanan / karari reddedilen alternatifler:
+  * generic `result` sinifi kullanilmaz ve CSS'te tanimlanmaz (design-spec).
+  * eksik kural "onemsiz" diye birakilmaz; kullanilan her result-* tanimli
+    olmali VE tanimli her kural kullanilmis olmali (iki yonlu, design-spec).
+  * SKIP kartina govde "zaten olculmus" diye birakilmaz.
+  * preview'de olmayan renk/olcu uydurulmaz; degerler preview'den birebir.
+- Onay gerektiren noktalar (uygulanmaz, raporlanir — P3):
+  * T05 verdict siddeti: ayni kanit (0/3 recovery) preview'de FAIL, canlida WARN.
+  * T19 WARN metni hicbir preview senaryosunda tasarlanmamis.
+- Kaynak plan bolumleri: design-spec "Result blogu" ve S3 (merdiven);
+  onayli preview'ler t03/t04/t06/t08/t12/t13/t14/t16/t25; plan §5.4
+  (ayni hata kalibi: markup var, CSS yok → stilsiz render).
+```
+
+### 6.2. Olcum — neden bu bir kusur
+
+`report_writer.cpp` uretilen stylesheet'te bu 12 sinifin **hicbiri icin kural
+yok**; git gecmisi bunlarin hic eklenmedigini gosteriyor (regresyon degil,
+hic transfer edilmemis). Sonuc canli raporda:
+
+| bulgu | olcum |
+| --- | --- |
+| `result-warn` (T04/05/08/13/19), `result-skip` (T25) | ciplak `<div>` ile ayni computed style: seffaf zemin, `padding:0`, `16px/400` — tasarlanan amber/gri kutu yok |
+| T03 `bar-streamon`/`bar-firstframe` | `<i>` ogesi kural almayinca `display:inline` kaliyor, inline `width:88.72%` **yok sayiliyor**; iki segment cokup etiketleri birlesiyor ve ekranda `1141145` okunuyor |
+| T06 `bar-pass` | `width:100%` var ama zemin seffaf → dolgu gorunmez, yalnizca gri track kaliyor |
+| T03/T06 satir ve etiket aileleri | grid kurali olmayinca tek satir yerine dikey yigiliyor ("Full cycles" / "100%" / "20/20" ayri satirlarda) |
+| `scale-name` | eksen adi 9px ortali yerine 16px govde metni |
+
+### 6.2b. Uygulama sonucu — 6.1(a), 6.3, 6.4
+
+Durum: `UYGULANDI` (2026-08-09). DOM sozlesmesi
+`tests/report_css_contract_test.cpp` ile kilitli ve production
+`write_reports()` ciktisi uzerinde olculdu. `DOGRULANDI` **degil**: Kural 10'un
+ucuncu seviyesi kullanicinin cihaz kosumunu paylasmasini bekliyor.
+
+| madde | sonuc |
+| --- | --- |
+| 6.1(a) eksik CSS | 12 sinif + `.bar-warn` eklendi; `header-title-group` olu sinif olarak **kaldirildi** (hicbir kural, test veya frontend referansi yoktu) |
+| 6.1(a2) `.bar-track` iki kabuk | Onaylı tasarim T03/T06 icin `display:flex`, T17/T11/T15/T19/T21 icin blok kullaniyor. Paylasilan kural degistirilmedi; flex varyanti `.stacked-chart .bar-track, .rel-chart .bar-track` ile kapsandi |
+| 6.1(b) kopya banner | T13/T19/T25 iki banner basiyordu: dispatcher **ve** 14 teste ozgu renderer ayni blogu ekliyordu. 14 kopya kaldirildi, dispatcher tek kaynak |
+| 6.3 SKIP govdesi | Kapi statuye degil **bosluga** bagli: `Skipped && metrics.empty() && details.empty()`. Kanit kaydetmis bir skipped test govdesini korur |
+| 6.4 binlik ayirici | `display_number()` eklendi. `number()` **degistirilmedi**: 52 cagri yeri SVG koordinati ve CSS genisligi besliyor, virgul orada geometriyi bozar |
+
+**6.4'un kapsami daraltildi (kullanici karari, secenek C):** yalnizca ayirici.
+Ondalik hassasiyet **dokunulmadi** — onaylı set ayni `float / milliseconds`
+turunu 0, 1, 2 ve 3 ondalikla basiyor (t06 `1132`, t13 `45.0`, t06 `44.81`,
+t14 `55.164`), yani tek bir hassasiyet kurali bunu uretemiyor. 408 sayisal
+hucrenin 101'i hala uretimden farkli; bu **acik madde**.
+
+Ayirici sorusu koddan cozuldu, tahminle degil: `grouped_bytes()` zaten vardi ve
+tamsayi byte sayilarini grupluyordu (`5,439,744`), kesirli degerlerin ise hic
+gruplama yolu yoktu. t22'nin `4096`'si ve t03'un `3000`'i preview'de de
+ayirsizdir — degistirilmedi.
+
+Sabotaj kaniti (her birinde build exit code ayrica olculdu, Kural 9):
+
+| sabotaj | yakalayan |
+| --- | --- |
+| `.result-warn` kurali silindi | stilsiz sinif + palet assertion'i |
+| palet degeri bozuldu | palet assertion'i (kural var, renk yanlis) |
+| `bar-streamon` `display:inline` | inline-width assertion'i |
+| kopya `result_block` geri kondu | kart basina en fazla 1 banner |
+| SKIP kapisi `true` yapildi | SKIP govde assertion'i |
+| SKIP kapisi yalniz statuye baglandi | `report_writer` ("capture capability is not presented") |
+| `display_number` gruplamayi biraki | ayirici assertion'i |
+
+Geometri guvenligi ayrica olculdu: uretilen HTML'de `style="width:"`,
+`x=`, `y=`, `cx=`, `cy=`, `x1/x2/y1/y2`, `width=`, `height=`, `r=`
+niteliklerinin **hicbirinde** virgul yok.
+
+### 6.5. Tipografi — 6.5 ve 6.6
+
+Durum: `UYGULANDI` (2026-08-09).
+
+Onaylı kabuk `docs/assets/refactored_previews/detailed-result-card.css`
+dosyasidir; preview'ler onu `<link>` ile cagirir ve uzerine kendi
+`<style>`'lariyla ekleme yapar. Karsilastirma **o dosyaya** karsi yapildi.
+
+Kart, header, `h2`, `status`, `duration`, `section` ve `item-label`
+kurallari **birebir ayni** cikti. Iki gercek fark vardi:
+
+| madde | onaylı | uretimdeki | sonuc |
+| --- | --- | --- | --- |
+| 6.5 `section-label` | 26 preview'in tamami kabuktaki duz etiketi ezip `border-bottom:2px solid #2d3a47` + `letter-spacing:.4px` + `color:#2d3a47` veriyor | yalnizca kabuk formu; alt cizgi **hic yok** | uygulandi |
+| 6.6 font stack | `Inter, ui-sans-serif, system-ui, -apple-system, ...` | iki UI anahtar sozcugu **eksik** | uygulandi |
+
+t01 ve t03 kuralin kisa formunu yazar; renk ve letter-spacing'i kabuktan
+devralirlar ve ayni 2px cizgiyi boyarlar, yani render sonucu ayni. t03
+**2026-08-09 02:52**'de guncellenmis (en yeni parti), yani kisa form sonradan
+alinmis bir karar degil.
+
+`item-label` kendi daha ince `1px #dfe5eb` cizgisini korudu (design-spec S2);
+olcumle dogrulandi, section kurali ona sizmadi.
+
+**Alinmayan (P4, raporlanir):** ayni kabuk dosyasinin `14px/1.45` taban
+olcusu, `#17202b` metin ve `#e9edf2` zemin degerleri. Onlar tek kartlik
+**preview sayfasini** tanimlar; uretimde `body` ayni zamanda rapor header'ini,
+Overview tablosunu ve footer'i giydiriyor ve **52** kart kurali kendi
+`font-size`'i olmadigi icin ondan devralir. Bu sayfa capinda bir yeniden
+bicimlendirmedir, bu adimin sapmasi degil.
+
+Sabotaj kaniti (build exit code ayrica olculdu):
+
+| sabotaj | yakalayan |
+| --- | --- |
+| `section-label` alt cizgisi kaldirildi | 6.5 assertion'i |
+| font stack eski haline dondu | 6.6 assertion'i |
+
+6.6'da **ilk guard yuk tasimadi**: kuralin ustundeki gerekce yorumu iki
+anahtar sozcugu de icerdigi icin stylesheet metninde substring aramasi
+sabotajdan sonra da yesil kaldi. Assertion `body` **bildirimine** cevrildi ve
+sabotaj tekrarlandi; ikinci turda yakalandi. Kural 2'nin tarif ettigi durum:
+test adi degil, assertion'in gercekte gozledigi sey kanittir.
+
+### 6.7. T11 grafigi onaylı konvansiyona cevrildi
+
+Durum: `UYGULANDI` (2026-08-09). Kullanici karari: "gorsel sonuc ayni degil;
+nasil dizayn edilmek istendiyse o sekilde olmali. Genel convention
+`refactored_previews`'deki gibi olmali."
+
+Onceki turda bunu "gorsel sonuc bozuk degil" diyerek kapsam disi
+birakmistim — **yanlisti**. Onaylı `t11-preview.html` grafigi paylasilan
+yatay-bar sozdagarciyla cizer; uretim ise T08'in doygunluk ailesini
+(`load-row`/`load-track`/`load-bar`/`load-value`) odunc almisti.
+
+| | onaylı | uretimdeki (once) |
+| --- | --- | --- |
+| satir | `bar-row` > `bar-label` + `bar-track` > `bar-fill.bar-full\|bar-cache` + `bar-info` | `load-row` > `strong` + `load-track` > `load-bar.t11-copy-bar` + `load-value` |
+| legend | `legend-full` / `legend-cache` swatch'li `chart-legend` | **yok** |
+| eksen adi | `scale-name` — "Copy throughput (mebibytes per second)" | **yok** |
+| deger kolonu | `bar-info`, 74px, tabular | `load-value`, 112px |
+
+Olculen sonuc: `bar-full` `#2e6fa3`, `bar-cache` `#71879a` (ikisi de
+preview'den birebir), degerler `1,027.13` / `1,033.87` / `1,025.31`.
+
+**Olu kural temizligi (iki yonlu kontrolun ters bacagi):** `load-row`,
+`load-track`, `load-bar`, `load-value`, `t11-copy-bar`, `t11-full-bar`,
+`t11-cache-bar` kaldirildi. Olculdu: T08 kendi doygunluk halini `queue-row` ve
+`slots` ile ciziyor, yani `load-*` ailesini **hicbir sey** kullanmiyordu —
+gercek cihaz raporundaki 4 gecisin tamami T11'e aitti.
+
+**Bayat assertion yakalandi (Kural 7):** `test_content_registry_test`
+`count_of(html, "t11-copy-bar") == 3` sayiyordu. O sinif artik yok; assertion
+paylasilan `bar-fill bar-full` + `bar-fill bar-cache` sayimina cevrildi ve
+ikinci bir kontrol iki cache satirinin ikincil seri oldugunu dogruluyor. Eski
+haliyle birakilsaydi hicbir sey cizmeyen bir grafikte sessizce yesil kalirdi.
+
+Sabotaj: grafik `load-*` ailesine geri dondurulunca `report_css_contract` yedi
+sinifi "kuralsiz" olarak, `test_content_registry` de bar sayimini yakaladi
+(`build_exit=0`).
+
+### 6.3. SKIP govdesi
+
+Onayli preview'lerdeki **yedi** SKIP kartinin tamami yalnizca banner tasiyor
+(`h4=0`, `section=0`, 86-104 karakter). Canli T25 SKIP ise `h4=4`, `section=3`,
+1383 karakter ile tam govde uretiyor. Kural 4b geregi bu fazlalik kaldirilir.
+
 ## 6. Kalan is
 
 Faz 0-5'in tamami uygulandi ve kontrol listesinde acik madde kalmadi.

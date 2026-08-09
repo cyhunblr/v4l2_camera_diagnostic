@@ -549,7 +549,15 @@ bool write_html(const RunResult &result, const std::string &path, bool dmesg_log
 <style>
 :root { --pass: #16a34a; --fail: #dc2626; --warn: #d97706; --skip: #64748b; }
 * { box-sizing: border-box; }
-body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+/* The font stack the approved card shell declares (docs/assets/refactored_previews/
+   detailed-result-card.css): 'ui-sans-serif, system-ui' sit between Inter and the
+   platform fallbacks, so a machine without Inter lands on the OS UI face rather than
+   skipping straight to -apple-system. Production omitted both keywords.
+   NOT taken from that file: its 14px/1.45 base, #17202b text and #e9edf2 background.
+   Those describe the single-card PREVIEW page; here `body` also dresses the report
+   header, the Overview table and the footer, and 52 card-scope rules inherit its size.
+   Changing them is a page-wide restyle, not this step's deviation -- reported instead. */
+body { font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
        margin: 0; padding: 0; background: #f8fafc; color: #1e293b; line-height: 1.5; }
 .container { max-width: 1100px; margin: 0 auto; padding: 40px 32px; }
 .header { background: linear-gradient(135deg, #0f172a, #1e293b); color: white; padding: 48px 40px; border-radius: 12px; margin-bottom: 32px; }
@@ -642,16 +650,13 @@ table.overview .status-cell { font-weight: 700; font-size: 12px; text-transform:
 .flag-state.neutral { color: #64717e; }
 /* 5.10.8: the boundary note against T21, quieter than the evidence above it. */
 .boundary-note { margin: 12px 16px 0; color: #64717e; font-size: 11px; font-style: italic; }
-/* review-plan 5.11.4/5.11.7: the full-frame bar is the primary result; the cache-sized
-   ones are visibly a different series so 3x the full-frame figure is not read as camera
-   throughput. */
-.t11-full-bar { background: #2e6fa3; }
-.t11-cache-bar { background: #71879a; }
-/* review-plan 5.8.5/5.8.6: saturation-load bars and queue slots, colours and geometry
-   from the approved preview (t08-buffer-saturation-preview.html). */
-.load-row { display: grid; grid-template-columns: 74px 1fr 112px; gap: 10px; align-items: center; margin-top: 14px; font-size: 11px; }
-.load-track { height: 18px; border: 1px solid #bcc6d0; background: #eef2f5; }
-.load-bar { height: 100%; background: #3477aa; }
+/* The load-* family and the t11-*-bar tones are GONE: they existed only for T11's
+   throughput chart, which now draws with the shared bar-row/bar-fill vocabulary its
+   approved preview uses (.bar-full / .bar-cache, declared with the other series colours
+   below). T08 -- whose preview the load-* geometry was originally taken from -- draws its
+   saturation state with .queue-row and .slots, not with these, so nothing else referenced
+   them. Keeping a rule no markup names is the other half of the design spec's two-way
+   check. */
 .interpretation { margin: 10px 0 0; color: #526171; font-size: 10px; }
 .queue-row { display: grid; grid-template-columns: 74px 1fr 70px; gap: 10px; align-items: center; margin-top: 14px; font-size: 11px; }
 .slots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -767,7 +772,14 @@ table.overview .summary-text { color: #475569; }
 .test-header .status { color: var(--status-text); font-size: 13px; font-weight: 800; }
 .test-header h2 { margin: 0; font-size: 16px; font-weight: 750; text-transform: none; line-height: 1.25; }
 .test-header .duration { color: #536171; font-size: 13px; font-weight: 400; font-variant-numeric: tabular-nums; }
-.test-card .section-label { margin: 0 0 8px; color: #52606d; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+/* The section heading rule the approved previews actually render: all 26 override the
+   shell's plain label with a dark 2px underline, which is what separates "Measurement"
+   from "Measurement Result" down a long card. Production carried only the shell form
+   (no rule at all for the border, and letter-spacing at the browser default), so the
+   three section headings read as plain grey text. Two previews (t01, t03) write the
+   short form of the same rule -- they inherit colour and letter-spacing from the shell
+   and still paint the same border, so the rendered result is identical. */
+.test-card .section-label { margin: 0 0 10px; padding-bottom: 6px; border-bottom: 2px solid #2d3a47; color: #2d3a47; font-size: 11px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; }
 .test-card .section { padding: 16px; border-bottom: 1px solid #dfe5eb; }
 .test-card .section:last-child { border-bottom: 0; }
 .test-card .section p { margin: 0; color: #354352; font-size: 12px; }
@@ -855,11 +867,60 @@ table.overview .summary-text { color: #475569; }
 .bar-axis { display: grid; grid-template-columns: 120px 1fr 74px; gap: 10px; margin-top: 4px; }
 .scale-in { display: flex; justify-content: space-between; font-size: 9px; color: #7a8693; font-variant-numeric: tabular-nums; }
 .chart-axis-caption { margin: 6px 0 0; padding-left: 16px; color: #7a8693; font-size: 9px; }
+/* The name under a CSS bar chart (T03, T06), verbatim from the approved previews. Without
+   it the axis name rendered as 16px body text pushed to the left margin. */
+.scale-name { margin: 6px 0 0; padding: 0 16px; color: #44515f; font-size: 9px; font-weight: 600; text-align: center; }
+.has-items .scale-name, .has-items .stacked-chart, .has-items .rel-chart, .has-items .cycle-row, .has-items .rel-row { padding-left: 48px; }
+/* T03's stacked two-phase bar per cycle, verbatim from t03-preview.html. The two segments
+   are <i> elements: an inline box IGNORES width, so without an explicit non-inline display
+   both segments collapsed and their labels printed as one number (1141 + 145 -> "1141145"
+   in the 2026-08-09 run). The flex box is what makes the inline width apply at all. */
+.stacked-chart { padding: 2px 16px 0; }
+/* The segmented charts lay two coloured segments side by side INSIDE one track, so their
+   track is a flex row -- t03/t06-preview.html declare it that way. The single-fill charts
+   (T11/T15/T17/T19/T21) keep the plain block track declared above with `.bar-fill`; the
+   approved previews really do carry two different shells under the same class name, so the
+   flex variant is scoped to these two charts instead of changing the shared rule. */
+.stacked-chart .bar-track, .rel-chart .bar-track { display: flex; border-left: 1px solid #aeb9c5; border-radius: 0; background: #f2f5f8; }
+.cycle-row { display: grid; grid-template-columns: 56px 1fr 46px; gap: 10px; align-items: center; margin: 0; }
+.cycle-row + .cycle-row { margin-top: 4px; }
+.cycle-label { color: #52606d; font-size: 9px; }
+.cycle-info { color: #2d3a47; font-size: 8px; font-variant-numeric: tabular-nums; }
+.bar-streamon { display: flex; align-items: center; justify-content: center; background: #3b82b6; color: #fff; font-size: 8px; font-weight: 700; white-space: nowrap; }
+.bar-firstframe { display: flex; align-items: center; justify-content: center; background: #8fbcdb; color: #fff; font-size: 8px; font-weight: 700; white-space: nowrap; }
+.legend-streamon { background: #3b82b6; }
+.legend-ff { background: #8fbcdb; }
+/* T06's cycle-completion bars, verbatim from t06-preview.html. The tone is banded by the
+   same thresholds the verdict uses; `bar-warn` takes the amber the card's own legend
+   already declares inline (#b8860b), since the preview's fixture never hits that band. */
+.rel-chart { padding: 4px 16px; }
+.rel-row { display: grid; grid-template-columns: 90px 1fr 40px; gap: 8px; align-items: center; margin: 0; }
+.rel-row + .rel-row { margin-top: 4px; }
+.rel-label { color: #52606d; font-size: 9px; }
+.rel-info { color: #2d3a47; font-size: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bar-pass, .bar-warn, .bar-fail { display: flex; align-items: center; justify-content: center; color: #fff; font-size: 8px; font-weight: 700; white-space: nowrap; }
+.bar-pass { background: #4b9b69; }
+.bar-warn { background: #b8860b; min-width: 26px; }
+.bar-fail { background: #c55757; min-width: 26px; }
+/* The result block (design-spec "Result blogu"): shown on a non-PASS card only, class and
+   text prefix both bound to the status. The palette is fixed by the spec; a generic
+   `.result` rule is forbidden -- it was once bound to two different colours in two files
+   and rendered t04's WARN card grey. */
+.result-fail { padding: 12px 16px; border-bottom: 1px solid #ead4d4; background: #fff7f7; color: #6e2424; font-size: 12px; font-weight: 600; }
+.result-warn { padding: 12px 16px; border-bottom: 1px solid #ede0b8; background: #fffdf5; color: #6e4f00; font-size: 12px; font-weight: 600; }
+.result-skip { padding: 12px 16px; border-bottom: 1px solid #dfe5eb; background: #f8f9fa; color: #596776; font-size: 12px; font-weight: 600; }
 /* Series colours. A measured quantity and its upper statistic are the same family in two
    weights, so mean/nonblock share one blue and max/p95/block share one grey. */
 .bar-mean, .legend-mean, .bar-nonblock, .legend-nonblock { background: #2563a6; }
 .bar-max, .legend-max, .bar-block, .legend-block, .bar-p95, .legend-p95 { background: #71879a; }
 .bar-ok, .legend-ok { background: #4b9b69; }
+/* T11 contrasts the full-frame copy against the cache-sized samples, verbatim from
+   t11-preview.html: the primary series in the measured blue, the cache reads in the
+   secondary grey. `thr-chart` is that chart's own padding box. */
+.thr-chart { padding: 0 16px; }
+.has-items .thr-chart { padding-left: 48px; }
+.bar-full, .legend-full { background: #2e6fa3; }
+.bar-cache, .legend-cache { background: #71879a; }
 /* T22 contrasts unique against identical payload pairs; the approved preview colours the
    identical bar as the finding, not as an error. */
 .bar-uniq, .legend-uniq { background: #8fbcdb; }
@@ -1058,7 +1119,10 @@ table.overview .summary-text { color: #475569; }
 )";
 
   // Header
-  out << "<div class=\"header\"><div class=\"header-title-group\">";
+  // The title group is a plain wrapper: `.header h1` and `.header .subtitle` style the
+  // children directly and `.header` is not a flex/grid parent, so a class here would carry
+  // no rule. The design spec's verification is two-way, so the class is not emitted.
+  out << "<div class=\"header\"><div>";
   out << "<h1>V4L2 Camera Diagnostic Report</h1>";
   out << "<p class=\"subtitle\">Automated hardware diagnostic test results</p>";
   out << "</div>";
@@ -1250,11 +1314,27 @@ table.overview .summary-text { color: #475569; }
       out << render_result_card_open(test);
       out << "<div class=\"test-body\">";
 
+      // A skipped test that recorded nothing renders the verdict line and stops. All seven
+      // SKIP cards in the approved previews carry exactly that one div (and a "—" duration,
+      // i.e. a test that never ran); the 2026-08-09 device report instead gave T25 the full
+      // body -- four item labels, three sections -- reading "Unavailable" down every column.
+      // Measured on that run's JSON: T25 is the only skipped test and it recorded 0 metrics
+      // and 0 details, so there was nothing behind those placeholders.
+      //
+      // The emptiness is what gates this, not the status alone. A skipped test that DID
+      // record evidence still shows it: dropping it would hide a real measurement, and the
+      // approved previews only settle the case where nothing was recorded. Chart omissions
+      // and per-test content are both measurement reporting; warnings are not, because a
+      // warning belongs to the run and a skipped test can still have raised one.
+      const bool measured = test.status != TestStatus::Skipped || !test.metrics.empty() || !test.details.empty();
+
       // "Not measured" is a FINDING, not chart furniture: a format or resolution that was
       // enumerated but failed to stream must be reported whether or not this test draws a
       // chart. It used to live inside render_test_metrics(), so removing the unapproved
       // charts silently took the omission notices with it.
-      render_chart_omissions(out, test, test.metrics, {});
+      if (measured) {
+        render_chart_omissions(out, test, test.metrics, {});
+      }
 
       // The per-test content renderer (plan 3.1, review round 2): each approved test has
       // its OWN table with its own column names, because each measures something
@@ -1264,7 +1344,7 @@ table.overview .summary-text { color: #475569; }
       // It also emits the Result block, the Metric definitions section and the notes,
       // because whether those appear and where is part of each test's approved
       // architecture rather than a property of the shell.
-      out << render_test_content(test);
+      out << (measured ? render_test_content(test) : render_test_result_block(test));
 
       // Warnings stay here: a warning belongs to the run, not to a test's content
       // architecture, and every test presents them the same way.
