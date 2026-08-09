@@ -279,6 +279,59 @@ int main() {
     rmdir(noisy_dir.c_str());
   }
 
+  // Reconciling in memory is not enough: the FILE has to be repaired, or every future
+  // process re-reads the same stale ids and reprints the same notice. The dedup above is
+  // per-process, so it cannot help here -- measured on the user's device, the notice
+  // returned on every server start. The notice used to end "save the preset to rewrite
+  // it", asking a person to do by hand what the migration already computed losslessly.
+  //
+  // The assertion is deliberately on a SECOND registry over the same directory: it proves
+  // the repair reached the disk, which an in-memory check would pass without.
+  {
+    const std::string heal_dir = dir + "-heal";
+    mkdir(heal_dir.c_str(), 0755);
+    const std::string heal_file = heal_dir + "/default.json";
+    write_stale_config(heal_file);
+    const std::string before = read_file(heal_file);
+
+    // Observe inside the capture, assert outside it. require() writes to stderr, so an
+    // assertion made while CapturedStderr is redirecting lands in its temp file and is
+    // unlinked with it -- the test would fail with no message at all, which is how this
+    // block first behaved.
+    std::string after;
+    std::string second_log;
+    {
+      testing::CapturedStderr capture;
+      v4l2diag::ThresholdRegistry first(heal_dir);
+      after = read_file(heal_file);
+
+      // A fresh registry over the repaired directory has nothing left to reconcile.
+      const std::string mark = capture.text();
+      v4l2diag::ThresholdRegistry second(heal_dir);
+      second_log = capture.text().substr(mark.size());
+    }
+
+    ok &= require(after != before, "a stale threshold config file is left unrepaired on disk");
+    // The renumbered ids are what the file must now carry, and the vanished test must be
+    // gone. Checked on the file text, not on the registry, so an in-memory-only fix fails.
+    ok &= require(after.find("t23-sustained-capture") != std::string::npos,
+                  "the rewritten config lost the migrated id t23-sustained-capture");
+    ok &= require(after.find("t22-sustained-capture") == std::string::npos,
+                  "the rewritten config still carries the pre-renumbering id t22-sustained-capture");
+    ok &= require(after.find("t24-max-fps") == std::string::npos,
+                  "the rewritten config still carries the dropped test t24-max-fps");
+    // The user's configured value must survive the rewrite, or self-healing silently
+    // resets thresholds to defaults -- worse than the notice it replaces.
+    ok &= require(after.find("91") != std::string::npos,
+                  "the rewritten config discarded the value the user had configured");
+
+    ok &= require(second_log.find("no longer matches the current tests") == std::string::npos,
+                  "the notice returns after the file was rewritten, so the repair did not stick");
+
+    unlink(heal_file.c_str());
+    rmdir(heal_dir.c_str());
+  }
+
   unlink((dir + "/default.json").c_str());
   rmdir(dir.c_str());
 

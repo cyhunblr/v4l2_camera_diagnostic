@@ -217,7 +217,10 @@ bool config_from_json(const Json::Value &root, bool known_only, ThresholdConfig 
   return true;
 }
 
-bool parse_config_file(const std::string &path, ThresholdConfig *config) {
+// `reconciled`, when given, reports whether ids had to be migrated or dropped to load
+// this file -- i.e. whether the text on disk still describes the current tests. The
+// caller uses it to rewrite the file; parsing itself stays read-only.
+bool parse_config_file(const std::string &path, ThresholdConfig *config, bool *reconciled = nullptr) {
   std::ifstream in(path);
   if (!in) {
     return false;
@@ -243,6 +246,10 @@ bool parse_config_file(const std::string &path, ThresholdConfig *config) {
   std::sort(dropped.begin(), dropped.end());
   dropped.erase(std::unique(dropped.begin(), dropped.end()), dropped.end());
 
+  if (reconciled != nullptr) {
+    *reconciled = !migrated.empty() || !dropped.empty();
+  }
+
   // Say it once per file, not once per read. The web server constructs a
   // ThresholdRegistry on every API request, so this notice was reprinted on each one and
   // buried the log it was meant to draw attention to.
@@ -263,7 +270,7 @@ bool parse_config_file(const std::string &path, ThresholdConfig *config) {
       }
       std::cerr << ")";
     }
-    std::cerr << "; save the preset to rewrite it." << std::endl;
+    std::cerr << "; the file has been rewritten to match." << std::endl;
   }
   return true;
 }
@@ -693,8 +700,26 @@ void ThresholdRegistry::load() {
 
   for (const auto &name : names) {
     ThresholdConfig config;
-    if (!parse_config_file(directory_ + "/" + name, &config)) {
+    bool reconciled = false;
+    if (!parse_config_file(directory_ + "/" + name, &config, &reconciled)) {
       continue;
+    }
+    // Persist what the migration already worked out, instead of asking the user to open
+    // the UI and press save. Without this the reconciliation is per-process: every server
+    // start re-read the same stale ids and reprinted the same notice.
+    //
+    // Safe because the migration is lossless -- a renumbered id keeps the value the user
+    // configured, and only ids matching no current test are dropped. The write is atomic
+    // (temp file + rename), and it is best-effort: a read-only config directory leaves
+    // the in-memory config correct and simply keeps the notice on the next start.
+    //
+    // Guarded on the file NAME matching the id: load() also accepts files whose inner id
+    // disagrees with their filename, and write_config_file() derives the path from the
+    // id, so rewriting one of those would create a second file rather than repair this
+    // one -- and leave the stale original in place.
+    if (reconciled && name == config.id + ".json") {
+      std::string ignored;
+      write_config_file(config, &ignored);
     }
     // Which file this actually came from. The id inside may say something else.
     config.source_file = name;
