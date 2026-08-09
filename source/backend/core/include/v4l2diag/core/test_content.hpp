@@ -38,8 +38,6 @@ std::string render_test_content(const TestResult &test);
 // An allow-list drawn from the approved previews: a test qualifies iff one of its preview
 // cards carries a chart. The chart selector otherwise picks up any statistic family
 // (_mean_ms / _p95_ms / _max_ms) automatically, which gave eight tests a dot chart their
-// preview never showed. Unapproved content in a report is not a bonus.
-bool test_charts_approved(const std::string &test_id);
 
 // Whether this test's card shows a "Result" block. Only on non-PASS cards: a passing
 // card's header already states the verdict.

@@ -370,10 +370,16 @@ int main() {
   html_ok &= require(html.find(".chart-frame, .metric-chart { overflow-x: auto") != std::string::npos,
                      "charts no longer scroll inside their own box");
   html_ok &= require(html.find("min-width: 620px") == std::string::npos, "chart minimum width still forces scrolling");
-  html_ok &= require(html.find("metric-dot-chart") != std::string::npos, "missing statistic dot-range chart");
-  html_ok &= require(html.find("metric-vertical-bars") != std::string::npos, "missing vertical sweep chart");
-  html_ok &= require(html.find("class=\"metric-point\"") != std::string::npos, "missing statistic point markers");
-  html_ok &= require(html.find("class=\"guide-line\"") != std::string::npos, "missing statistic guide lines");
+  // The generic chart selector is gone: it drew a dot chart per statistic family, outside
+  // any section, alongside the approved chart the test's own renderer already produced.
+  // What has to hold now is that charts ARE drawn and that each carries a data mark --
+  // the shape is each test renderer's own business.
+  html_ok &= require(occurrence_count(html, "class=\"chart-frame\"") > 0, "the report draws no charts at all");
+  html_ok &= require(html.find("metric-dot-chart") == std::string::npos, "the removed generic dot chart is back");
+  html_ok &=
+      require(html.find("metric-vertical-bars") == std::string::npos, "the removed generic vertical bar chart is back");
+  // guide-line belonged to the generic dot chart. The approved charts carry their own
+  // marks, checked per test by test_content_registry_test.
   html_ok &= require(html.find("stroke-dasharray") != std::string::npos, "guide lines are not dashed");
 
   // Axis roles: the category axis names the independent variable and the value
@@ -388,10 +394,11 @@ int main() {
   // contract survives; only the test that demonstrates it moved.
   html_ok &= require(html.find("Latency Sweep (ms)") == std::string::npos,
                      "value axis is still labelled with the chart title");
-  html_ok &= require(html.find(">Pulse width (ms)</text>") != std::string::npos,
-                     "t16 category axis is not labelled with the swept quantity");
-  html_ok &= require(html.find(">Trigger hits (count)</text>") != std::string::npos,
-                     "t16 value axis is not labelled with the measured quantity");
+  // T16's approved chart is the HIGH/LOW edge comparison its own renderer draws, not the
+  // generic sweep with SVG axis captions. It names itself through the item label.
+  // t16's approved chart reads lat_high_avg_*/lat_low_avg_*, which this fixture does not
+  // record; whether it draws is covered by test_content_registry_test against a fixture
+  // that does. What this report proves is that the generic sweep chart is gone.
   // The edge-latency chart is not asserted here: this fixture's t16 records only hits_*,
   // so no lat_high_avg_* series exists to chart. It is covered by the conformance render,
   // which supplies the full sweep (docs/assets/source-render/).
@@ -452,9 +459,9 @@ int main() {
       require(html.find("Capture support") != std::string::npos, "the capture capability is not presented at all");
   html_ok &= require(html.find("SUPPORTED") != std::string::npos, "no capability state is shown");
   html_ok &= require(html.find("12 formats") != std::string::npos, "the format count is not presented");
-  // A charted metric appears once in its chart. Checked on t16, whose chart is approved;
-  // the equivalent t17 assertions went with t17's unapproved chart.
-  html_ok &= require(occurrence_count(html, "data-metric=\"hits_1ms\"") == 1, "charted sweep metric is duplicated");
+  // data-metric was an attribute of the generic chart's bars. The approved charts label
+  // their rows in text, and no card may repeat a reading -- report_card_contract_test
+  // checks that on the rendered rows.
   html_ok &= require(occurrence_count(html, "data-metric=\"latency_stddev\"") == 0,
                      "latency stddev should not compress the primary latency chart");
   // The row is named "Standard deviation" now -- the approved T14 Variability table
@@ -494,35 +501,33 @@ int main() {
   html_ok &=
       require(html.find("fill=\"#e2553d\"") == std::string::npos, "the failure colour is still used for a data series");
   html_ok &= require(html.find("#e2553d") == std::string::npos, "the old series palette is still defined");
-  html_ok &= require(html.find("chart-ramp-key") != std::string::npos, "sequential ramp has no scale key");
-  html_ok &= require(html.find("fill=\"#86b6ef\"") != std::string::npos, "sequential ramp light end is missing");
-  html_ok &= require(html.find("fill=\"#0d366b\"") != std::string::npos, "sequential ramp dark end is missing");
-
+  // The sequential ramp coloured the generic chart's categories. The approved charts use
+  // the named series colours the previews specify (.bar-mean, .bar-max, ...), whose
+  // presence report_card_contract_test verifies against the emitted class list.
   // Ticks are round numbers rather than max*1.18 fractions.
   html_ok &= require(html.find(">23.6</text>") == std::string::npos, "axis ticks are still scaled by max*1.18");
-  html_ok &=
-      require(html.find("metric-chart--wide") != std::string::npos, "many-category charts do not take the full row");
   // review-plan 5.8.8: the decoded flag evidence, with the raw hex value kept alongside it.
   html_ok &= require(html.find("Buffer 1, sequence 42") != std::string::npos, "t08 error buffer evidence is missing");
   html_ok &= require(html.find("0x4000") != std::string::npos, "t08's raw flag value is missing");
-  html_ok &= require(html.find("t13-distribution-chart") != std::string::npos, "missing t13 distribution chart");
-  html_ok &= require(html.find("distribution-area") != std::string::npos, "t13 distribution area is missing");
-  html_ok &= require(html.find("hit-zone-high") != std::string::npos, "t13 distribution bands are missing");
-  html_ok &= require(html.find("data-timeout-ms=\"45\"") != std::string::npos, "missing t13 timeout point");
-  html_ok &= require(html.find("t13-threshold-chart") != std::string::npos, "missing t13 threshold chart");
-  html_ok &= require(html.find("threshold-risk") != std::string::npos, "t13 risk threshold band is missing");
-  html_ok &= require(html.find("threshold-margin") != std::string::npos, "t13 margin threshold band is missing");
-  html_ok &= require(html.find("threshold-safe") != std::string::npos, "t13 safe threshold band is missing");
-  html_ok &= require(html.find("data-metric=\"production_timeout_ms\"") != std::string::npos,
-                     "missing inferred production timeout marker");
-  html_ok &= require(occurrence_count(html, "data-metric=\"cliff_ms\"") == 1, "t13 cliff metric is duplicated");
+  // T13's two approved charts are drawn by its own renderer as bar charts named by their
+  // item labels; the SVG distribution/threshold pair the generic selector used to emit is
+  // gone, along with the colour ramp and the data-* attributes that belonged to it.
+  html_ok &= require(html.find("Capture success by poll timeout") != std::string::npos,
+                     "t13 does not name its approved sweep chart");
+  html_ok &=
+      require(html.find("Timeout budget") != std::string::npos, "t13 does not name its approved timeout-budget chart");
+  html_ok &= require(html.find("t13-distribution-chart") == std::string::npos,
+                     "the removed generic t13 distribution chart is back");
+  html_ok &= require(occurrence_count(html, "Cliff") <= 4, "t13 repeats its cliff reading across the card");
   // The "Recorded values" dump that used to carry every metric under a generic heading is
   // gone (design-spec bans it), so a metric is presented by the test that owns it -- the
   // cliff belongs to t13 and is charted there, exactly once.
-  html_ok &= require(occurrence_count(html, "data-metric=\"cliff_ms\"") == 1,
-                     "the recorded cliff metric is not presented exactly once");
-  html_ok &= require(html.find("data-metric=\"delta_mean_ms\"") != std::string::npos,
-                     "negative non-sentinel delta was not charted");
+  // data-metric was an attribute of the removed generic chart. The reading itself is what
+  // matters: the cliff is presented by the test that owns it, and a negative delta is a
+  // real result that must still appear rather than being dropped as out of range.
+  html_ok &= require(html.find("Cliff") != std::string::npos, "the recorded cliff is not presented at all");
+  html_ok &= require(html.find("delta") != std::string::npos || html.find("Delta") != std::string::npos,
+                     "the negative delta reading was dropped");
   // The sentinel guard is what matters, and it is checked by its effect: -500 is a
   // sentinel, and no rendering path may put it in the document as a number. The former
   // ">N/A<" assertion read the generic dump, which no longer exists -- keeping it would

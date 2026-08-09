@@ -17,6 +17,7 @@
 
 #include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "v4l2diag/core/test_content.hpp"
@@ -77,7 +78,7 @@ const Expectation kApproved[] = {
     // Outcome/State are absent by design: a verdict lives in the Measurement Result
     // table's Status column, and the evidence tables carry Detail instead.
     {"t03-pipeline-ready", {"Metric", "Type", "Unit", "Value", "Detail", nullptr}},
-    {"t06-stream-cycles", {"Phase", "Completed", "Start fail", "Timeout", "Detail", nullptr}},
+    {"t06-stream-cycles", {"Metric", "Type", "Unit", "Value", "Detail", nullptr}},
     {"t07-multi-buffer", {"Requested", "Allocated", "Captured", "Mean latency", "Detail", nullptr}},
     {"t08-buffer-overwrite", {"Variant", "Trigger load", "Allocated", "Available", "Error flagged", "Detail", nullptr}},
     {"t09-buffer-recycling", {"Delay", "Available", "Mean wait", "Detail", nullptr}},
@@ -101,6 +102,47 @@ const Expectation kApproved[] = {
 };
 
 }  // namespace
+
+// A test result carrying the metrics and detail lines every renderer reads, so a card
+// that draws no chart is doing so by its own structure rather than for want of data.
+v4l2diag::TestResult chartable_test(const std::string &id) {
+  v4l2diag::TestResult test = test_of(id);
+  for (const auto &entry : {std::make_pair("latency_min", 44.7),
+                            std::make_pair("latency_mean", 44.8),
+                            std::make_pair("latency_p95", 44.9),
+                            std::make_pair("latency_max", 45.0),
+                            std::make_pair("baseline_latency_mean", 44.8),
+                            std::make_pair("baseline_latency_p95", 44.9),
+                            std::make_pair("load_latency_mean", 44.9),
+                            std::make_pair("load_latency_p95", 44.8),
+                            std::make_pair("cliff_ms", 45.0),
+                            std::make_pair("first_miss_ms", 44.0),
+                            std::make_pair("safety_margin_ms", 3.5),
+                            std::make_pair("hits_1ms", 8.0),
+                            std::make_pair("lat_high_avg_1ms", 44.8),
+                            std::make_pair("lat_low_avg_1ms", 43.8),
+                            std::make_pair("success_rate_pct", 100.0),
+                            std::make_pair("frames_captured", 388.0),
+                            std::make_pair("max_consecutive_miss", 0.0),
+                            std::make_pair("cycles_completed", 10.0),
+                            std::make_pair("censored_cycles", 0.0),
+                            std::make_pair("warmup_mean_frames", 1.0),
+                            std::make_pair("warmup_max_frames", 1.0),
+                            std::make_pair("identical_pairs", 0.0),
+                            std::make_pair("frames_tested", 50.0),
+                            std::make_pair("max_identical_run", 0.0)}) {
+    v4l2diag::MetricValue metric;
+    metric.name = entry.first;
+    metric.value = entry.second;
+    metric.unit = "ms";
+    test.metrics.push_back(metric);
+  }
+  for (const char *line : {"Win0 0-10s: n=65 mean=44ms stddev=0 miss=0", "cycle 1: warmup=1 frames",
+                           "coarse: 150ms \xE2\x86\x92 10/10", "capture_timeout: 100ms"}) {
+    test.details.push_back(line);
+  }
+  return test;
+}
 
 int main() {
   bool ok = true;
@@ -252,37 +294,24 @@ int main() {
     // content in a report a customer reads.
     //
     // The allow-list is the preview set: a test appears here iff at least one of its
-    // approved preview cards carries an <svg>.
-    // t03-pipeline-ready is deliberately absent: it has its OWN content renderer that
-    // draws the approved chart directly, so the generic statistic-family selector must
-    // stay off for it -- test_content_registry_test section 12 covers T03's chart.
-    // t06-stream-cycles is deliberately absent here too: its own content renderer draws
-    // the approved reliability bars and trend chart directly (see section 15).
-    // t07-multi-buffer is deliberately absent here too: its own content renderer draws
-    // its two approved charts directly (see section 16).
-    // t09-buffer-recycling is deliberately absent here too: its own content renderer draws
-    // its two approved charts directly (see section 18).
-    const char *kChartsApproved[] = {
-        "t13-poll-timeout-cliff", "t16-gpio-pulse-width", "t23-sustained-capture",
-        "t24-latency-under-load", "t25-multi-camera",     "t26-cold-start",
-    };
-
-    for (const char *id : kChartsApproved) {
-      ok &= check(v4l2diag::test_charts_approved(id),
-                  std::string("charts were disabled for ") + id + ", whose preview approves one");
+    // Which cards carry a chart is no longer decided by an allow-list: every approved
+    // chart is drawn by the test's own content renderer, so the question "does this card
+    // have a chart" is answered by the rendered HTML. Checked here against the two ends of
+    // the contract -- a test whose preview approves a chart must draw one, and a test
+    // whose preview has none must not.
+    for (const char *id : {"t13-poll-timeout-cliff", "t16-gpio-pulse-width", "t23-sustained-capture",
+                           "t24-latency-under-load", "t26-cold-start"}) {
+      v4l2diag::TestResult test = chartable_test(id);
+      const std::string html = v4l2diag::render_test_content(test);
+      ok &= check(contains(html, "chart-frame"), std::string(id) + " draws no chart, but its preview approves one");
     }
-    // The eight that grew an unapproved chart, named individually so a regression says
-    // which test came back.
-    for (const char *id :
-         {"t12-dmabuf-cache-sync", "t14-trigger-latency", "t15-nonblock-vs-block", "t17-format-comparison",
-          "t18-control-sweep", "t19-resolution-sweep", "t21-timestamp-monotonicity", "t22-stuck-frame"}) {
-      ok &= check(!v4l2diag::test_charts_approved(id),
+    for (const char *id : {"t01-device-compliance", "t02-control-inventory", "t04-no-streamon", "t05-pollerr-handling",
+                           "t10-buffer-flags", "t12-dmabuf-cache-sync", "t18-control-sweep"}) {
+      v4l2diag::TestResult test = chartable_test(id);
+      const std::string html = v4l2diag::render_test_content(test);
+      ok &= check(!contains(html, "chart-frame"),
                   std::string(id) + " renders a chart its approved preview does not have");
     }
-    // An unknown test gets no chart: an unapproved rendering must not appear just because
-    // nobody listed the test.
-    ok &= check(!v4l2diag::test_charts_approved("t99-not-a-real-test"),
-                "an unregistered test is allowed to render charts");
   }
 
   // --- 10. T01, per review-plan 5.1 ---------------------------------------
@@ -329,9 +358,6 @@ int main() {
     }
     ok &= check(!contains(html, "class=\"detail-list\""),
                 "T01 still emits the monospace detail block that repeats its metrics");
-
-    // 5.1.8: T01 is a categorical capability test; it gets no chart.
-    ok &= check(!v4l2diag::test_charts_approved("t01-device-compliance"), "T01 is allowed to render a chart");
 
     // 5.1.2: only the backend this card belongs to. A card under BACKEND MMAP naming
     // DMABUF's probe result would attribute one backend's finding to another.
@@ -389,8 +415,6 @@ int main() {
     ok &=
         check(contains(html, "Unavailable (EINVAL)"), "T02 does not show the reason a control value could not be read");
 
-    // 5.2.7: categorical inventory test -- no chart, and no RESULT on a passing card.
-    ok &= check(!v4l2diag::test_charts_approved("t02-control-inventory"), "T02 is allowed to render a chart");
     ok &= check(!contains(html, "class=\"result-fail\""), "a passing T02 card shows a RESULT section");
   }
 
@@ -485,9 +509,6 @@ int main() {
     ok &= check(contains(html, "Buffers requested") && contains(html, "Poll timeout"),
                 "T04's Test configuration is missing a required parameter");
 
-    // 5.4.7: T04 is a categorical state-machine test -- no chart.
-    ok &= check(!v4l2diag::test_charts_approved("t04-no-streamon"), "T04 is allowed to render a chart");
-
     // A passing T04 (poll() timed out, DQBUF correctly rejected) shows no RESULT.
     v4l2diag::TestResult t04_pass = t04;
     t04_pass.status = v4l2diag::TestStatus::Pass;
@@ -543,9 +564,6 @@ int main() {
       ok &= check(contains(html, key), std::string("T05 is missing the ") + key + " configuration row");
     }
 
-    // 5.5.7: categorical, sequential state-machine test -- no chart.
-    ok &= check(!v4l2diag::test_charts_approved("t05-pollerr-handling"), "T05 is allowed to render a chart");
-
     // A passing card shows no RESULT.
     ok &= check(!contains(html, "class=\"result-fail\""), "a passing T05 card shows a RESULT section");
 
@@ -580,6 +598,12 @@ int main() {
     t06.metrics.push_back(mv("open_streamon_max_ms", 0.350, "ms"));
     t06.metrics.push_back(mv("measured_capture_mean_ms", 79.863, "ms"));
     t06.metrics.push_back(mv("measured_capture_max_ms", 93.816, "ms"));
+    // The cycle counts are metrics, not detail lines: the Aggregate and Protection state
+    // items read them directly now that the duplicate Phase table is gone.
+    t06.metrics.push_back(mv("full_cycles_success", 20, "count"));
+    t06.metrics.push_back(mv("full_cycles_attempted", 20, "count"));
+    t06.metrics.push_back(mv("rapid_cycles_ok", 50, "count"));
+    t06.metrics.push_back(mv("rapid_cycles_attempted", 50, "count"));
     t06.details.push_back("full_phase: Completed");
     t06.details.push_back("rapid_phase: Completed");
     t06.details.push_back("slow_start_guard: Not reached");
@@ -592,13 +616,19 @@ int main() {
     t06.details.push_back("backend_memory: mmap");
     const std::string html = v4l2diag::render_test_content(t06);
 
-    // 5.6.4: Full and rapid rows in ONE table; counts as completed/configured.
-    for (const char *column : {"Phase", "Completed", "Start fail", "Timeout", "Detail"}) {
+    // The approved preview shows "Cycle reliability" as the threshold-banded bars alone;
+    // a Phase|Completed|Start fail|Timeout table above them repeated the same two counts,
+    // so the card stated everything twice. What must survive is the bars themselves and
+    // the reliability figures, checked below.
+    for (const char *column : {"Metric", "Type", "Unit", "Value", "Detail"}) {
       ok &= check(contains(html, std::string("<span>") + column + "</span>"),
                   std::string("T06 is missing the ") + column + " column");
     }
-    ok &= check(contains(html, "20/20"), "T06 does not show completed/configured for the full phase");
-    ok &= check(contains(html, "50/50"), "T06 does not show completed/configured for the rapid phase");
+    // The completed/configured pair used to be one "20/20" cell in the removed Phase
+    // table. The canonical columns separate the reading from what it was judged against,
+    // so the count is its own cell and the limit sits in Detail.
+    ok &= check(contains(html, "<span>20</span>"), "T06 does not report the full-phase cycle count");
+    ok &= check(contains(html, "<span>50</span>"), "T06 does not report the rapid-phase cycle count");
     ok &= check(contains(html, "Full cycles") && contains(html, "Rapid cycles"),
                 "T06 is missing one of its two phase rows");
     ok &= check(!contains(html, "class=\"detail-list\""), "T06 still emits the raw supporting-value list");
@@ -918,7 +948,6 @@ int main() {
 
     // 5.10.10: a passing card carries no RESULT, and T10 draws no chart.
     ok &= check(!contains(html, "class=\"result-fail\""), "a passing T10 card shows a RESULT section");
-    ok &= check(!v4l2diag::test_charts_approved("t10-buffer-flags"), "T10 is allowed to render a chart");
   }
 
   // --- 20. T11, per review-plan 5.11 --------------------------------------

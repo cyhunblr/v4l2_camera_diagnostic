@@ -20,6 +20,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "v4l2diag/core/report_naming.hpp"
@@ -574,17 +575,22 @@ int main() {
     v4l2diag::CameraRunResult camera;
     camera.camera_path = "/dev/video0";
 
-    // A statistic family is exactly what the chart selector picks up automatically.
+    // Both cards are given the metrics their own renderer reads. The generic statistic
+    // family this used to supply ("interval_mean_ms") drew nothing once the automatic
+    // selector was turned off -- every approved chart is now the test's own.
     for (const char *id : {"t14-trigger-latency", "t23-sustained-capture"}) {
       v4l2diag::TestResult test = test_of(v4l2diag::TestStatus::Pass, id, id);
-      for (const char *suffix : {"_mean_ms", "_p95_ms", "_max_ms"}) {
+      for (const auto &entry : {std::make_pair("latency_min", 44.7), std::make_pair("latency_mean", 44.8),
+                                std::make_pair("latency_p95", 44.9), std::make_pair("latency_max", 45.0)}) {
         v4l2diag::MetricValue metric;
-        metric.name = std::string("interval") + suffix;
-        metric.value = 33.3;
+        metric.name = entry.first;
+        metric.value = entry.second;
         metric.unit = "ms";
-        metric.description = "An interval statistic.";
+        metric.description = "A latency statistic.";
         test.metrics.push_back(metric);
       }
+      test.details.push_back("capture_timeout: 100ms");
+      test.details.push_back("Win0 0-10s: n=65 mean=44ms stddev=0 miss=0");
       camera.tests.push_back(test);
     }
     run.cameras.push_back(camera);
@@ -599,17 +605,23 @@ int main() {
     if (wrote) {
       const std::string html =
           read_file(directory + "/" + v4l2diag::report_artifact_filename(naming_of(run), v4l2diag::ReportFormat::Html));
-      // t23's chart is approved, t14's is not -- same metric family, opposite outcome, so
-      // the difference can only come from the allow-list.
+      // Both previews approve a chart, so both cards must draw one. This case used to
+      // prove the opposite -- that an allow-list kept t14 chart-free -- but t14's preview
+      // does show "Latency distribution", and the list is gone: a chart now exists exactly
+      // when the test's own renderer draws it.
       const std::size_t t14_at = html.find("id=\"result-mmap-t14-trigger-latency\"");
       const std::size_t t23_at = html.find("id=\"result-mmap-t23-sustained-capture\"");
       ok &= check(t14_at != std::string::npos && t23_at != std::string::npos, "a card is missing from the report");
       if (t14_at != std::string::npos && t23_at != std::string::npos) {
         const std::string t14_card = html.substr(t14_at, t23_at - t14_at);
         const std::string t23_card = html.substr(t23_at);
-        ok &= check(!contains(t14_card, "class=\"metric-chart"),
-                    "t14 rendered a chart its approved preview does not have");
-        ok &= check(contains(t23_card, "class=\"metric-chart"), "t23 lost the chart its preview approves");
+        // Both previews approve a chart now -- t14's "Latency distribution" and "Capture
+        // timeout headroom", t23's "Mean capture latency by window". They are drawn by the
+        // tests' own renderers inside .chart-frame; the generic .metric-chart selector is
+        // off, so checking that class alone reported a chart as lost while it was there.
+        ok &= check(contains(t14_card, "Latency distribution"), "t14 lost the chart its preview approves");
+        ok &= check(contains(t23_card, "chart-frame") || contains(t23_card, "class=\"metric-chart"),
+                    "t23 lost the chart its preview approves");
       }
       remove_report_directory(directory, run);
     }

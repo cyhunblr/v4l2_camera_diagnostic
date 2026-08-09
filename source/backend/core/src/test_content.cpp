@@ -1458,18 +1458,6 @@ std::string render_t05(const TestResult &test) {
   return out;
 }
 
-// A "completed/configured" cell: "20/20". Absent metrics fall back to Unavailable rather
-// than a bare slash.
-std::string completed_of(const TestResult &test, const std::string &completed_metric,
-                         const std::string &configured_metric) {
-  const MetricValue *completed = find_metric(test, completed_metric);
-  const MetricValue *configured = find_metric(test, configured_metric);
-  if (completed == nullptr || configured == nullptr) {
-    return "Unavailable";
-  }
-  return number(completed->value) + "/" + number(configured->value);
-}
-
 // review-plan 5.6.5: a threshold-banded horizontal bar -- <70 fail, 70-89 warn, 90+ pass --
 // with the bar's own colour independent of the card's overall status: a run can PASS
 // overall while one phase's reliability sits in the warn band.
@@ -1546,30 +1534,13 @@ std::string render_t06(const TestResult &test) {
   // 5.6.4: Full and Rapid in ONE table, counts as completed/configured, and the phase
   // that ran out an outcome of its own rather than the card's overall status -- a
   // borderline phase can WARN even on a PASS card.
-  std::string out = measurement_open() + item_label("Cycle reliability");
-  out += table_open({"Phase", "Completed", "Start fail", "Timeout", "Detail"});
-  if (find_metric(test, "full_cycles_success") == nullptr && find_metric(test, "full_cycles") == nullptr &&
-      find_metric(test, "rapid_cycles_ok") == nullptr && find_metric(test, "rapid_cycles") == nullptr) {
-    out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable", "Unavailable"});
-  } else {
-    out += row({"Full cycles",
-                completed_of(test, "full_cycles_success", "full_cycles_attempted") != "Unavailable"
-                    ? completed_of(test, "full_cycles_success", "full_cycles_attempted")
-                    : completed_of(test, "full_cycles_success", "full_cycles_attempted"),
-                value_of_any(test, {"full_cycle_failures", "full_start_fail"}),
-                value_of_any(test, {"rapid_capture_timeouts", "first_frame_timeouts", "full_timeouts"}),
-                state_word(test.status)});
-    out += row({"Rapid cycles",
-                completed_of(test, "rapid_cycles_ok", "rapid_cycles_attempted") != "Unavailable"
-                    ? completed_of(test, "rapid_cycles_ok", "rapid_cycles_attempted")
-                    : completed_of(test, "rapid_cycles_ok", "rapid_cycles_total"),
-                value_of_any(test, {"rapid_start_failures", "rapid_start_fail"}),
-                value_of(test, "rapid_capture_timeouts"), state_word(test.status)});
-  }
-  out += table_close();
+  // The approved preview shows "Cycle reliability" as the threshold-banded bars alone. A
+  // Phase|Completed|Start fail|Timeout table stated the same two numbers immediately
+  // above them, so the card said everything twice.
+  std::string out = measurement_open();
 
   // 5.6.5: the threshold-banded reliability bars, once per phase.
-  out += item_label("Aggregate");
+  out += item_label("Cycle reliability");
   const MetricValue *full_completed = find_metric(test, "full_cycles_success");
   const MetricValue *full_configured = find_metric(test, "full_cycles_attempted");
   if (full_completed != nullptr && full_configured != nullptr && full_configured->value > 0.0) {
@@ -1607,11 +1578,15 @@ std::string render_t06(const TestResult &test) {
   // 5.6.7: the renamed timing fields. "Open + STREAMON" because the measurement spans
   // device open, buffer setup and STREAMON, not STREAMON alone; T06's own capture figures
   // are secondary observations, not T03's readiness measurement.
+  // Named again: the empty label continued the reliability bars back when a duplicate
+  // table sat above them. With that table gone these rows are their own item, which is
+  // what the approved preview shows.
   out += kv_items(
-      "", {{"Open + STREAMON mean", value_of_any(test, {"streamon_ms_mean", "open_streamon_mean_ms"})},
-           {"Open + STREAMON maximum", value_of_any(test, {"streamon_ms_max", "open_streamon_max_ms"})},
-           {"Measured capture mean", value_of_any(test, {"first_frame_latency_mean", "measured_capture_mean_ms"})},
-           {"Measured capture maximum", value_of_any(test, {"first_frame_latency_max", "measured_capture_max_ms"})}});
+      "Aggregate",
+      {{"Open + STREAMON mean", value_of_any(test, {"streamon_ms_mean", "open_streamon_mean_ms"})},
+       {"Open + STREAMON maximum", value_of_any(test, {"streamon_ms_max", "open_streamon_max_ms"})},
+       {"Measured capture mean", value_of_any(test, {"first_frame_latency_mean", "measured_capture_mean_ms"})},
+       {"Measured capture maximum", value_of_any(test, {"first_frame_latency_max", "measured_capture_max_ms"})}});
 
   // 5.6.8: semantic text, not raw booleans, for the phase and guard state. Declared here
   // rather than inside the block because the verdict rows further down report the same
@@ -2828,7 +2803,39 @@ std::string render_t13(const TestResult &test) {
   const std::string below_label =
       first_miss != nullptr ? "Below cliff · " + number(first_miss->value) + " ms" : "Below cliff";
 
-  out += measurement_open() + item_label("Round evidence");
+  // Approved charts, drawn here rather than by the generic selector so they sit inside
+  // the Measurement section like every other item. The sweep points come from the probe
+  // lines the runner writes ("coarse: 150ms -> 10/10", "bsearch:  45ms -> 10/10").
+  out += measurement_open();
+  {
+    // Matched without the arrow: a raw string literal does not interpret \xE2\x86\x92, so
+    // spelling the UTF-8 arrow inside R"RX(...)" looks for those characters literally and
+    // never matches. Anything between the timeout and the ratio is skipped instead.
+    const std::regex probe(R"RX((?:coarse|bsearch):\s*(\d+)ms[^0-9]+(\d+)/(\d+))RX");
+    std::vector<BarDatum> sweep;
+    for (const std::string &detail : test.details) {
+      std::smatch parts;
+      if (std::regex_search(detail, parts, probe)) {
+        const double hit = std::strtod(parts[2].str().c_str(), nullptr);
+        const double of = std::strtod(parts[3].str().c_str(), nullptr);
+        sweep.push_back({parts[1].str() + " ms", of > 0.0 ? hit / of * 100.0 : 0.0, "ok"});
+      }
+    }
+    out += bar_chart("Capture success by poll timeout", {{"Capture success", "ok"}}, sweep, "percent", "");
+
+    // The three timeouts that bound the decision, on one scale.
+    std::vector<BarDatum> budget;
+    for (const auto &entry : {std::make_pair("First miss", "first_miss_ms"), std::make_pair("Cliff", "cliff_ms"),
+                              std::make_pair("Safety margin", "safety_margin_ms")}) {
+      const MetricValue *metric = find_metric(test, entry.second);
+      if (metric != nullptr) {
+        budget.push_back({entry.first, metric->value, "thr"});
+      }
+    }
+    out += bar_chart("Timeout budget", {{"Poll timeout", "thr"}}, budget, "ms", "");
+  }
+
+  out += item_label("Round evidence");
   out += table_open({"Round", at_label, below_label, "Detail"});
 
   bool any_round = false;
@@ -3032,8 +3039,10 @@ std::string render_t15(const TestResult &test) {
   const MetricValue *eagain = find_metric(test, "avg_eagain_spins");
   if (eagain != nullptr) {
     out += item_label("CPU spin cost");
-    out += "<div class=\"evidence-row\"><strong>Average EAGAIN spins / frame</strong><span class=\"flags\">" +
-           number(eagain->value) + "</span></div>";
+    out += table_open({"Metric", "Type", "Unit", "Value", "Detail"});
+    out += row({"Average EAGAIN spins / frame", type_word(number(eagain->value)), unit_word(""), number(eagain->value),
+                "Spins the non-blocking mode paid per frame"});
+    out += table_close();
   }
   // Outside the conditional for the same reason as T09: no EAGAIN metric must not leave
   // the Measurement section open.
@@ -3115,10 +3124,17 @@ std::string render_t16(const TestResult &test) {
   }
 
   out += item_label("Edge evidence");
-  out += "<div class=\"evidence-row\"><strong>" +
-         html_escape(edge_decision.empty() ? "Rising-edge trigger likely" : edge_decision) + "</strong>";
-  out += "<span class=\"flags\">HIGH spread: " + high_spread + " | LOW spread: " + low_spread +
-         " | Margin: " + edge_margin + "</span></div>";
+  out += table_open({"Metric", "Type", "Unit", "Value", "Detail"});
+  {
+    const std::string decision = edge_decision.empty() ? std::string("\xE2\x80\x94") : edge_decision;
+    out += row({"Edge decision", "string", unit_word(""), html_escape(decision), "\xE2\x80\x94"});
+    out += row({"HIGH spread", type_word(high_spread), unit_word("milliseconds"), high_spread,
+                "Across the pulse-width sweep"});
+    out += row(
+        {"LOW spread", type_word(low_spread), unit_word("milliseconds"), low_spread, "Derived from the falling edge"});
+    out += row({"Margin", type_word(edge_margin), unit_word("milliseconds"), edge_margin, "\xE2\x80\x94"});
+  }
+  out += table_close();
   out += measurement_items(test, "Aggregate",
                            {{"Observed minimum tested", "hits_1ms", "hits_5ms", "Lowest width at full hits"},
                             {"Trigger edge", "value:Edge detection", nullptr, nullptr}});
@@ -4042,29 +4058,6 @@ std::string render_generic(const TestResult &test) {
 }
 
 }  // namespace
-
-bool test_charts_approved(const std::string &test_id) {
-  // The preview set, verbatim. Kept as its own list rather than derived from the renderer
-  // table because having a renderer and having an approved chart are different facts: 22
-  // tests have renderers, 10 have charts.
-  // T03 is deliberately absent: its own content renderer draws the approved stacked
-  // timing chart directly (render_t03_timing_chart), so the generic statistic-family
-  // selector must not ALSO draw one for it -- that produced a second, colliding chart.
-  // t06-stream-cycles is deliberately absent, same reason as t03-pipeline-ready: its own
-  // content renderer draws the approved reliability bars and Open+STREAMON trend chart
-  // directly (5.6.5/5.6.6), so the generic statistic-family selector must stay off for it
-  // -- otherwise "Open streamon" and "Measured capture" dot charts appear alongside it,
-  // which is exactly the removed chart 5.6.6 names.
-  // t07-multi-buffer is also deliberately absent: its own content renderer draws the
-  // requested-vs-allocated and latency-by-depth charts directly (5.7.6/5.7.7).
-  // t09-buffer-recycling is also deliberately absent: its own content renderer draws the
-  // availability and wait-after-requeue charts directly (5.9.6/5.9.7).
-  static const std::set<std::string> approved = {
-      "t13-poll-timeout-cliff", "t16-gpio-pulse-width", "t23-sustained-capture",
-      "t24-latency-under-load", "t25-multi-camera",     "t26-cold-start",
-  };
-  return approved.count(test_id) != 0;
-}
 
 bool has_test_content_renderer(const std::string &test_id) {
   return renderers().count(test_id) != 0;

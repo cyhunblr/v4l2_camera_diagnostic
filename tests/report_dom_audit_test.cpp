@@ -18,6 +18,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "v4l2diag/core/report_naming.hpp"
@@ -97,6 +98,25 @@ v4l2diag::TestResult test_of(const std::string &id, const std::string &name, v4l
   frames.value = 240;
   frames.description = "Frames captured in this run.";
   test.metrics.push_back(frames);
+  // T23's approved chart is drawn from the per-window detail lines the runner writes, and
+  // its readings from the latency metrics -- not from a generic statistic family. Without
+  // these the card renders no chart and this fixture cannot audit one.
+  if (id == "t23-sustained-capture") {
+    for (const char *line :
+         {"Win0 0-10s: n=65 mean=44ms stddev=0 miss=0", "Win1 10-20s: n=65 mean=45ms stddev=0 miss=0",
+          "Win2 20-30s: n=64 mean=44ms stddev=0 miss=0"}) {
+      test.details.push_back(line);
+    }
+    for (const auto &entry : {std::make_pair("latency_mean", 44.8), std::make_pair("latency_p95", 44.9),
+                              std::make_pair("success_rate_pct", 100.0), std::make_pair("frames_captured", 388.0),
+                              std::make_pair("max_consecutive_miss", 0.0), std::make_pair("latency_drift_ms", 0.01)}) {
+      v4l2diag::MetricValue metric;
+      metric.name = entry.first;
+      metric.value = entry.second;
+      metric.unit = "ms";
+      test.metrics.push_back(metric);
+    }
+  }
   // A statistic family, so the tests whose previews approve a chart actually draw one.
   for (const char *suffix : {"_mean_ms", "_p95_ms", "_max_ms"}) {
     v4l2diag::MetricValue metric;
@@ -239,7 +259,10 @@ int main() {
   {
     // A chart with an axis but no data element is worse than no chart: it looks like a
     // measurement that came out empty.
-    const std::size_t charts = count_of(html, "class=\"metric-chart");
+    // Counted across BOTH wrappers. The generic selector (.metric-chart) is off now that
+    // every approved chart is drawn by its own test renderer inside a .chart-frame, so
+    // counting only the old class reported "no charts" on a report full of them.
+    const std::size_t charts = count_of(html, "class=\"metric-chart") + count_of(html, "class=\"chart-frame\"");
     ok &= check(charts > 0, "the report renders no charts at all");
     for (std::size_t at = html.find("<svg"); at != std::string::npos; at = html.find("<svg", at + 1)) {
       const std::size_t end = html.find("</svg>", at);
