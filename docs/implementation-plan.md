@@ -1181,9 +1181,118 @@ Faz 0-5'in tamami uygulandi ve kontrol listesinde acik madde kalmadi.
 kullanici gercek donanimda kosup raporu paylasacak. O zamana kadar Faz 3b
 `UYGULANDI` kalir, `DOGRULANDI` olmaz.
 
+### 6.19. T05 verdict kurali duzeltildi
+
+Durum: `UYGULANDI` (2026-08-10). Kullanici karari: secenek A.
+
+**Kural.** `recovery_ok == 0` → `FAIL`; `0 < recovery_ok < min_recovery_ok` →
+`WARN`; esigi karsilarsa `PASS`. DQBUF STREAMOFF'tan sonra basarili olursa veya
+re-STREAMON basarisiz olursa `FAIL` — bunlar kurtarma sonucundan **once**
+kontrol edilir.
+
+**Celiskinin iki tarafi olculdu.** Onaylı `t05-preview.html` uc senaryoda da
+`FAIL` gosteriyor ve iki ayri cumle kullaniyor: free-run "The driver returned a
+frame after STREAMOFF", hardware/software-trigger "DQBUF was correctly rejected
+after STREAMOFF, but the restarted stream delivered no recovery frames (0/3)".
+Preview'de **hic** `result-warn` veya `test-card warn` yok. Buna karsilik
+`docs/backend/tests/t05-pollerr-handling.md` verdict tablosu WARN'i acikca
+tanimliyordu.
+
+Cozumun dayanagi: `recovery_ok = 0` **partial degil**. Doc'un kendi Failure
+Modes tablosu bunu ayri satirda "the pipeline is stalled" olarak listeliyor.
+Ayrica T05 tek bir `min_recovery_ok` esigi tasiyor; gercekten WARN kademesi olan
+testler (T03, T24) `pass_*`/`warn_*` cifti tasiyor, yani WARN bandi icin
+altyapi yok. Secenek A doc'un WARN bandini tarif ettigi duruma (kismi kurtarma)
+birakip sifir durumunu preview'e uyduruyor.
+
+**Uygulama.** Karar `pollerr_recovery_verdict()` icine alindi
+(`diagnostic_runner.hpp`), cunku test govdesi gercek cihaz gerektiriyor;
+`multi_buffer_verdict`/`pulse_width_verdict` ile ayni kalip. Ozet cumleler de
+preview'in ifadesine cevrildi ve `/3` sabiti `RECOVERY_CAP`'e baglandi — eski
+metin yapilandirilabilir sayima ragmen her zaman "/3" yaziyordu.
+
+Doc guncellendi: verdict tablosu artik kodla ayni ve degisikligin gerekcesini
+tasiyor.
+
+**Sabotaj — biri once bosa cikti, bu bir bulgudur.** Ilk turda govdenin kendi
+`else → Warn` merdivenine geri donmesi **butun testleri yesil biraktı**:
+`verdict_rules_test` yalnizca saf fonksiyonu olcuyordu, cagri yerini kimse
+gozlemiyordu. Kural doğruydu ve **kullanilmiyordu** — Kural 9'un tarif ettigi
+vacuous guard. Kapatmak icin runner kaynagini tarayan bir delegasyon kontrolu
+eklendi (`metric_name_contract_test` ayni kalibi kullaniyor); `WORKING_DIRECTORY`
+CMake'de repo kokune ayarlandi. Tarama yalnizca **verdict bolgesini** olcuyor:
+oturum kurulumu basarisiz oldugunda erken `return` mesru sekilde `Fail` yaziyor
+ve bu surucu davranisi hakkinda bir verdict degil.
+
+| sabotaj | build_exit | sonuc |
+| --- | --- | --- |
+| `recovery_ok <= 0` dali `&& false` ile kapatildi | 0 | iki assertion yakaladi |
+| govde inline WARN merdivenine dondu (1. tur) | 0 | **bosa cikti** — guard eklendi |
+| govde inline WARN merdivenine dondu (2. tur) | 0 | delegasyon kontrolu yakaladi |
+
+Production dogrulamasi: cihaz kosumunun kendi kaniti (`dqbuf_failed=1`,
+`restreamon_ok=1`, `recovery_ok=0`) `write_reports()` uzerinden gecirildi —
+`card class=fail`, `status=FAIL`, banner `[fail]` ve cumle onaylı preview ile
+birebir ayni.
+
+### 6.20. T08 karti onaylı tasarima gore yeniden yazildi
+
+Durum: `UYGULANDI` (2026-08-10). Kullanici karari: secenek A (tam yeniden yazim).
+
+Kullanici grafik isimlendirmesini isaret etti; olcum daha genis bir sapma gosterdi
+ve tam kart yeniden yazimi secildi.
+
+| konu | once | onaylı / simdi |
+| --- | --- | --- |
+| grafik | `metric-chart-title` "Queue After Saturation 2 count allocated buffers" + legend | **grafik yok** |
+| slot markup | iki kolonlu ortali ERROR/READY kutulari | `queue-row` > `queue-label` + `slot-strip` > `slot` |
+| slot icerigi | uydurma bir ERROR + bir READY | buffer basina index / state / sequence / cozulmus flag |
+| sira | slot'lar once, tablo sonra | tablo once, slot'lar sonra, Aggregate en son |
+| `Error flag mask` | `error_flag_total` → `2` | `0x2041`, detayi `ERROR \| MAPPED \| MONOTONIC` |
+| `Buffer retention` | `frames_available_A` → `2` | iki variant toplami → `4/4` |
+| config satirlari | 6 satir, "Variant A: 100 triggers at 100ms" | onaylı 8 satir, tetik sayisi ve aralik ayri |
+
+**Runner tarafinda gercek bir eksik vardi.** Kosum yalnizca **hatali** buffer'lar
+icin kanit yaziyordu (`Error flag buffers: ...`). Onaylı kart her buffer'i
+gosteriyor — READY olanlari da — cunku "2'den 1'i flag tasidi" ancak ikisi birden
+cizilince okunur. Yeni `slot: <variant>|<index>|<sequence>|<flags>` satiri her
+tutulan buffer icin yaziliyor. Ayrica `errors=` alani artik 0 durumunda da
+yaziliyor (eksik alan renderer'da "bilinmiyor" gibi okunuyordu) ve `buffers=2`
+sabiti `BUF_COUNT`'a baglandi.
+
+**Yan bulgu — `split_unit()` hex degeri bozuyordu.** `0x2041` icin rakam taramasi
+`x`'te duruyor, deger `0` ve birim `x2041` oluyordu: bir buffer flag'i **sifir**
+olarak raporlaniyordu. Hex literal tek token olarak ele alindi; bu T02'nin kontrol
+id'leri gibi diger hex alanlari da koruyor.
+
+**Sabotaj — biri yine bosa cikti.** T05'teki ayni kalip: runner'in slot yazimini
+`if (buf.flags & V4L2_BUF_FLAG_ERROR)` icine almak **butun testleri yesil
+biraktı**, cunku her fixture kendi `slot:` satirlarini elle yaziyor — renderer
+kapsanmis, runner'in emisyonu kapsanmamis. Kaynak taramasi ile guard eklendi.
+
+| sabotaj | build_exit | sonuc |
+| --- | --- | --- |
+| `MONOTONIC` cozumu `&& false` ile kapatildi | 0 | iki test yakaladi |
+| slot yazimi error flag'ine baglandi (1. tur) | 0 | **bosa cikti** — guard eklendi |
+| slot yazimi error flag'ine baglandi (2. tur) | 0 | delegasyon/emisyon guard'i yakaladi |
+
+Production dogrulamasi (taze binary ile, cihaz kosumunun kendi verisi): grafik
+yok, iki `queue-row`, iki `slot-strip`, iki READY + iki ERROR slot, mask `0x2041`,
+retention `4/4`. Geometri onaylı preview ile ortusuyor (`item-label` 173/171,
+`queue-row` `pl=48px` her ikisinde).
+
+Emekli edilen siniflar: `slots`, `queue-value`, `t08-legend-error`,
+`t08-legend-ready`, `evidence-row` (+ `.flags`/`.raw`). Iki-yonlu CSS sozlesmesi
+kullanilmayan kural raporunda artik hicbirini listelemiyor. `.slots`'a atifta
+bulunan eskimis bir yorum da duzeltildi.
+
 ### 6.18. Raporlanan, duzeltilmeyen celiskiler ve kapsam disi bulgular
 
 P3/P4 geregi: olculdu, raporlandi, **uygulanmadi**.
+
+> **Cozuldu 2026-08-10 (secenek A).** Asagidaki T05 celiskisi kullanici karariyla
+> kapatildi; kayit `6.19`'da. Bolum, kararin dayandigi olcumu korumak icin
+> duruyor.
 
 **T05 verdict celiskisi.** Ayni kanit onaylı preview'de `FAIL`, canli kosumda
 `WARN`. Karar noktasi olculdu — `diagnostic_runner.cpp:2115`:
@@ -1200,11 +1309,37 @@ ayrilmis, yani DQBUF dogru davranip kurtarma sifir oldugunda kodun `FAIL`'e
 giden **hicbir yolu yok**. Duzeltme verdict mantigini degistirmek demektir
 (P2), o yuzden karar kullanicidadir.
 
-**Milisaniye tam sayi celiskisi.** Onaylı t13 `float` satirlarini `45.0` ve
-`44.0` gosteriyor; uydurma-ondalik yasagi ise tam degerin tam yazilmasini
-istiyor. Kod yasagi koruyor, dolayisiyla bu iki hucre `45` ve `44` cikar.
+**Milisaniye tam sayi celiskisi — kapandi 2026-08-10, secenek A: kod degismez.**
 
-**T08 kapsam disi (P4).** Kullanici grafik isimlendirmesini isaret etti ama
+Kullanici karari, olcumden sonra: onaylı sette **tutarli bir kural yok**, o yuzden
+kod taklit edilecek bir ilke bulamiyor. Tam deger + `float` tipi kombinasyonu iki
+farkli sekilde basiliyor:
+
+| test | satir | tip | deger |
+| --- | --- | --- | --- |
+| t13 | Reliable cliff | float | **45.0** |
+| t13 | First miss | float | **44.0** |
+| t13 | Timeout headroom | float | **45.0** |
+| t16 | Edge margin | float | **1.0** |
+| t03 | First-frame mean | float | **145** |
+| t06 | Open + STREAMON mean | float | **1132** |
+
+Ayni girdi, farkli cikti. t16 ikisini **tek kartta** gosteriyor: ayni 1 ms degeri
+`Edge margin` satirinda `1.0`, `Observed minimum tested` satirinda `1`. Yani
+ondalik degerden de, olculmus olmasindan da turetilemiyor — satir bazinda
+editoryal bir secim.
+
+Bir ara hipotezim ("olculen vs yapilandirilan") **yanlisti** ve olcum onu curuttu:
+t03'un `145`'i ve t06'nin `1132`'si de olcumdur ve ciplak basiliyor.
+
+Reddedilen alternatifler: metrik adina gore `.0` zorlamak (dort hucreyi duzeltir
+ama kurali bir istisna listesine cevirir ve uydurma-ondalik yasagiyla kavramsal
+olarak celisir); preview'lerdeki dort hucreyi ciplaga cevirmek (onaylı tasarima
+dokunur). Kodun tutarli olmasi, tutarsiz bir tasarimi taklit etmesine tercih
+edildi. Sapma bilinerek kabul edildi: t13'te uc hucre, t16'da bir hucre.
+
+**T08 kapsam disi (P4) — cozuldu 2026-08-10, kayit `6.20`.** Asagidaki olcum
+kararin dayanagi oldugu icin duruyor. Kullanici grafik isimlendirmesini isaret etti ama
 olcum daha buyuk bir sapma gosterdi: onaylı `t08` farkli tablo siniflari
 (`variant-header`/`variant-row`), buffer basina zengin slot markup'i
 (`slot-index`/`slot-state`/`slot-seq`/`slot-flag`), grafik basligi **ve** legend

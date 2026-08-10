@@ -193,7 +193,10 @@ add_test(NAME run_status COMMAND v4l2diag_run_status_test)
 add_executable(v4l2diag_verdict_rules_test tests/verdict_rules_test.cpp)
 target_link_libraries(v4l2diag_verdict_rules_test PRIVATE v4l2diag_core)
 v4l2diag_apply_warnings(v4l2diag_verdict_rules_test)
-add_test(NAME verdict_rules COMMAND v4l2diag_verdict_rules_test)
+# Reads diagnostic_runner.cpp to check the t05 body delegates to the verdict rule,
+# so it must run from the repository root.
+add_test(NAME verdict_rules COMMAND v4l2diag_verdict_rules_test
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # Drives the real CLI binary, so the argument contract itself is under test.
 add_executable(v4l2diag_cli_role_binding_test tests/cli_role_binding_test.cpp)

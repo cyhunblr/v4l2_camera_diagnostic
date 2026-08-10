@@ -664,23 +664,29 @@ table.overview .status-cell { font-weight: 700; font-size: 12px; text-transform:
    throughput chart, which now draws with the shared bar-row/bar-fill vocabulary its
    approved preview uses (.bar-full / .bar-cache, declared with the other series colours
    below). T08 -- whose preview the load-* geometry was originally taken from -- draws its
-   saturation state with .queue-row and .slots, not with these, so nothing else referenced
-   them. Keeping a rule no markup names is the other half of the design spec's two-way
-   check. */
+   saturation state with the .queue-row / .slot-strip family below, not with these, so nothing
+   else referenced them. Keeping a rule no markup names is the other half of the design spec's
+   two-way check. */
 .interpretation { margin: 10px 0 0; color: #526171; font-size: 10px; }
-.queue-row { display: grid; grid-template-columns: 74px 1fr 70px; gap: 10px; align-items: center; margin-top: 14px; font-size: 11px; }
-.slots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.slot { min-height: 42px; display: flex; flex-direction: column; justify-content: center; padding: 5px 9px; border: 1px solid; border-radius: 3px; text-align: center; font-size: 10px; font-weight: 800; }
-.slot small { margin-top: 1px; font-size: 8px; font-weight: 600; }
-.slot.error { border-color: #b84c4c; background: #fff1f1; color: #932f2f; }
-.slot.ready { border-color: #43835b; background: #eff8f2; color: #23633b; }
-.queue-value { text-align: right; font-weight: 800; }
-.t08-legend-error { background: #fff1f1; border: 1px solid #b84c4c; }
-.t08-legend-ready { background: #eff8f2; border: 1px solid #43835b; }
-/* 5.8.8: the decoded flag evidence row. */
-.evidence-row { display: grid; grid-template-columns: 100px 1fr 1fr; gap: 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid #e5eaee; font-size: 11px; }
-.evidence-row:last-child { border-bottom: 0; }
-.evidence-row .raw { text-align: right; color: #64717e; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+/* T08's per-buffer slot strip, verbatim from t08-preview.html. One slot per RETAINED buffer,
+   reading index / state / sequence / decoded flags across a single line, so a READY buffer and
+   an error-flagged one can be compared at a glance. Production previously drew a two-column
+   grid of centred ERROR/READY boxes under a chart title and legend, none of which the approved
+   card has: it names no chart, and the state is carried by the text plus the tinted border. */
+.queue-row { display: grid; grid-template-columns: 110px 1fr; gap: 10px; align-items: center; padding: 0 16px 8px; }
+.queue-row:last-child { padding-bottom: 0; }
+.queue-label { color: #596776; font-size: 9px; font-weight: 700; }
+.slot-strip { display: flex; gap: 8px; }
+.slot { flex: 1; display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; border-radius: 4px; font-size: 10px; white-space: nowrap; overflow: hidden; }
+.slot-ready { border: 1px solid #bcd9c6; background: #f2f8f4; }
+.slot-error { border: 1px solid #ead4d4; background: #fff7f7; }
+.slot-index { color: #2d3a47; font-weight: 800; font-variant-numeric: tabular-nums; }
+.slot-state { font-size: 9px; font-weight: 800; letter-spacing: .3px; }
+.slot-ready .slot-state { color: #17643a; }
+.slot-error .slot-state { color: #c93c37; }
+.slot-seq { color: #596776; font-variant-numeric: tabular-nums; }
+.slot-flag { margin-left: auto; color: #7a8693; font-size: 9px; font-variant-numeric: tabular-nums; }
+.slot-error .slot-flag { color: #8a4a47; }
 /* review-plan 5.7: two charts side by side, per the approved preview's ".charts" rule. */
 /* One chart per row (design-spec: no side-by-side panels). Two charts sharing a row
    render the SAME viewBox at half the width, so one SVG unit stops being one CSS pixel
@@ -833,6 +839,10 @@ table.overview .summary-text { color: #475569; }
 /* Staircase (S3): section label at 21px, item label at 53px, item content at 69px.
    Scoped by has-items so a section without subheadings keeps its own indent. */
 .has-items .grid-head, .has-items .grid-row, .has-items .chart-legend { padding-left: 48px; }
+/* T08's slot strip takes the same staircase indent as the tables it sits between; the approved
+   preview lists queue-row alongside its variant rows in exactly this rule. The indent goes on
+   the ROW, not also on the strip inside it, for the reason given at .has-items .scale-name. */
+.has-items .queue-row { padding-left: 48px; }
 /* The chart box keeps the staircase alignment WITHOUT the indent eating into the 906px
    the SVG needs: 968 available - 48 indent = 920, which overflowed by 14px. Pulling the
    box out by the section padding restores the room while the left edge still lines up. */

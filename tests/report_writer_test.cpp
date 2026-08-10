@@ -258,15 +258,17 @@ int main() {
       {"frames_available_A", "count", 2.0, "Frames available after variant A."},
       {"error_flag_total", "count", 1.0, "Frames with V4L2_BUF_FLAG_ERROR."},
   };
-  // review-plan 5.8: the structured variant/evidence detail format T08's own content
-  // renderer reads.
+  // review-plan 5.8: the structured variant/slot detail format T08's own content renderer
+  // reads. "slot:" replaced the earlier "evidence:" line, because the approved card draws one
+  // slot per RETAINED buffer -- READY ones included -- rather than a row per flagged buffer.
   overwrite_test.details = {
-      "variant: Variant A|10 at 10/s|2|2|2|1|2|WARN",
-      "evidence: Variant A|Buffer 1, sequence 42: MAPPED|0x4000",
+      "Variant A: buffers=2 triggers=10 available=2 errors=1",
+      "slot: A|0|41|0x2001",
+      "slot: A|1|42|0x2041",
       "settle_time: 500ms",
       "backend_memory: mmap",
-      "variant_a_config: 10 / 100ms",
-      "variant_b_config: n/a",
+      "variant_a: 10 triggers at 100ms",
+      "variant_b: 20 triggers at 50ms",
       "error_threshold: 0",
   };
   overwrite_test.metrics.push_back({"allocated_buffers", "count", 2.0, "Allocated buffers."});
@@ -509,9 +511,16 @@ int main() {
   // presence report_card_contract_test verifies against the emitted class list.
   // Ticks are round numbers rather than max*1.18 fractions.
   html_ok &= require(html.find(">23.6</text>") == std::string::npos, "axis ticks are still scaled by max*1.18");
-  // review-plan 5.8.8: the decoded flag evidence, with the raw hex value kept alongside it.
-  html_ok &= require(html.find("Buffer 1, sequence 42") != std::string::npos, "t08 error buffer evidence is missing");
-  html_ok &= require(html.find("0x4000") != std::string::npos, "t08's raw flag value is missing");
+  // review-plan 5.8.6/5.8.8: one slot per retained buffer, its state as text, its sequence, and
+  // the decoded flags beside the raw hex value.
+  html_ok &= require(html.find("class=\"slot-index\">Buffer 1<") != std::string::npos,
+                     "t08's slot strip does not name the buffer index");
+  html_ok &= require(html.find("class=\"slot-seq\">seq 42<") != std::string::npos,
+                     "t08's slot strip does not carry the buffer sequence");
+  html_ok &= require(html.find("0x2041") != std::string::npos, "t08's raw flag value is missing");
+  html_ok &= require(html.find("slot slot-ready") != std::string::npos,
+                     "t08 renders no READY slot; only flagged buffers reached the strip");
+  html_ok &= require(html.find("MONOTONIC") != std::string::npos, "t08 does not decode the timestamp flag bit");
   // T13's two approved charts are drawn by its own renderer as bar charts named by their
   // item labels; the SVG distribution/threshold pair the generic selector used to emit is
   // gone, along with the colour ramp and the data-* attributes that belonged to it.

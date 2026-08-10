@@ -835,6 +835,14 @@ std::string state_word(TestStatus status) {
 // reading "30 frames" hides the number from the eye that is scanning the column.
 void split_unit(const std::string &raw, std::string *value, std::string *unit) {
   const std::string text = trim_of(raw);
+  // A hex literal is ONE token. The digit scan below stops at the 'x', which turned the T08
+  // flag mask "0x2041" into the value 0 with the unit "x2041" -- a buffer flag reported as
+  // zero. Buffer flags and control ids are both written this way.
+  if (text.compare(0, 2, "0x") == 0 || text.compare(0, 2, "0X") == 0) {
+    *value = text;
+    unit->clear();
+    return;
+  }
   std::size_t at = 0;
   // The comma is a THOUSANDS SEPARATOR here, not a boundary: stopping at it turned
   // "4,915,200 bytes" into the value 4 and silently reported a 4-byte payload.
@@ -2228,30 +2236,124 @@ std::vector<T08Variant> t08_variants(const TestResult &test) {
   return variants;
 }
 
-// review-plan 5.8.6: the actual allocated buffer slots, ERROR/READY labelled in TEXT (not
-// colour alone), with the error slot naming its buffer index.
-std::string render_t08_queue_after_saturation(const std::vector<T08Variant> &variants,
-                                              const std::string &allocated_buffers) {
-  if (variants.empty()) {
+// One "slot: <variant key>|<buffer index>|<sequence>|<flags hex>" line: a single retained
+// buffer after saturation.
+struct T08Slot {
+  std::string variant_key;
+  std::string index;
+  std::string sequence;
+  std::string flags_hex;
+  bool error = false;
+};
+
+// The V4L2 buffer flag bits the approved card names. Only the bits the design shows are
+// decoded: inventing names for bits the preview never displays would put text on the page that
+// no approved artifact contains (project rule 4b).
+std::string t08_decode_flags(const std::string &hex) {
+  const unsigned long bits = std::strtoul(hex.c_str(), nullptr, 16);
+  std::string out;
+  const auto add = [&out](const char *name) {
+    if (!out.empty()) {
+      out += " | ";
+    }
+    out += name;
+  };
+  if (bits & 0x0040UL) {  // V4L2_BUF_FLAG_ERROR
+    add("ERROR");
+  }
+  if (bits & 0x0001UL) {  // V4L2_BUF_FLAG_MAPPED
+    add("MAPPED");
+  }
+  if (bits & 0x2000UL) {  // V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC
+    add("MONOTONIC");
+  }
+  return out;
+}
+
+// The trigger count or the interval from a variant's config line. The runner writes one string
+// ("100 triggers at 100ms") while the approved card gives each number its own row with its own
+// unit, so the two halves are separated here rather than printed as one opaque value.
+std::string t08_config_field(const TestResult &test, const std::string &key, bool want_triggers) {
+  const std::string line = detail_value(test, key);
+  if (line.empty()) {
     return std::string();
   }
-  std::string out = "<div class=\"chart-frame\"><div class=\"metric-chart-title\">Queue After Saturation <span>" +
-                    html_escape(allocated_buffers) + " allocated buffers</span></div>";
-  for (const auto &variant : variants) {
-    out += "<div class=\"queue-row\"><strong>" + html_escape(variant.name) +
-           "</strong><div class=\"slots\">"
-           "<div class=\"slot error\">ERROR"
-           "<small>buffer 0</small></div>"
-           "<div class=\"slot "
-           "ready\">READY<small>retained "
-           "frame</small></div></div>"
-           "<div class=\"queue-value\">" +
-           html_escape(variant.available_num) + "/" + html_escape(variant.available_den) + "</div></div>";
+  if (want_triggers) {
+    return std::to_string(std::atoi(line.c_str()));
   }
-  out +=
-      "<div class=\"legend\"><span class=\"legend-item\"><i class=\"legend-swatch t08-legend-error\"></i>Error "
-      "flagged</span><span class=\"legend-item\"><i class=\"legend-swatch "
-      "t08-legend-ready\"></i>Available</span></div></div>";
+  const std::size_t at = line.find(" at ");
+  if (at == std::string::npos) {
+    return std::string();
+  }
+  return trim_of(line.substr(at + 4));
+}
+
+std::vector<T08Slot> t08_slots(const TestResult &test) {
+  std::vector<T08Slot> slots;
+  for (const auto &detail : test.details) {
+    if (detail.compare(0, 6, "slot: ") != 0) {
+      continue;
+    }
+    std::vector<std::string> fields;
+    std::size_t start = 6;
+    while (start <= detail.size()) {
+      const std::size_t bar = detail.find('|', start);
+      fields.push_back(detail.substr(start, bar == std::string::npos ? std::string::npos : bar - start));
+      if (bar == std::string::npos) {
+        break;
+      }
+      start = bar + 1;
+    }
+    if (fields.size() < 4) {
+      continue;
+    }
+    T08Slot slot;
+    slot.variant_key = trim_of(fields[0]);
+    slot.index = trim_of(fields[1]);
+    slot.sequence = trim_of(fields[2]);
+    slot.flags_hex = trim_of(fields[3]);
+    slot.error = (std::strtoul(slot.flags_hex.c_str(), nullptr, 16) & 0x0040UL) != 0;
+    slots.push_back(slot);
+  }
+  return slots;
+}
+
+// review-plan 5.8.6: one slot per retained buffer, its state in TEXT (not colour alone), with
+// the buffer index, the sequence number and the decoded flags on the same line.
+//
+// The approved t08 card has NO chart in any of its three scenarios: no chart frame, no title,
+// no legend. Production drew a "Queue After Saturation" title with an "N count allocated
+// buffers" subtitle and a two-swatch legend, then invented one ERROR and one READY box per
+// variant regardless of what the run recorded. This draws the buffers the run actually
+// dequeued.
+std::string render_t08_buffer_slots(const std::vector<T08Variant> &variants, const std::vector<T08Slot> &slots) {
+  if (slots.empty()) {
+    return std::string();
+  }
+  std::string out;
+  for (const auto &variant : variants) {
+    // The runner keys slots by the variant letter ("A"), while the variant line names it
+    // ("Variant A"), so the strip is matched on the trailing key rather than the whole label.
+    const std::string key = variant.name.empty() ? std::string() : variant.name.substr(variant.name.size() - 1);
+    std::string strip;
+    for (const auto &slot : slots) {
+      if (slot.variant_key != key) {
+        continue;
+      }
+      const std::string decoded = t08_decode_flags(slot.flags_hex);
+      strip += "<div class=\"slot " + std::string(slot.error ? "slot-error" : "slot-ready") +
+               "\"><span class=\"slot-index\">Buffer " + html_escape(slot.index) +
+               "</span><span class=\"slot-state\">" + (slot.error ? "ERROR" : "READY") +
+               "</span><span class=\"slot-seq\">seq " + html_escape(slot.sequence) +
+               "</span><span class=\"slot-flag\">" + html_escape(decoded) + "&nbsp;&nbsp;" +
+               html_escape(slot.flags_hex) + "</span></div>";
+    }
+    if (strip.empty()) {
+      continue;
+    }
+    out += "<div class=\"queue-row\"><div class=\"queue-label\">" + html_escape(variant.name) +
+           "</div><div class=\"slot-strip\">" + strip + "</div></div>";
+  }
   return out;
 }
 
@@ -2259,7 +2361,6 @@ std::string render_t08(const TestResult &test) {
   const std::vector<T08Variant> variants = t08_variants(test);
 
   std::string out = measurement_open();
-  out += render_t08_queue_after_saturation(variants, value_of_any(test, {"frames_available_A", "allocated_buffers"}));
 
   // 5.8.7: the six approved columns, observed/allocated for available and error-flagged.
   // "Saturation by variant" labels this TABLE. It used to label a bar chart of trigger
@@ -2278,35 +2379,10 @@ std::string render_t08(const TestResult &test) {
   }
   out += table_close();
 
-  // 5.8.8: the hex flag value decoded by name, with the raw value kept alongside it.
+  // 5.8.6/5.8.8: the per-buffer slot strip, each buffer's flags decoded beside the raw value.
   out += item_label("Buffer state after saturation");
-  bool any_evidence = false;
-  for (const auto &detail : test.details) {
-    if (detail.compare(0, 9, "evidence:") != 0) {
-      continue;
-    }
-    any_evidence = true;
-    const std::size_t colon = detail.find(':');
-    std::vector<std::string> fields;
-    std::size_t start = colon + 1;
-    while (start <= detail.size()) {
-      const std::size_t bar = detail.find('|', start);
-      fields.push_back(detail.substr(start, bar == std::string::npos ? std::string::npos : bar - start));
-      if (bar == std::string::npos) {
-        break;
-      }
-      start = bar + 1;
-    }
-    fields.resize(3);
-    out += "<div class=\"evidence-row\"><strong>" + html_escape(trim_of(fields[0])) +
-           "</strong><span "
-           "class=\"flags\">" +
-           html_escape(trim_of(fields[1])) + "</span><span class=\"raw\">" + html_escape(trim_of(fields[2])) +
-           "</span></div>";
-  }
-  if (!any_evidence) {
-    out += "<p>Unavailable</p>";
-  }
+  const std::string strips = render_t08_buffer_slots(variants, t08_slots(test));
+  out += strips.empty() ? std::string("<p>Unavailable</p>") : strips;
   // Both counts come from the parsed variant lines; "detail:variant" named a key the
   // runner does not write, so the rows read Unavailable on a real run.
   const std::string variants_spec = "literal:" + std::to_string(variants.size());
@@ -2319,23 +2395,52 @@ std::string render_t08(const TestResult &test) {
   const std::string passed_spec =
       "literal:" + (variants.empty() ? std::string("Unavailable")
                                      : std::to_string(variants_clean) + "/" + std::to_string(variants.size()));
-  out += measurement_items(test, "Aggregate",
-                           {{"Variants tested", variants_spec.c_str(), nullptr, nullptr},
-                            {"Buffers per variant", "frames_available_A", nullptr, nullptr},
-                            {"Error flag mask", "error_flag_total", nullptr, "Buffers reporting an error flag"}});
+  // The approved card shows the flag VALUE here ("0x2041") with its decode as the detail, not
+  // the number of flagged buffers -- that count is the "Error-flagged" verdict row below.
+  // Reading `error_flag_total` printed "2" under a label promising a bitmask.
+  const std::vector<T08Slot> slots = t08_slots(test);
+  std::string mask_hex;
+  for (const auto &slot : slots) {
+    if (slot.error) {
+      mask_hex = slot.flags_hex;
+      break;
+    }
+  }
+  const std::string mask_spec = "literal:" + (mask_hex.empty() ? std::string("Unavailable") : mask_hex);
+  const std::string mask_detail = mask_hex.empty() ? std::string() : t08_decode_flags(mask_hex);
+  out += measurement_items(
+      test, "Aggregate",
+      {{"Variants tested", variants_spec.c_str(), nullptr, nullptr},
+       {"Buffers per variant", "frames_available_A", nullptr, nullptr},
+       {"Error flag mask", mask_spec.c_str(), nullptr, mask_detail.empty() ? nullptr : mask_detail.c_str()}});
   out += section_close();
 
-  // 5.8.9: the six configuration parameters.
+  // Buffer retention is a ratio across BOTH variants ("4/4" in the approved card): every
+  // retained buffer against every allocated one. `frames_available_A` alone is one variant's
+  // count, which read as "2" where the design shows the total.
+  int retained_total = 0;
+  int allocated_total = 0;
+  for (const auto &variant : variants) {
+    retained_total += std::atoi(variant.available_num.c_str());
+    allocated_total += std::atoi(variant.available_den.c_str());
+  }
+  const std::string retention_spec =
+      "literal:" + (variants.empty() ? std::string("Unavailable")
+                                     : std::to_string(retained_total) + "/" + std::to_string(allocated_total));
   out += verdict_section(
-      test, {{"Buffer retention", "frames_available_A", nullptr, "Buffers still available after saturation"},
+      test, {{"Buffer retention", retention_spec.c_str(), nullptr, "Buffers still available after saturation"},
              {"Error-flagged", "error_flag_total", nullptr, "Buffers carrying V4L2_BUF_FLAG_ERROR"},
              {"Variants passed", passed_spec.c_str(), nullptr, "Variants with no error-flagged buffer"}});
-  out += config_items({{"Allocated buffers", value_of_any(test, {"frames_available_A", "allocated_buffers"})},
+  // 5.8.9: the approved eight rows. The variant load is split into a trigger count and an
+  // interval, as the preview does, rather than one "100 triggers at 100ms" string.
+  out += config_items({{"Buffer count", detail_value(test, "allocated_buffers")},
+                       {"Variant A triggers", t08_config_field(test, "variant_a", true)},
+                       {"Variant A interval", t08_config_field(test, "variant_a", false)},
+                       {"Variant B triggers", t08_config_field(test, "variant_b", true)},
+                       {"Variant B interval", t08_config_field(test, "variant_b", false)},
                        {"Settle time", detail_value(test, "settle_time")},
-                       {"Backend memory", detail_value(test, "backend_memory")},
-                       {"Variant A", detail_value(test, "variant_a_config")},
-                       {"Variant B", detail_value(test, "variant_b_config")},
-                       {"Error threshold", detail_value(test, "error_threshold")}});
+                       {"Max error flags", detail_value(test, "error_threshold")},
+                       {"Backend memory", detail_value(test, "backend_memory")}});
   return out;
 }
 
@@ -3083,27 +3188,35 @@ std::string render_t13(const TestResult &test) {
       out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable"});
     }
   }
+  // The production timeout is a CONFIGURED value ("Production timeout 48.5 / From
+  // configuration" in the approved preview), not the safety margin. Binding it to
+  // `safety_margin_ms` made one card print the same 3.5 twice under two different labels --
+  // measured on the 2026-08-10 device run, where no production_timeout metric exists at all.
+  const std::string prod_val = detail_value(test, "production_timeout");
+  // `literal:` carries a value the caller resolved; the string has to outlive the spec vector
+  // because VerdictSpec holds a `const char *`.
+  const std::string prod_spec =
+      "literal:" + (prod_val.empty() ? std::string("Unavailable")
+                                     : prod_val + (prod_val.find("ms") == std::string::npos ? " ms" : ""));
   out += measurement_items(test, "Aggregate",
                            {{"Reliable cliff", "cliff_ms", nullptr, "Lowest reliable timeout"},
                             {"First miss", "first_miss_ms", nullptr, nullptr},
-                            {"Production timeout", "safety_margin_ms", "production_timeout_ms", nullptr}});
+                            {"Production timeout", prod_spec.c_str(), nullptr, "From configuration"}});
   out += table_close() + section_close();
 
-  // Configuration
-  const std::string prod_val = detail_value(test, "production_timeout");
   out +=
       verdict_section(test, {{"Safety margin", "safety_margin_ms", nullptr, "Production timeout against the cliff"},
                              {"Boundary stability", "stability_confirmed", "stability", "Rounds agreeing on the cliff"},
                              {"Timeout headroom", "cliff_ms", nullptr, "Cliff + 5 ms margin"}});
-  out +=
-      config_items({{"Probe samples", "10 / timeout"},
-                    {"Stability", "5 x 10 frames"},
-                    {"Warmup frames", "10 frames"},
-                    {"Safe margin", "5 ms"},
-                    {"Production timeout",
-                     prod_val.empty() ? value_of_any(test, {"safety_margin_ms", "production_timeout_ms"}) : prod_val},
-                    {"Backend memory",
-                     detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
+  out += config_items({{"Probe samples", "10 / timeout"},
+                       {"Stability", "5 x 10 frames"},
+                       {"Warmup frames", "10 frames"},
+                       {"Safe margin", "5 ms"},
+                       // Never falls back to the safety margin: they are different quantities and
+                       // the fallback printed 3.5 here on the 2026-08-10 run.
+                       {"Production timeout", prod_val.empty() ? std::string("Unavailable") : prod_val},
+                       {"Backend memory",
+                        detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
 
   return out;
 }
@@ -3158,18 +3271,42 @@ std::string render_t14(const TestResult &test) {
                             {"P95", "latency_p95", "latency_p95_ms", "Trigger edge to DQBUF"},
                             {"Maximum", "latency_max", "latency_max_ms", "Trigger edge to DQBUF"}});
 
-  // Variability Evidence Table
+  // The spread is max MINUS min, which no metric records -- it was bound to `latency_max` and
+  // printed the maximum under a label promising a range (44.843 on the 2026-08-10 run).
+  const MetricValue *lat_min = find_metric(test, "latency_min");
+  const MetricValue *lat_max = find_metric(test, "latency_max");
+  const std::string spread_spec = lat_min != nullptr && lat_max != nullptr
+                                      ? "literal:" + display_number_ms(lat_max->value - lat_min->value, 3) + " ms"
+                                      : std::string("literal:Unavailable");
   out += measurement_items(
       test, "Variability",
       {{"Standard deviation", "latency_stddev", "latency_stddev_ms", "Spread around the mean"},
        {"Inter-sample delta variation", "latency_jitter", "latency_stddev_ms", "Between consecutive samples"},
-       {"Min-max spread", "latency_max", "latency_max_ms", "Complete observed range"}});
+       {"Min-max spread", spread_spec.c_str(), nullptr, "Complete observed range"}});
   out += section_close();
 
+  // Reliability is a RATIO of frames and missed captures is a COUNT; the approved preview
+  // shows "50/50" and "0". Both were bound to latency statistics, so the card reported
+  // "Capture reliability 44.807" and "Missed captures 0.013" -- neither is a count of
+  // anything. `frames_captured` and `frames_missed` are what the runner actually records.
+  const MetricValue *captured = find_metric(test, "frames_captured");
+  const MetricValue *missed = find_metric(test, "frames_missed");
+  const std::string reliability_spec =
+      captured != nullptr && missed != nullptr
+          ? "literal:" + display_number(captured->value) + "/" + display_number(captured->value + missed->value)
+          : std::string("literal:Unavailable");
+  // "capture_timeout: 100ms" -- strtod stops at the unit suffix.
+  const std::string timeout_detail = detail_value(test, "capture_timeout");
+  const double timeout_ms = timeout_detail.empty() ? 0.0 : std::strtod(timeout_detail.c_str(), nullptr);
+  const std::string headroom_spec = timeout_ms > 0.0 && lat_max != nullptr
+                                        ? "literal:" + display_number_ms(timeout_ms - lat_max->value, 3) + " ms"
+                                        : std::string("literal:Unavailable");
   out += verdict_section(
-      test, {{"Capture reliability", "latency_mean", "latency_mean_ms", "Triggers that delivered a frame"},
-             {"Missed captures", "latency_stddev", "latency_stddev_ms", nullptr},
-             {"Timeout headroom", "latency_max", "latency_max_ms", "Capture timeout minus observed maximum"}});
+      test, {{"Capture reliability", reliability_spec.c_str(), nullptr, "Triggers that delivered a frame"},
+             {"Missed captures", "frames_missed", nullptr, nullptr},
+             // Approved t14 shows "55.164" against a 100 ms timeout, i.e. timeout - max. The
+             // binding printed the maximum itself (44.843), contradicting its own detail text.
+             {"Timeout headroom", headroom_spec.c_str(), nullptr, "Capture timeout minus observed maximum"}});
   out += test_configuration(test);
   return out;
 }
@@ -3242,17 +3379,53 @@ std::string render_t15(const TestResult &test) {
   }
   // Outside the conditional for the same reason as T09: no EAGAIN metric must not leave
   // the Measurement section open.
+  // "Mean difference" is the difference BETWEEN the modes and "Lower mean mode" names a mode
+  // -- the approved preview shows "0.003" and "Practically equal". Both were bound to a raw
+  // mean, so the 2026-08-10 card printed 44.797 and 44.799 under labels promising neither.
+  const MetricValue *nb_mean = find_metric(test, "nonblock_latency_mean");
+  const MetricValue *bl_mean = find_metric(test, "block_latency_mean");
+  std::string difference_spec = "literal:Unavailable";
+  std::string lower_spec = "literal:Unavailable";
+  if (nb_mean != nullptr && bl_mean != nullptr) {
+    const double gap = bl_mean->value - nb_mean->value;
+    const double magnitude = gap < 0.0 ? -gap : gap;
+    difference_spec = "literal:" + display_number_ms(magnitude, 3) + " ms";
+    // The approved wording: a gap under the run's own standard deviation is not a winner.
+    const MetricValue *nb_sd = find_metric(test, "nonblock_latency_stddev");
+    const double noise = nb_sd != nullptr ? nb_sd->value : 0.0;
+    lower_spec =
+        magnitude <= noise ? "literal:Practically equal" : (gap > 0.0 ? "literal:Non-blocking" : "literal:Blocking");
+  }
   out += measurement_items(test, "Aggregate",
-                           {{"Mean difference", "nonblock_latency_mean", "nonblock_mean_ms", "Between the two modes"},
-                            {"Lower mean mode", "block_latency_mean", "block_mean_ms", nullptr}});
+                           {{"Mean difference", difference_spec.c_str(), nullptr, "Between the two modes"},
+                            {"Lower mean mode", lower_spec.c_str(), nullptr, nullptr}});
   out += section_close();
 
   // Test Configuration
 
-  out += verdict_section(
-      test, {{"Non-block captures", "nonblock_latency_mean", "nonblock_mean_ms", nullptr},
-             {"Blocking captures", "block_latency_mean", "block_mean_ms", nullptr},
-             {"Modes compared", "nonblock_latency_p95", "nonblock_p95_ms", "Both capture modes measured"}});
+  // All three rows are ratios in the approved preview -- "30/30", "30/30", "2/2" -- and all
+  // three were bound to latency means or a P95. `nonblock_captures` / `block_captures` are the
+  // metrics that hold the sample counts.
+  const MetricValue *nb_caps = find_metric(test, "nonblock_captures");
+  const MetricValue *bl_caps = find_metric(test, "block_captures");
+  const std::string samples_detail = detail_value(test, "samples_per_mode");
+  const double per_mode = !samples_detail.empty() ? std::strtod(samples_detail.c_str(), nullptr)
+                          : nb_caps != nullptr    ? nb_caps->value
+                                                  : 0.0;
+  const auto ratio_spec = [per_mode](const MetricValue *captures) {
+    if (captures == nullptr || per_mode <= 0.0) {
+      return std::string("literal:Unavailable");
+    }
+    return "literal:" + display_number(captures->value) + "/" + display_number(per_mode);
+  };
+  const std::string nonblock_spec = ratio_spec(nb_caps);
+  const std::string blocking_spec = ratio_spec(bl_caps);
+  // Both modes ran when both recorded a capture count; the preview states this as "2/2".
+  const int modes_done = (nb_caps != nullptr ? 1 : 0) + (bl_caps != nullptr ? 1 : 0);
+  const std::string modes_spec = "literal:" + std::to_string(modes_done) + "/2";
+  out += verdict_section(test, {{"Non-block captures", nonblock_spec.c_str(), nullptr, nullptr},
+                                {"Blocking captures", blocking_spec.c_str(), nullptr, nullptr},
+                                {"Modes compared", modes_spec.c_str(), nullptr, "Both capture modes measured"}});
   out += config_items(
       {{"Samples / mode",
         detail_value(test, "samples_per_mode").empty() ? "\xE2\x80\x94" : detail_value(test, "samples_per_mode")},

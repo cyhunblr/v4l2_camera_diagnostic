@@ -463,6 +463,9 @@ void run_buffer_overwrite(const std::string &camera_path, MemoryBackend backend,
 
   int error_frames_total = 0;
   std::vector<std::string> error_buffer_details;
+  // "slot: <variant>|<buffer index>|<sequence>|<flags hex>" -- one line per retained buffer,
+  // in dequeue order. The renderer draws the approved per-buffer slot strip from these.
+  std::vector<std::string> slot_details;
   for (const auto &v : variants) {
     emit(log, camera_path, "t08", std::string(v.label) + ": sending " + std::to_string(v.triggers) + " triggers...");
     V4lSession s;
@@ -497,6 +500,15 @@ void run_buffer_overwrite(const std::string &camera_path, MemoryBackend backend,
                << " sequence=" << buf.sequence << " flags=0x" << std::hex << buf.flags;
         error_buffer_details.push_back(detail.str());
       }
+      // Every retained buffer, not only the flagged ones. The approved t08 card shows one slot
+      // per buffer with its state, sequence and decoded flags side by side -- a READY slot next
+      // to an ERROR slot is what makes "1 of 2 carried the flag" legible. Recording only the
+      // error buffers left the renderer inventing the READY slots from nothing.
+      {
+        std::ostringstream slot;
+        slot << "slot: " << v.key << "|" << buf.index << "|" << buf.sequence << "|0x" << std::hex << buf.flags;
+        slot_details.push_back(slot.str());
+      }
     }
     error_frames_total += error_frames;
 
@@ -504,11 +516,16 @@ void run_buffer_overwrite(const std::string &camera_path, MemoryBackend backend,
     r.metrics.push_back(metric("triggers_" + k, "count", static_cast<double>(v.triggers), v.label));
     r.metrics.push_back(metric("frames_available_" + k, "count", static_cast<double>(available),
                                "Frames available after all triggers in variant " + k + "."));
-    r.details.push_back(std::string(v.label) + ": buffers=2 triggers=" + std::to_string(v.triggers) +
-                        " available=" + std::to_string(available) +
-                        (error_frames > 0 ? " errors=" + std::to_string(error_frames) : ""));
+    // `errors=` is always written, including the 0 case: a variant that flagged nothing is a
+    // finding, and omitting the field made the renderer read a missing value as unknown.
+    r.details.push_back(std::string(v.label) + ": buffers=" + std::to_string(BUF_COUNT) +
+                        " triggers=" + std::to_string(v.triggers) + " available=" + std::to_string(available) +
+                        " errors=" + std::to_string(error_frames));
   }
   for (const auto &detail : error_buffer_details) {
+    r.details.push_back(detail);
+  }
+  for (const auto &detail : slot_details) {
     r.details.push_back(detail);
   }
 
@@ -904,6 +921,13 @@ void run_poll_timeout_cliff(const std::string &camera_path, MemoryBackend backen
   r.details.push_back("probe_frames: " + std::to_string(PROBE_FRAMES));
   const double PROD_MS = thv(th, "t13-poll-timeout-cliff", "production_timeout_ms");
   const double SAFE_MARGIN_THRESHOLD = thv(th, "t13-poll-timeout-cliff", "safe_margin_ms");
+  // Recorded so the report can state it. The value drives the verdict and appears in the
+  // summary sentence, but nothing wrote it into the result -- so the renderer had no honest
+  // source for the approved "Production timeout / From configuration" row and had been bound
+  // to `safety_margin_ms` instead, printing the same number under two different labels.
+  char prod_text[32];
+  snprintf(prod_text, sizeof(prod_text), "%.1f", PROD_MS);
+  r.details.push_back("production_timeout: " + std::string(prod_text));
   const uint64_t pulse_ns = pulse_ns_from(tp);
   emit(log, camera_path, "t13", "Poll timeout cliff finder: adaptive search...");
 
@@ -2112,15 +2136,22 @@ void run_pollerr_handling(const std::string &camera_path, MemoryBackend backend,
 
   const int min_rec = static_cast<int>(thv(th, "t05-pollerr-handling", "min_recovery_ok"));
   r.details.push_back("min_recovery_frames: " + std::to_string(min_rec));
-  if (dq_ret < 0 && re_ok && recovery_ok >= min_rec) {
-    r.status = TestStatus::Pass;
-    r.summary = "STREAMOFF correctly prevents DQBUF; recovery OK (" + std::to_string(recovery_ok) + "/3).";
-  } else if (dq_ret >= 0) {
-    r.status = TestStatus::Fail;
-    r.summary = "DQBUF succeeded after STREAMOFF — unexpected.";
+  r.status = pollerr_recovery_verdict(dq_ret < 0, re_ok, recovery_ok, min_rec);
+  const std::string recovered = std::to_string(recovery_ok) + "/" + std::to_string(RECOVERY_CAP);
+  if (dq_ret >= 0) {
+    r.summary = "The driver returned a frame after STREAMOFF.";
+  } else if (!re_ok) {
+    r.summary = "DQBUF was correctly rejected after STREAMOFF, but the stream could not be restarted.";
+  } else if (recovery_ok <= 0) {
+    // Distinct from the partial case below: the approved preview words this one as a total
+    // recovery failure, because zero frames is a stalled pipeline rather than a slow one.
+    r.summary =
+        "DQBUF was correctly rejected after STREAMOFF, but the restarted stream delivered no recovery frames (" +
+        recovered + ").";
+  } else if (recovery_ok < min_rec) {
+    r.summary = "DQBUF failed correctly but recovery partial (" + recovered + ").";
   } else {
-    r.status = TestStatus::Warn;
-    r.summary = "DQBUF failed correctly but recovery partial (" + std::to_string(recovery_ok) + "/3).";
+    r.summary = "STREAMOFF correctly prevents DQBUF; recovery OK (" + recovered + ").";
   }
 }
 
@@ -3381,6 +3412,27 @@ int multi_buffer_usable_count(const std::vector<MultiBufferOutcome> &outcomes) {
     }
   }
   return usable;
+}
+
+// See the rule and its authority in diagnostic_runner.hpp.
+TestStatus pollerr_recovery_verdict(bool dqbuf_failed, bool restreamon_ok, int recovery_ok, int min_recovery_ok) {
+  // A frame handed back after STREAMOFF is a state-machine violation, and no amount of
+  // successful recovery excuses it. Checked first for that reason.
+  if (!dqbuf_failed) {
+    return TestStatus::Fail;
+  }
+  if (!restreamon_ok) {
+    return TestStatus::Fail;
+  }
+  // No recovery at all: the ioctl path restarted but the pipeline never delivered. Kept ahead
+  // of the threshold comparison so a threshold of 0 cannot define a stalled pipeline away.
+  if (recovery_ok <= 0) {
+    return TestStatus::Fail;
+  }
+  if (recovery_ok < min_recovery_ok) {
+    return TestStatus::Warn;
+  }
+  return TestStatus::Pass;
 }
 
 TestStatus multi_buffer_verdict(const std::vector<MultiBufferOutcome> &outcomes) {

@@ -63,6 +63,37 @@ v4l2diag::TestResult test_of(const std::string &id, v4l2diag::TestStatus status 
   return test;
 }
 
+// The Value cell of the grid row whose first cell is `label`.
+//
+// Rows are `<div class="grid-row cols-N"><span>Label</span><span>type</span><span>unit</span>
+// <span>VALUE</span>...`, so the value is the fourth span. Returning the cell rather than
+// searching the whole card matters: "0.013" appears legitimately as the standard deviation
+// elsewhere in the same table, and a card-wide substring search would find it and call a
+// mislabelled row correct.
+std::string cell_after_label(const std::string &html, const std::string &label) {
+  const std::string needle = "<span>" + label + "</span>";
+  const std::size_t at = html.find(needle);
+  if (at == std::string::npos) {
+    return "(label not rendered)";
+  }
+  std::size_t cursor = at + needle.size();
+  std::string cell;
+  for (int index = 0; index < 3; ++index) {
+    const std::size_t open = html.find("<span", cursor);
+    if (open == std::string::npos) {
+      return "(row truncated)";
+    }
+    const std::size_t gt = html.find('>', open);
+    const std::size_t close = html.find("</span>", gt);
+    if (gt == std::string::npos || close == std::string::npos) {
+      return "(row truncated)";
+    }
+    cell = html.substr(gt + 1, close - gt - 1);
+    cursor = close + 7;
+  }
+  return cell;
+}
+
 // Every test id that has a standalone approved preview, with the column headers that
 // preview uses. Taken from the preview sources, which are the design authority here.
 struct Expectation {
@@ -771,36 +802,64 @@ int main() {
         "Both saturation variants retained 2/2 buffers, but one retained buffer in "
         "each variant carried V4L2_BUF_FLAG_ERROR.";
     t08.metrics.push_back(mv("allocated_buffers", 2, ""));
-    t08.details.push_back("variant: Variant A|100 at 100ms|2|2|2|1|2|WARN");
-    t08.details.push_back("variant: Variant B|200 at 50ms|2|2|2|1|2|WARN");
-    t08.details.push_back("evidence: Variant A|Buffer 0, sequence 0: ERROR, MAPPED, TIMESTAMP_MONOTONIC|0x2041");
-    t08.details.push_back("evidence: Variant B|Buffer 0, sequence 0: ERROR, MAPPED, TIMESTAMP_MONOTONIC|0x2041");
+    t08.metrics.push_back(mv("error_flag_total", 2, ""));
+    t08.details.push_back("Variant A: buffers=2 triggers=100 available=2 errors=1");
+    t08.details.push_back("Variant B: buffers=2 triggers=200 available=2 errors=1");
+    // Per-buffer slots, in the runner's own wording: one line per RETAINED buffer, so a READY
+    // slot sits beside the ERROR one. 0x2001 = MAPPED | TIMESTAMP_MONOTONIC (no error bit);
+    // 0x2041 adds V4L2_BUF_FLAG_ERROR.
+    t08.details.push_back("slot: A|0|4208|0x2001");
+    t08.details.push_back("slot: A|1|4211|0x2041");
+    t08.details.push_back("slot: B|0|8613|0x2041");
+    t08.details.push_back("slot: B|1|8614|0x2001");
+    t08.details.push_back("Error flag buffers: variant A buffer_index=1 sequence=4211 flags=0x2041");
+    t08.details.push_back("Error flag buffers: variant B buffer_index=0 sequence=8613 flags=0x2041");
     t08.details.push_back("settle_time: 500ms");
     t08.details.push_back("backend_memory: mmap");
-    t08.details.push_back("variant_a_config: 100 / 100ms");
-    t08.details.push_back("variant_b_config: 200 / 50ms");
+    t08.details.push_back("variant_a: 100 triggers at 100ms");
+    t08.details.push_back("variant_b: 200 triggers at 50ms");
     t08.details.push_back("error_threshold: 0");
     const std::string html = v4l2diag::render_test_content(t08);
 
-    // 5.8.5: the saturation-load comparison, both variants named with their rate.
+    // 5.8.5: the variant table is the FIRST item, and there is no chart at all -- the approved
+    // t08 has none in any of its three cards. The card used to open with a
+    // `metric-chart-title` reading "Queue After Saturation 2 count allocated buffers", which
+    // put a chart heading and a legend into a card the design gives neither.
     ok &= check(contains(html, "<h4 class=\"item-label\">Saturation by variant</h4>"),
-                "T08 has no Saturation by variant chart");
-    ok &= check(contains(html, "100 at 10/s") || contains(html, "100"),
-                "T08's load chart does not name Variant A's trigger rate");
-    ok &= check(contains(html, "200 at 20/s") || contains(html, "200"),
-                "T08's load chart does not name Variant B's trigger rate");
-    // The "approximately 10 seconds" sentence went with the load chart it captioned:
-    // T08's preview has no chart, and the trigger load is already a column of the
-    // approved six-column table ("Trigger load").
+                "T08 has no Saturation by variant item");
+    ok &= check(!contains(html, "metric-chart-title"), "T08 still emits a chart title");
+    ok &= check(!contains(html, "Queue After Saturation"), "T08 still emits the unapproved chart heading");
+    ok &= check(!contains(html, "chart-frame") && !contains(html, "legend-swatch"),
+                "T08 still emits a chart frame or legend; the approved card has neither");
     ok &= check(!contains(html, "approximately 10 seconds"), "T08's unapproved load-chart caption came back");
+    // Order: the variant table precedes the slot strip, which precedes Aggregate.
+    {
+      const std::size_t variants_at = html.find("Saturation by variant");
+      const std::size_t slots_at = html.find("Buffer state after saturation");
+      const std::size_t aggregate_at = html.find(">Aggregate<");
+      ok &=
+          check(variants_at != std::string::npos && slots_at != std::string::npos && aggregate_at != std::string::npos,
+                "T08 is missing one of its three approved items");
+      ok &= check(variants_at < slots_at && slots_at < aggregate_at,
+                  "T08's items are out of the approved order (table, then slots, then Aggregate)");
+    }
 
-    // 5.8.6: the queue-after-saturation slots, with ERROR/READY as visible TEXT, not only
-    // colour, and the error slot naming its buffer index.
-    ok &= check(contains(html, "Queue After Saturation") || contains(html, "Queue after saturation"),
-                "T08 has no Queue After Saturation chart");
-    ok &= check(count_of(html, ">ERROR<") >= 2, "T08's queue chart does not label both error slots as ERROR");
-    ok &= check(count_of(html, ">READY<") >= 2, "T08's queue chart does not label both ready slots as READY");
-    ok &= check(contains(html, "buffer 0"), "T08's error slot does not name its buffer index");
+    // 5.8.6: one slot per retained buffer, each naming its index, state, sequence and decoded
+    // flags. The approved markup is queue-row > queue-label + slot-strip > slot.slot-ready |
+    // slot.slot-error, with slot-index / slot-state / slot-seq / slot-flag inside.
+    ok &= check(count_of(html, "class=\"queue-row\"") == 2, "T08 does not render one queue row per variant");
+    ok &= check(count_of(html, "class=\"slot-strip\"") == 2, "T08 does not render one slot strip per variant");
+    ok &= check(count_of(html, "slot slot-ready") == 2, "T08 does not render the two READY buffers as ready slots");
+    ok &= check(count_of(html, "slot slot-error") == 2, "T08 does not render the two flagged buffers as error slots");
+    ok &= check(count_of(html, "class=\"slot-index\">Buffer ") == 4, "T08's slots do not each name their buffer index");
+    ok &= check(contains(html, "class=\"slot-seq\">seq 4208<"), "T08's slots do not carry the buffer sequence");
+    ok &= check(count_of(html, ">ERROR<") >= 2, "T08's slots do not label the error state as text");
+    ok &= check(count_of(html, ">READY<") >= 2, "T08's slots do not label the ready state as text");
+    // Decoded flag names beside the raw value, per 5.8.8. MONOTONIC must appear for 0x2001,
+    // which has no error bit -- a decoder that only names ERROR would leave a ready slot blank.
+    ok &= check(contains(html, "MAPPED"), "T08 does not decode the MAPPED flag bit");
+    ok &= check(contains(html, "MONOTONIC"), "T08 does not decode the timestamp flag bit");
+    ok &= check(count_of(html, "0x2001") >= 2, "T08 does not show the non-error flag value on its ready slots");
 
     // 5.8.7: the six approved columns, observed/allocated format.
     for (const char *column : {"Variant", "Trigger load", "Allocated", "Available", "Error flagged", "Detail"}) {
@@ -811,14 +870,21 @@ int main() {
                 "T08 does not show available/error-flagged as observed/allocated");
     ok &= check(!contains(html, "class=\"detail-list\""), "T08 still emits the raw repeating detail block");
 
-    // 5.8.8: the hex flag decoded by name, with the raw value preserved alongside it.
-    ok &= check(contains(html, "ERROR, MAPPED, TIMESTAMP_MONOTONIC") || contains(html, "ERROR"),
-                "T08 does not decode the flag bits by name");
-    ok &= check(contains(html, "0x2041"), "T08 does not preserve the raw flag value");
+    // 5.8.8: the raw flag value is preserved beside the decoded names.
+    ok &= check(count_of(html, "0x2041") >= 2, "T08 does not preserve the raw flag value on its error slots");
 
-    // 5.8.9: the six configuration parameters.
-    for (const char *key :
-         {"Allocated buffers", "Settle time", "Backend memory", "Variant A", "Variant B", "Error threshold"}) {
+    // The Aggregate "Error flag mask" row shows the flag VALUE with its decode as the detail,
+    // per the approved card ("0x2041" / "ERROR | MAPPED | MONOTONIC"). It used to read
+    // `error_flag_total`, printing the count 2 under a label promising a bitmask.
+    {
+      const std::string mask = cell_after_label(html, "Error flag mask");
+      ok &= check(mask.find("0x") != std::string::npos,
+                  "T08 'Error flag mask' shows '" + mask + "'; expected a hex flag value, not a count");
+    }
+
+    // 5.8.9: the configuration parameters, in the approved wording.
+    for (const char *key : {"Buffer count", "Variant A triggers", "Variant A interval", "Variant B triggers",
+                            "Variant B interval", "Settle time", "Max error flags", "Backend memory"}) {
       ok &= check(contains(html, key), std::string("T08 is missing the ") + key + " configuration row");
     }
   }
@@ -1068,6 +1134,92 @@ int main() {
     // 5.11.2: PASS confirms a valid benchmark ran; no platform threshold was applied, so
     // there is no RESULT block on a passing card.
     ok &= check(!contains(html, "class=\"result-fail\""), "a passing T11 card shows a RESULT section");
+  }
+
+  // --- T13/T14/T15: a row's label must match the quantity it prints -------------
+  //
+  // The 2026-08-10 device run (1786329594-21268) exposed six rows bound to a metric that
+  // measures something else. They were invisible while millisecond values printed at two
+  // decimals; at three the latency shape gave them away -- "Missed captures 0.013" is not a
+  // count of anything, and T13 printed the same 3.5 for two different quantities.
+  //
+  // Every one of these is a DERIVED value the runner does not record as a metric, which is
+  // why the binding reached for the nearest latency instead. The approved previews name what
+  // each row shows; those values are asserted here.
+  {
+    // T13: the production timeout is a configured value, not the safety margin. Approved
+    // t13 shows "Production timeout 48.5 / From configuration" beside "Safety margin 3.5".
+    v4l2diag::TestResult t13 = test_of("t13-poll-timeout-cliff", v4l2diag::TestStatus::Warn);
+    t13.name = "Poll Timeout Reliability Boundary";
+    t13.metrics.push_back(mv("cliff_ms", 45, "ms"));
+    t13.metrics.push_back(mv("first_miss_ms", 44, "ms"));
+    t13.metrics.push_back(mv("safety_margin_ms", 3.5, "ms"));
+    t13.metrics.push_back(mv("stability_confirmed", 1, "bool"));
+    t13.metrics.push_back(mv("stability_rounds_passed", 5, "count"));
+    t13.details.push_back("production_timeout: 48.5");
+    const std::string html = v4l2diag::render_test_content(t13);
+
+    // Observed: the cell that follows the "Production timeout" label in the Aggregate table.
+    const std::string prod = cell_after_label(html, "Production timeout");
+    ok &= check(prod.find("48.5") != std::string::npos,
+                "T13 'Production timeout' shows '" + prod + "'; the configured 48.5 was recorded");
+    ok &= check(prod.find("3.5") == std::string::npos,
+                "T13 'Production timeout' is still printing the safety margin (3.5)");
+  }
+  {
+    // T14: reliability is a ratio and missed captures is a count. Approved t14 shows
+    // "Capture reliability 50/50" and "Missed captures 0", NOT latency statistics.
+    v4l2diag::TestResult t14 = test_of("t14-trigger-latency");
+    t14.name = "Trigger to Capture Latency";
+    t14.metrics.push_back(mv("frames_captured", 50, "count"));
+    t14.metrics.push_back(mv("frames_missed", 0, "count"));
+    t14.metrics.push_back(mv("latency_mean", 44.806510, "ms"));
+    t14.metrics.push_back(mv("latency_stddev", 0.013344, "ms"));
+    t14.metrics.push_back(mv("latency_min", 44.781062, "ms"));
+    t14.metrics.push_back(mv("latency_max", 44.842566, "ms"));
+    t14.metrics.push_back(mv("latency_p95", 44.834056, "ms"));
+    t14.metrics.push_back(mv("latency_jitter", 0.018048, "ms"));
+    t14.details.push_back("capture_timeout: 100ms");
+    const std::string html = v4l2diag::render_test_content(t14);
+
+    const std::string reliability = cell_after_label(html, "Capture reliability");
+    ok &= check(reliability.find("50/50") != std::string::npos,
+                "T14 'Capture reliability' shows '" + reliability + "'; expected the ratio 50/50");
+    const std::string missed = cell_after_label(html, "Missed captures");
+    ok &= check(missed.find("0.013") == std::string::npos,
+                "T14 'Missed captures' shows '" + missed + "', which is the standard deviation");
+    // The spread is max - min: 44.842566 - 44.781062 = 0.061504, which is "0.062" at three
+    // decimals. Never max alone.
+    const std::string spread = cell_after_label(html, "Min-max spread");
+    ok &= check(spread.find("44.84") == std::string::npos,
+                "T14 'Min-max spread' shows '" + spread + "', which is the maximum, not the spread");
+    ok &= check(spread.find("0.062") != std::string::npos,
+                "T14 'Min-max spread' shows '" + spread + "'; expected max - min = 0.062");
+  }
+  {
+    // T15: the difference between the two modes, and a count of modes. Approved t15 shows
+    // "Mean difference 0.003" and "Modes compared 2/2".
+    v4l2diag::TestResult t15 = test_of("t15-nonblock-vs-block");
+    t15.name = "Non-blocking Spin vs Blocking DQBUF";
+    t15.metrics.push_back(mv("nonblock_latency_mean", 44.796811, "ms"));
+    t15.metrics.push_back(mv("block_latency_mean", 44.799275, "ms"));
+    t15.metrics.push_back(mv("nonblock_latency_p95", 44.808614, "ms"));
+    t15.metrics.push_back(mv("nonblock_captures", 30, "count"));
+    t15.metrics.push_back(mv("block_captures", 30, "count"));
+    const std::string html = v4l2diag::render_test_content(t15);
+
+    // 44.799275 - 44.796811 = 0.002464 -> "0.002" at three decimals.
+    const std::string difference = cell_after_label(html, "Mean difference");
+    ok &= check(difference.find("44.79") == std::string::npos,
+                "T15 'Mean difference' shows '" + difference + "', which is one mode's mean, not the difference");
+    ok &= check(difference.find("0.002") != std::string::npos,
+                "T15 'Mean difference' shows '" + difference + "'; expected the between-mode difference 0.002");
+    const std::string compared = cell_after_label(html, "Modes compared");
+    ok &= check(compared.find("2/2") != std::string::npos,
+                "T15 'Modes compared' shows '" + compared + "'; expected the ratio 2/2");
+    const std::string nonblock = cell_after_label(html, "Non-block captures");
+    ok &= check(nonblock.find("30/30") != std::string::npos,
+                "T15 'Non-block captures' shows '" + nonblock + "'; expected the ratio 30/30");
   }
 
   if (ok) {

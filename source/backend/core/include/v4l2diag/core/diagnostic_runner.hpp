@@ -78,6 +78,27 @@ struct MultiBufferOutcome {
 int multi_buffer_usable_count(const std::vector<MultiBufferOutcome> &outcomes);
 TestStatus multi_buffer_verdict(const std::vector<MultiBufferOutcome> &outcomes);
 
+// t05 verdict. The approved t05 preview shows FAIL in all three trigger scenarios, with two
+// distinct failure sentences: "The driver returned a frame after STREAMOFF" (the state-machine
+// violation) and "DQBUF was correctly rejected after STREAMOFF, but the restarted stream
+// delivered no recovery frames (0/3)". The second was reaching WARN, because the code treated
+// every non-PASS case with a correctly-failing DQBUF as "recovery partial".
+//
+// Zero recovery frames is not partial recovery -- it is no recovery. The test's own
+// documentation separates these in its Failure Modes table ("recovery_ok = 0: the pipeline is
+// stalled"), and t05 carries a single `min_recovery_ok` threshold with no WARN counterpart,
+// unlike the tests that genuinely have a warning band (t03, t24 carry pass_*/warn_* pairs).
+//
+//   FAIL  DQBUF succeeded after STREAMOFF (state-machine violation), or re-STREAMON failed,
+//         or the restarted stream delivered NO frames at all
+//   WARN  recovery is genuinely partial: at least one frame arrived, but fewer than required
+//   PASS  DQBUF failed as it must, re-STREAMON worked, and recovery met the threshold
+//
+// User decision 2026-08-10 (option A), resolving preview-vs-doc: the preview's FAIL is
+// honoured for the zero case while the doc's WARN band is kept for the partial case it
+// actually describes.
+TestStatus pollerr_recovery_verdict(bool dqbuf_failed, bool restreamon_ok, int recovery_ok, int min_recovery_ok);
+
 // One pulse width in the t16 sweep.
 struct PulseWidthOutcome {
   int width_ms = 0;

@@ -356,6 +356,10 @@ v4l2diag::TestResult test_of(const std::string &id, const std::string &name, v4l
   // renders rows that say "Unavailable" for a parameter that did have a value.
 
   test.details.push_back("buffers_requested: 2");
+  // T13's production timeout, in the runner's wording. It is a configured threshold, and until
+  // the runner recorded it the renderer read `safety_margin_ms` instead -- printing the same
+  // value under both "Safety margin" and "Production timeout" on the 2026-08-10 device run.
+  test.details.push_back("production_timeout: 48.5");
   test.details.push_back("poll_timeout_ms: 100");
   test.details.push_back("warmup_frames: 5");
   test.details.push_back("min_recovery_frames: 2");
@@ -371,8 +375,14 @@ v4l2diag::TestResult test_of(const std::string &id, const std::string &name, v4l
   test.details.push_back("sample_interval: 200ms");
   test.details.push_back("settle_time: 500ms");
   test.details.push_back("allocated_buffers: 2");
+  // Both spellings, because the runner writes both: `variant_a` feeds T08's Test Configuration
+  // rows (split into a trigger count and an interval) and `variant_a_config` is the older key.
+  test.details.push_back("variant_a: 100 triggers at 100ms");
+  test.details.push_back("variant_b: 200 triggers at 50ms");
   test.details.push_back("variant_a_config: 100 triggers at 100ms");
   test.details.push_back("variant_b_config: 200 triggers at 50ms");
+  test.details.push_back("slot: A|0|4208|0x2001");
+  test.details.push_back("slot: A|1|4211|0x2041");
   test.details.push_back("error_threshold: 0");
   test.details.push_back("samples_per_width: 8");
   test.details.push_back("identical_run_threshold: 2");

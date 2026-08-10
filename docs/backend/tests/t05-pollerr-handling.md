@@ -59,8 +59,19 @@ DQBUF after STREAMOFF: failed errno=22 (Invalid argument)
 | Status | Condition |
 | -------- | ----------- |
 | **Pass** | DQBUF fails after STREAMOFF AND re-STREAMON succeeds AND recovery_ok ≥ 2 (min_recovery_ok threshold) |
-| **Warn** | DQBUF fails correctly but recovery is partial (recovery_ok < min_recovery_ok) |
-| **Fail** | DQBUF succeeded after STREAMOFF — state machine violation |
+| **Warn** | Recovery is genuinely partial: `0 < recovery_ok < min_recovery_ok` |
+| **Fail** | DQBUF succeeded after STREAMOFF (state machine violation), OR re-STREAMON failed, OR `recovery_ok = 0` |
+
+`recovery_ok = 0` is a **Fail**, not a Warn: zero frames is a stalled pipeline rather than a
+slow one, which is the distinction the Failure Modes table below already draws. The rule lives
+in `pollerr_recovery_verdict()` (`diagnostic_runner.hpp`) and is checked by
+`tests/verdict_rules_test.cpp`, which also verifies the test body delegates to it.
+
+Changed 2026-08-10 on the user's decision, resolving a conflict this table had with the
+approved `docs/assets/refactored_previews/t05-preview.html`: all three of its scenarios show
+FAIL, and the hardware-trigger card words it "DQBUF was correctly rejected after STREAMOFF, but
+the restarted stream delivered no recovery frames (0/3)". A 2026-08-10 device run hit exactly
+that state and the report said WARN.
 
 ## Interpretation Guide
 
