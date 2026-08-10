@@ -303,10 +303,13 @@ export default function App() {
     const previous = previousRunStatusRef.current;
     const wasRunning = previous === "queued" || previous === "running";
     const isTerminal = TERMINAL_RUN_STATUSES.has(runStatus);
-    if (isTerminal && runId) {
-      unlockPage("results");
-    }
+    // Only a run that finished in this session unlocks Result Output. A run
+    // restored from localStorage by useRunPolling arrives already terminal, and
+    // unlocking on that alone made Result Output clickable on a fresh page load
+    // before the user had done anything. Opening a run from Dashboard history
+    // unlocks it through its own path (openHistoricalRun).
     if (wasRunning && isTerminal && runId) {
+      unlockPage("results");
       setActivePage("results");
     }
     previousRunStatusRef.current = runStatus;

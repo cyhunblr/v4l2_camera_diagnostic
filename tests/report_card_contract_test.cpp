@@ -497,13 +497,12 @@ int main() {
   // --- S1: only the canonical section names -------------------------------
   // Observed: the text of every <h3 class="section-label">.
   {
-    const std::set<std::string> allowed = {"Measurement",
-                                           "Measurement Result",
-                                           "Test Configuration",
-                                           "Control Evidence",
-                                           "Device Evidence \xC2\xB7 Information",
-                                           "Device Evidence \xC2\xB7 Capability",
-                                           "Device Evidence \xC2\xB7 Pixel Formats"};
+    // T01's three headings dropped the shared "Device Evidence ·" prefix (user decision
+    // 2026-08-10): each column names its own subject instead of repeating two words across
+    // one row.
+    const std::set<std::string> allowed = {"Measurement",         "Measurement Result", "Test Configuration",
+                                           "Control Evidence",    "Device Information", "Device Capability",
+                                           "Device Pixel Formats"};
     for (const std::string &name : tag_texts(cards, "<h3 class=\"section-label\"")) {
       check(allowed.count(name) == 1, "section name outside the canonical set: '" + name + "'");
     }

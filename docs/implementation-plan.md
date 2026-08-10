@@ -998,6 +998,138 @@ Bir olcum hatasi daha duzeltildi: ilk assertion `"id": "t01..."` isaretinden
 **ileriye** dilimliyordu ve 0 format satiri buluyordu — serializer `details`'i
 `id`'den **once** yaziyor. Vacuous gecmek yerine FAIL verdigi icin yakalandi.
 
+### 6.12. Girinti iki kez uygulaniyordu (olculdu)
+
+Durum: `UYGULANDI` (2026-08-10). Kullanici bulgusu: "tablonun sol tarafindaki
+yazi cok fazla girdi olarak sag tarafa alinmis"; T13/T14/T15/T17/T19-T24 icin
+"hic girdi uygulanmamis"; T16 icin "tam olmasi gerektigi gibi".
+
+Chrome 146 headless ile `--hide-scrollbars`, hem onaylı preview'ler hem de
+`write_reports()` ciktisi uzerinde `getBoundingClientRect().left` olculdu.
+
+| element | preview | uretim (once) | fark |
+| --- | --- | --- | --- |
+| `item-label` | 171 | 189 | +18 |
+| `chart-frame` | 171 (`pl=0`) | 189 (`pl=48`) | +18 |
+| `stacked-chart` | 171 (`pl=48`) | 237 | +66 |
+| `cycle-row` | 219 | 285 | +66 |
+
+**Iki ayri kok neden.**
+
+1. `.test-body { padding: 16px }` — onaylı 26 preview'in **hicbirinde** boyle bir
+   sarmalayici yok; orada `.section` kartin dogrudan cocugu ve
+   `.test-card .section` zaten 16px tasiyor. Her kartta her element 16px sağa
+   kaydi. `item-label`'in iki tarafta da `padding-left:32px` olmasina ragmen
+   171 → 189 farki bunu gosterir: kayma konteyner seviyesinde.
+2. `.has-items .chart-frame` **ve** `.has-items .stacked-chart` ikisi birden 48px
+   ekliyordu. Onaylı kural: 48px belirli bir seviyeye **bir kez** uygulanir.
+   Preview'lerde `chart-frame{padding:0 16px}` sade kalir ve 48px ic grafige
+   aittir; **tek istisna t16**, orada `chart-frame{padding:0 16px 0 48px}` ve ici
+   tekrar etmez. Kullanicinin "T16 dogru" demesinin sebebi tam olarak bu.
+
+Duzeltme: `.test-body` padding'i sifirlandi (sinif markup'ta kaldigi icin kural
+iki-yonlu sozlesme geregi duruyor), ve SVG grafikleri icin `chart-frame`
+girintisi korunurken CSS bar grafiklerini sarmaladigi durumda
+`:has(.stacked-chart, .thr-chart, .rel-chart)` ile iptal edildi. SVG tarafi
+degismedi: T13 `chart-frame` halen `pl=48px`.
+
+Uretim ciktisi uzerinde olculen sonuc — preview ile eleman eleman ortusuyor
+(sabit +2px kartin 1px kenarligi ve durum seridi):
+
+| element | preview | uretim (sonra) |
+| --- | --- | --- |
+| `chart-frame` | 171 (`pl=0`) | 173 (`pl=0`) |
+| `stacked-chart` | 171 (`pl=48`) | 173 (`pl=48`) |
+| `cycle-row` | 219 | 221 |
+
+Sabotaj (`build_exit=0` ayri olculdu): iptal kurali silindi → 6.12 yakaladi;
+`.test-body` padding'i geri kondu → 6.13 yakaladi.
+
+### 6.14. T01 ve T02 icin ozel kurallar
+
+Durum: `UYGULANDI` (2026-08-10). Kullanici karari.
+
+**T01.** Dort degisiklik:
+
+- Section basliklari `Device Evidence ·` onekini birakti:
+  `Device Information` / `Device Capability` / `Device Pixel Formats`.
+  Bu, onaylı preview'i **degistiren** bir karardir (preview `Device Evidence ·`
+  diyor) — Kural 6 geregi kullanicinin en son acik karari ustte.
+- `Driver`/`Card`/`Bus` degerleri normal yazi fontuna dondu. Uretim
+  `.kv-row dd` icin `JetBrains Mono` kullaniyordu; onaylı preview'de
+  `font-family` override'i yok ve `.kv strong{font-weight:400}`.
+- `SUPPORTED` vurgusuz: `.capability-row dd` 800 → 400. Renk verdigi tasiyor,
+  kalinlik tasimiyor. Yesil korundu.
+- `Backend support (VIDIOC_REQBUFS accepted)` → `Backend Support` (buyuk S) ve
+  kabul edilen ioctl kendi satirinda (`Accepted ioctl`). Kullanicinin genel
+  geri bildirimi: rapor `Backend supported` yaziyordu, `Backend Support` olmali.
+
+**T02.** Controls/Writable/Read-only seridi kaldirildi. Onaylı preview
+`Control Evidence` + tablodan olusur, serit yok (Kural 4b). Serit ayni zamanda
+**yanlisti**: `Read-only`, `{"writable_count", "read_only"}` sirasini cozuyordu,
+yani writable sayisini yaziyordu — 2026-08-10 kosumunda 14 writable + 1 read-only
+tasiyan bir tablonun ustunde "13" ve "13". Iki sayi da `Measurement Result`'ta
+kaliyor (Kural 4c).
+
+### 6.15. PASS kartlarinda giris metni kaldirildi
+
+Durum: `UYGULANDI` (2026-08-10). Kullanici karari: "pass olan bir test
+sonucunda asla yazi bu sekilde girise yazilmaz, aslinda bu tarz yazi hic
+yazilmaz. Bunu not almistik. Hata yapmissin."
+
+Olculdu: onaylı `t07` ve `t11` hardware-trigger kartlarinda `<p>` **yoktur**
+(tek `<p>` preview etiketinin kendisi, karta ait degil).
+
+- T07: `Requested and allocated buffer counts matched...` + `100/100 frames
+  captured` kaldirildi. Bilgi kaybolmuyor (Kural 4c): tahsis araligi
+  `Latency by buffer count` tablosunda satir satir, toplam ise
+  `Measurement Result` icindeki `Capture success` oraninda.
+- T11: `The 4 KiB and 64 KiB figures are repeated reads...` kaldirildi. Ayrimi
+  artik legend tasiyor (`Full frame (primary)` / `Cache-sized reads`) ve her bar
+  kendi seri renginde.
+
+`requests.empty()` durumundaki `Unavailable` korundu: hic satiri olmayan bir
+kart bunu soylemek zorunda.
+
+### 6.16. T11 kopya bolgesi etiketleri okunabilir hale geldi
+
+Durum: `UYGULANDI` (2026-08-10).
+
+Kosum `mmap_full` / `mmap_4k` / `mmap_64k` yaziyordu — bunlar **metrik
+anahtarlari** (`<label>_mbps`). Onaylı preview `Full frame` / `4 KiB sample` /
+`64 KiB sample` gosteriyor. Teknik id degismedi (proje kurali); gosterim adi
+`t11_display_label()` icinde boyut sonekinden uretiliyor.
+
+### 6.17. Milisaniye hassasiyeti metrik basina belirlendi
+
+Durum: `UYGULANDI` (2026-08-10). Bu, onceki turda "kullanici karari bekliyor"
+diye birakilan **yedi kesirli hucre** maddesidir.
+
+Onaylı set olculdugunde tek bir kuralin bunu **uretemeyecegi** ortaya cikti —
+ondalik sayisi birimin degil, **metrigin ne olctugunun** ozelligi:
+
+| ondalik | nerede | ornek |
+| --- | --- | --- |
+| 3 | t14/t15 dagilim istatistikleri | `44.778`, `44.800`, `0.012`, `55.164` |
+| 2 | t06/t07/t11 tek bildirilen figur | `44.81`, `44.00`, `0.40`, `5.11` |
+| 1 | t13 poll-timeout sinirlari | `48.5`, `3.5` |
+| 0 | konfigurasyon girdileri | `Warmup frames 10`, `safe margin 5` |
+
+3 ondalik gerekcesi olculdu: t15 `44.796` ile `44.799` sutunlarini
+**karsilastiriyor**; iki ondalikta ikisi de `44.80` olur ve testin varlik sebebi
+kaybolur.
+
+Uygulama `ms_decimals_for()` icinde metrik adi desenlerine bagli. Desenler
+satir basina bir kural olarak `MsPrecisionRule` dizisinde: cıplak string'lerden
+olusan bir suslu parantez listesi, `metric_name_contract_test`'in statik
+taramasina `{label, metric, ...}` verdict spec'i gibi gorunuyor ve runner'dan
+`estimated_copy` diye bir metrik kaydetmesini istiyordu.
+
+Tam sayi kurali korundu: deger tam ise tam yazilir, yani uydurma `.000`
+uretilmiyor. **Bu, onaylı t13 ile celisir** — orada `float` tipli satirlar
+`45.0` ve `44.0` gosteriyor. Celiski asagida P3 geregi raporlanmistir, kod
+uydurma-ondalik yasagini koruyor.
+
 ### 6.7. T11 grafigi onaylı konvansiyona cevrildi
 
 Durum: `UYGULANDI` (2026-08-09). Kullanici karari: "gorsel sonuc ayni degil;
@@ -1048,6 +1180,44 @@ Faz 0-5'in tamami uygulandi ve kontrol listesinde acik madde kalmadi.
 **Tek acik is: cihaz kosumu dogrulamasi.** Kural 10'un ucuncu seviyesi —
 kullanici gercek donanimda kosup raporu paylasacak. O zamana kadar Faz 3b
 `UYGULANDI` kalir, `DOGRULANDI` olmaz.
+
+### 6.18. Raporlanan, duzeltilmeyen celiskiler ve kapsam disi bulgular
+
+P3/P4 geregi: olculdu, raporlandi, **uygulanmadi**.
+
+**T05 verdict celiskisi.** Ayni kanit onaylı preview'de `FAIL`, canli kosumda
+`WARN`. Karar noktasi olculdu — `diagnostic_runner.cpp:2115`:
+
+```text
+dqbuf_failed=1, recovery_ok=0, min_recovery_frames=2
+  dq_ret < 0 && re_ok && recovery_ok >= min_rec  -> false  (0 >= 2 degil)
+  dq_ret >= 0                                    -> false  (DQBUF dogru sekilde basarisiz)
+  else                                           -> WARN
+```
+
+Bu bir esik uyusmazligi **degil**: `FAIL` dali yalnizca `dq_ret >= 0` icin
+ayrilmis, yani DQBUF dogru davranip kurtarma sifir oldugunda kodun `FAIL`'e
+giden **hicbir yolu yok**. Duzeltme verdict mantigini degistirmek demektir
+(P2), o yuzden karar kullanicidadir.
+
+**Milisaniye tam sayi celiskisi.** Onaylı t13 `float` satirlarini `45.0` ve
+`44.0` gosteriyor; uydurma-ondalik yasagi ise tam degerin tam yazilmasini
+istiyor. Kod yasagi koruyor, dolayisiyla bu iki hucre `45` ve `44` cikar.
+
+**T08 kapsam disi (P4).** Kullanici grafik isimlendirmesini isaret etti ama
+olcum daha buyuk bir sapma gosterdi: onaylı `t08` farkli tablo siniflari
+(`variant-header`/`variant-row`), buffer basina zengin slot markup'i
+(`slot-index`/`slot-state`/`slot-seq`/`slot-flag`), grafik basligi **ve** legend
+yokluğu, ve tablo-once-slot-sonra sirasi kullaniyor. Canli kart slot'lari once
+veriyor. Bu tam bir kart yeniden yazimi; istenen maddenin sinirlarini asiyor.
+
+**Kuralsiz uc sinif.** `flags` (T10), `ok` (T13), `warn-text` (T20) kendi
+kuralina sahip degil ama olculdugunde ebeveyn kuralindan 11px/9px aliyor —
+gorsel bozukluk yok, hicbiri preview'de tanimli degil.
+
+**HTML dosya adi tarihi.** `output/` icinde JSON ve MD `2026-08-10_00-37-36`,
+HTML ise `2026-08-09_10-31-39` adini tasiyor; icerigi yeni kosum. Bir kosumun
+uc artifact'i ayni basename'i tasimali.
 
 ## 7. Kontrol listesi
 

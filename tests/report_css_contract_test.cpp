@@ -167,6 +167,61 @@ std::set<std::string> classes_defined(const std::string &css) {
   return defined;
 }
 
+// True when the rule for `selector` adds a non-zero left indent, via either the longhand
+// `padding-left` or a `padding` shorthand whose fourth value is non-zero. Reading the
+// shorthand matters: the approved previews express the indent as `padding:0 16px 0 48px`.
+bool rule_indents(const std::string &css, const std::string &selector) {
+  const std::size_t at = css.find(selector);
+  if (at == std::string::npos) {
+    return false;
+  }
+  const std::size_t end = css.find('}', at);
+  if (end == std::string::npos) {
+    return false;
+  }
+  const std::string body = css.substr(at, end - at);
+  const std::size_t pl = body.find("padding-left");
+  if (pl != std::string::npos) {
+    const std::size_t colon = body.find(':', pl);
+    if (colon != std::string::npos) {
+      const std::string value = body.substr(colon + 1, body.find(';', colon) - colon - 1);
+      return value.find('0') == std::string::npos || value.find_first_of("123456789") != std::string::npos;
+    }
+  }
+  // `padding:` shorthand with four values -- the last one is the left indent.
+  const std::size_t p = body.find("padding");
+  if (p == std::string::npos) {
+    return false;
+  }
+  const std::size_t colon = body.find(':', p);
+  if (colon == std::string::npos) {
+    return false;
+  }
+  std::istringstream parts(body.substr(colon + 1, body.find(';', colon) - colon - 1));
+  std::vector<std::string> values;
+  std::string value;
+  while (parts >> value) {
+    values.push_back(value);
+  }
+  return values.size() == 4 && values[3].find_first_of("123456789") != std::string::npos;
+}
+
+// One `<article class="test-card ...">` element, selected by the slug in its id attribute.
+std::string card_of(const std::string &markup, const std::string &slug) {
+  const std::string needle = "id=\"result-mmap-" + slug + "\"";
+  const std::size_t at = markup.find(needle);
+  if (at == std::string::npos) {
+    return std::string();
+  }
+  const std::string open = "<article class=\"test-card";
+  const std::size_t start = markup.rfind(open, at);
+  if (start == std::string::npos) {
+    return std::string();
+  }
+  const std::size_t next = markup.find(open, at);
+  return markup.substr(start, next == std::string::npos ? std::string::npos : next - start);
+}
+
 v4l2diag::MetricValue metric_of(const std::string &name, double value, const std::string &unit) {
   v4l2diag::MetricValue metric;
   metric.name = name;
@@ -208,6 +263,34 @@ v4l2diag::RunResult css_run() {
   camera.role = "master";
   camera.trigger_description = "GPIO line 108";
 
+  // T01 -- PASS, and the source of the three Device Evidence sections. The capability
+  // metrics have to be present or the section renders "Unavailable" and the heading/weight
+  // assertions below would observe the wrong branch.
+  v4l2diag::TestResult t01 =
+      base_test("t01-device-compliance", "V4L2 Device Compliance", v4l2diag::TestStatus::Pass, 30);
+  t01.details.push_back("driver: tegra-video");
+  t01.details.push_back("card: vi-output, tier4_isx021 41-001b");
+  t01.details.push_back("bus: platform:tegra-capture-vi:4");
+  t01.details.push_back("format: UYVY (UYVY 4:2:2, single-plane)");
+  t01.details.push_back("format: NV16 (Y/CbCr 4:2:2, single-plane)");
+  t01.metrics.push_back(metric_of("selected_backend_supported", 1, ""));
+  t01.metrics.push_back(metric_of("capture_supported", 1, ""));
+  t01.metrics.push_back(metric_of("streaming_supported", 1, ""));
+  t01.metrics.push_back(metric_of("format_count", 2, ""));
+  camera.tests.push_back(t01);
+
+  // T02 -- PASS, and the card the removed summary strip belonged to. The control table
+  // needs at least one WRITABLE and one READ-ONLY row so 6.12 observes a rendered table
+  // rather than an empty section.
+  v4l2diag::TestResult t02 =
+      base_test("t02-control-inventory", "V4L2 Control Inventory", v4l2diag::TestStatus::Pass, 10);
+  t02.details.push_back("control: Group Hold|0x009a2003|WRITABLE|0..1|1|0|0");
+  t02.details.push_back("control: Sensor Modes|0x009a2082|READ-ONLY|0..30|1|30|1");
+  t02.metrics.push_back(metric_of("control_count", 15, ""));
+  t02.metrics.push_back(metric_of("writable_count", 14, ""));
+  t02.metrics.push_back(metric_of("read_only_count", 1, ""));
+  camera.tests.push_back(t02);
+
   // T03 -- PASS, and the source of the stacked-bar family.
   v4l2diag::TestResult t03 =
       base_test("t03-pipeline-ready", "Pipeline Readiness after STREAMON", v4l2diag::TestStatus::Pass, 11600);
@@ -241,6 +324,16 @@ v4l2diag::RunResult css_run() {
   // ...and a fractional one beside them, so both branches are exercised in one card.
   t06.metrics.push_back(metric_of("first_frame_latency_mean", 44.812345, "milliseconds"));
   camera.tests.push_back(t06);
+
+  // T07 -- PASS, and the card that opened with prose in the run. The buffer rows have to be
+  // present or the "opens with evidence" assertion observes an empty section.
+  v4l2diag::TestResult t07 =
+      base_test("t07-multi-buffer", "Multi-buffer Configurations", v4l2diag::TestStatus::Pass, 47000);
+  t07.details.push_back("request: 1|1|20|20|44.0");
+  t07.details.push_back("request: 2|2|20|20|44.0");
+  t07.metrics.push_back(metric_of("buffer_counts_tested", 5, ""));
+  t07.metrics.push_back(metric_of("frames_captured", 100, ""));
+  camera.tests.push_back(t07);
 
   // T11 -- PASS, and the source of the >=1000 values the separator contract needs: a
   // fractional throughput (mebibytes per second) and integer byte counts. Without these the
@@ -711,6 +804,147 @@ int main() {
     }
     ok &= check(block,
                 std::string("rule .") + name + " must set a non-inline display, otherwise its inline width is ignored");
+  }
+
+  // --- 6.12: indentation is applied ONCE per nesting level -----------------
+  // Measured on the 2026-08-09 device run with headless Chrome: every `.chart-frame` in the
+  // report rendered at left=189 while the approved preview renders at left=171, and the
+  // chart inside it at 237 against the preview's 171. Two rules were both adding 48px --
+  // `.has-items .chart-frame` and `.has-items .stacked-chart` (and the `.thr-chart` /
+  // `.rel-chart` variants) -- so the indent applied twice and the chart hung off to the
+  // right of the table it belongs with. That is the "cok fazla girdi" the user reported.
+  //
+  // The approved rule, read from the previews' own <style> blocks: the 48px belongs to the
+  // OUTER box of a given item. `chart-frame` is `padding:0 16px` everywhere except t16,
+  // where the frame itself carries `0 16px 0 48px` and nothing inside it repeats the
+  // indent. So `.has-items .chart-frame` may carry the 48px, or the chart inside it may,
+  // but never both.
+  // A frame wrapping a CSS bar chart must cancel its own indent, because the chart inside it
+  // carries the 48px. The cancelling rule is what keeps the two from stacking, so its absence
+  // is the defect -- checking the rule pair alone would forbid the correct arrangement too.
+  {
+    const std::vector<std::string> inner = {"stacked-chart", "thr-chart", "rel-chart"};
+    if (rule_indents(css, ".has-items .chart-frame")) {
+      const std::size_t cancel = css.find(".has-items .chart-frame:has(");
+      ok &= check(cancel != std::string::npos,
+                  "`.has-items .chart-frame` indents and nothing cancels it for the CSS bar charts; "
+                  "the 48px applies twice (measured 237 against the approved 171)");
+      if (cancel != std::string::npos) {
+        const std::size_t end = css.find('}', cancel);
+        const std::string rule = css.substr(cancel, end == std::string::npos ? std::string::npos : end - cancel);
+        for (const auto &name : inner) {
+          ok &= check(rule.find(name) != std::string::npos,
+                      "the chart-frame indent is not cancelled for ." + name + "; its 48px would apply twice");
+        }
+        ok &=
+            check(rule.find("padding-left: 0") != std::string::npos || rule.find("padding-left:0") != std::string::npos,
+                  "the cancelling rule does not zero the frame's left padding");
+      }
+    }
+    // ...and the chart box itself must carry the indent, or the staircase disappears entirely.
+    for (const auto &name : inner) {
+      ok &= check(rule_indents(css, std::string(".has-items .") + name),
+                  "the chart box ." + name + " carries no staircase indent; the approved previews put the 48px here");
+    }
+  }
+
+  // --- 6.13: the card body adds no padding of its own ---------------------
+  // `.test-body { padding: 16px }` is a wrapper the approved set does not have: none of the
+  // 26 previews contains a `test-body` element, and `.test-card .section` already carries
+  // the approved 16px. The wrapper shifted EVERY element in every card right by 16px --
+  // `item-label` measured left=189 against the preview's 171 with identical
+  // `padding-left:32px`, which is how a container-level shift shows up.
+  {
+    const std::size_t at = css.find(".test-body");
+    if (at != std::string::npos) {
+      const std::size_t end = css.find('}', at);
+      const std::string body = end == std::string::npos ? std::string() : css.substr(at, end - at);
+      const bool pads = body.find("padding") != std::string::npos && body.find("padding: 0") == std::string::npos &&
+                        body.find("padding:0") == std::string::npos;
+      ok &= check(!pads,
+                  "`.test-body` adds padding; the approved previews have no such wrapper and "
+                  ".test-card .section already carries the 16px (double indent, measured 189 vs 171)");
+    }
+  }
+
+  // --- 6.14: T01 section headings name the subject directly ---------------
+  // User decision 2026-08-10: the shared "Device Evidence" prefix is dropped, so the three
+  // headings read "Device Information" / "Device Capability" / "Device Pixel Formats".
+  {
+    for (const char *heading : {"Device Information", "Device Capability", "Device Pixel Formats"}) {
+      ok &= check(markup.find(heading) != std::string::npos,
+                  std::string("T01 does not carry the heading '") + heading + "'");
+    }
+    ok &= check(markup.find("Device Evidence") == std::string::npos,
+                "T01 still carries the dropped 'Device Evidence' prefix");
+  }
+
+  // --- 6.15: T01 capability probe method is its own row ------------------
+  // User decision 2026-08-10: the capability row reads "Backend support" alone, and the
+  // ioctl that was accepted is stated on a separate row beneath it rather than crammed into
+  // the label in parentheses. Capital S: "Backend Support" was reported as "Backend
+  // supported" in the run, which is neither the label nor a sentence.
+  {
+    ok &= check(markup.find("Backend support (") == std::string::npos,
+                "T01 still names the probe method inside the capability label");
+    ok &= check(markup.find("VIDIOC_REQBUFS") != std::string::npos,
+                "T01 dropped the probe method entirely; it belongs on its own row");
+  }
+
+  // --- 6.16: T01 values use the body weight, not a bold override ---------
+  // The approved t01 preview sets `.kv strong{font-weight:400}` and prints SUPPORTED as
+  // plain text -- green, but not emphasised. The run rendered driver/card/bus and the three
+  // capability states bold, which is the convention break the user reported.
+  {
+    const std::size_t at = css.find(".capability-row dd");
+    if (at != std::string::npos) {
+      const std::size_t end = css.find('}', at);
+      const std::string body = end == std::string::npos ? std::string() : css.substr(at, end - at);
+      ok &= check(
+          body.find("font-weight: 700") == std::string::npos && body.find("font-weight: 800") == std::string::npos &&
+              body.find("font-weight:700") == std::string::npos && body.find("font-weight:800") == std::string::npos,
+          "T01 capability values are bold; the approved preview prints them at the body weight");
+    }
+  }
+
+  // --- 6.17: T02 carries no summary strip above its table ----------------
+  // The approved t02 preview is `Control Evidence` + the table, nothing else. The run added
+  // a Controls/Writable/Read-only strip, which is unapproved content (project rule 4b) AND
+  // was wrong: "Read-only" resolved `{"writable_count", "read_only"}` in that order, so it
+  // printed the WRITABLE count. Both counts stay available in Measurement Result.
+  {
+    const std::string card = card_of(markup, "t02-control-inventory");
+    ok &= check(!card.empty(), "fixture did not render a T02 card; 6.17 would pass vacuously");
+    const std::size_t table_at = card.find("grid-head");
+    const std::string before = table_at == std::string::npos ? card : card.substr(0, table_at);
+    ok &= check(before.find("<dt>Controls</dt>") == std::string::npos,
+                "T02 still renders the unapproved summary strip above its table");
+    ok &= check(before.find("<dt>Read-only</dt>") == std::string::npos,
+                "T02 still renders the Read-only summary value (which read the writable count)");
+  }
+
+  // --- 6.18: a PASS card opens with its evidence, not prose --------------
+  // The approved previews contain no narrative paragraph at a card's entry. T07 opened with
+  // "Requested and allocated buffer counts matched..." plus a bare "100/100 frames
+  // captured", and T11 closed its table with a three-sentence caveat. The entry position is
+  // reserved for the result banner, which a PASS card does not have.
+  {
+    for (const char *slug : {"t07-multi-buffer", "t11-memory-throughput"}) {
+      const std::string card = card_of(markup, slug);
+      ok &= check(!card.empty(), std::string("fixture did not render ") + slug + "; 6.18 would pass vacuously");
+      // The first section's content before any item label or table: prose here is the defect.
+      const std::size_t section_at = card.find("<section");
+      if (section_at == std::string::npos) {
+        continue;
+      }
+      const std::size_t label_at = card.find("item-label", section_at);
+      const std::size_t head_at = card.find("grid-head", section_at);
+      std::size_t stop = std::min(label_at, head_at);
+      const std::string opening =
+          card.substr(section_at, stop == std::string::npos ? std::string::npos : stop - section_at);
+      ok &= check(opening.find("<p>") == std::string::npos,
+                  std::string(slug) + " opens with a prose paragraph; the approved cards open with evidence");
+    }
   }
 
   std::cout << (ok ? "report_css_contract: PASS\n" : "report_css_contract: FAIL\n");

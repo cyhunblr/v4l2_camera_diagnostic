@@ -602,11 +602,21 @@ table.overview .status-cell { font-weight: 700; font-size: 12px; text-transform:
 .capability-row, .kv-row { display: flex; align-items: baseline; gap: 12px; padding: 7px 0; border-bottom: 1px solid #eef2f6; font-size: 13px; }
 .capability-row:last-child, .kv-row:last-child { border-bottom: 0; }
 .capability-row dt, .kv-row dt { margin: 0; color: #354352; }
-.capability-row dd { margin: 0 0 0 auto; font-weight: 800; font-size: 12px; letter-spacing: 0.04em; }
+/* The state reads in the body weight, not bold. The approved t01 preview prints SUPPORTED as
+   plain text and sets `.kv strong{font-weight:400}` -- the colour carries the verdict, the
+   weight does not. The 2026-08-09 run emphasised all three states at 800. */
+.capability-row dd { margin: 0 0 0 auto; font-weight: 400; font-size: 12px; letter-spacing: 0.04em; }
+/* The probe method is supporting detail under its capability, so it is quieter than the
+   state above it and never coloured -- it reports which ioctl ran, not a verdict. */
+.probe-row dt { color: #64717e; font-size: 11px; }
+.probe-row dd { color: #52606d; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; }
 .capability-row dd.good { color: var(--pass); }
 .capability-row dd.bad { color: var(--fail); }
 .capability-row dd.unknown { color: var(--skip); }
-.kv-row dd { margin: 0 0 0 auto; font-family: 'JetBrains Mono', ui-monospace, monospace; color: #17202b; }
+/* Driver / Card / Bus read in the normal text font. The approved t01 preview styles these
+   values with `.kv strong{font-weight:400}` and no font-family override, so they inherit the
+   body stack; the 2026-08-09 run set them in monospace, which reads as a code value. */
+.kv-row dd { margin: 0 0 0 auto; color: #17202b; }
 /* review-plan 5.6.5: threshold-banded reliability bar. */
 .reliability-bar { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 12px; }
 .reliability-bar-label { flex: 0 0 90px; color: #354352; }
@@ -783,7 +793,12 @@ table.overview .summary-text { color: #475569; }
 .test-card .section { padding: 16px; border-bottom: 1px solid #dfe5eb; }
 .test-card .section:last-child { border-bottom: 0; }
 .test-card .section p { margin: 0; color: #354352; font-size: 12px; }
-.test-body { padding: 16px; }
+/* The body wrapper contributes NO padding of its own. None of the 26 approved previews has
+   such a wrapper -- there `.section` is the card's direct child -- and `.test-card .section`
+   above already carries the approved 16px. With padding here every element in every card
+   moved right by 16px: `item-label` measured left=189 against the preview's 171 with an
+   identical `padding-left:32px`, which is how a container-level shift shows up. */
+.test-body { padding: 0; }
 /* Grid tables (design-spec S1). Header and rows share one grid-template, so the
    columns line up exactly; the horizontal padding sits on the ROW, not on each cell,
    which is what keeps the columns from creeping inward. Columns are equal 1fr: a
@@ -822,6 +837,13 @@ table.overview .summary-text { color: #475569; }
    the SVG needs: 968 available - 48 indent = 920, which overflowed by 14px. Pulling the
    box out by the section padding restores the room while the left edge still lines up. */
 .has-items .chart-frame { padding-left: 48px; margin-right: -20px; }
+/* ...but a frame wrapping a CSS bar chart must NOT indent, because the chart inside it
+   already does. The approved previews put the 48px on `stacked-chart` / `thr-chart` /
+   `rel-chart` (and their rows) and leave `.chart-frame{padding:0 16px}` plain; only the SVG
+   charts take the indent on the frame. With both, the 48px applied twice and the chart
+   rendered at left=237 against the approved 171 -- measured with headless Chrome on the
+   2026-08-09 run. `:has()` distinguishes the two cases without changing the markup. */
+.has-items .chart-frame:has(.stacked-chart, .thr-chart, .rel-chart) { padding-left: 0; margin-right: 0; }
 /* T26's warm-up column chart, verbatim from the approved preview. The gridline and the
    two text classes are shared with the other SVG charts, so they are declared once here
    rather than per test. */
@@ -870,7 +892,11 @@ table.overview .summary-text { color: #475569; }
 /* The name under a CSS bar chart (T03, T06), verbatim from the approved previews. Without
    it the axis name rendered as 16px body text pushed to the left margin. */
 .scale-name { margin: 6px 0 0; padding: 0 16px; color: #44515f; font-size: 9px; font-weight: 600; text-align: center; }
-.has-items .scale-name, .has-items .stacked-chart, .has-items .rel-chart, .has-items .cycle-row, .has-items .rel-row { padding-left: 48px; }
+/* The staircase indent for the CSS bar charts, exactly as the approved previews place it:
+   on the chart box itself, never also on the enclosing `.chart-frame` (see the `:has()` rule
+   above). `cycle-row` and `rel-row` are NOT listed -- in the previews the row inherits its
+   left edge from the chart box, and indenting both put the rows at 237 instead of 219. */
+.has-items .scale-name, .has-items .stacked-chart, .has-items .rel-chart, .has-items .thr-chart { padding-left: 48px; }
 /* T03's stacked two-phase bar per cycle, verbatim from t03-preview.html. The two segments
    are <i> elements: an inline box IGNORES width, so without an explicit non-inline display
    both segments collapsed and their labels printed as one number (1141 + 145 -> "1141145"
@@ -916,9 +942,9 @@ table.overview .summary-text { color: #475569; }
 .bar-ok, .legend-ok { background: #4b9b69; }
 /* T11 contrasts the full-frame copy against the cache-sized samples, verbatim from
    t11-preview.html: the primary series in the measured blue, the cache reads in the
-   secondary grey. `thr-chart` is that chart's own padding box. */
+   secondary grey. `thr-chart` is that chart's own padding box; the staircase indent comes
+   from the enclosing `.chart-frame`, never from here as well (see `.has-items .scale-name`). */
 .thr-chart { padding: 0 16px; }
-.has-items .thr-chart { padding-left: 48px; }
 .bar-full, .legend-full { background: #2e6fa3; }
 .bar-cache, .legend-cache { background: #71879a; }
 /* T22 contrasts unique against identical payload pairs; the approved preview colours the

@@ -321,9 +321,12 @@ int main() {
 
   // --- 10. T01, per review-plan 5.1 ---------------------------------------
   {
-    // 5.1.5: three capabilities, in this order, each with its probe method in
-    // parentheses on the SAME line and its state right-aligned. The probe used to occupy
-    // its own row, which doubled the section's height and separated a fact from its label.
+    // 5.1.5: three capabilities, in this order, with the state right-aligned.
+    //
+    // User decision 2026-08-10: the probe method moved BACK to its own row and the label is
+    // "Backend Support" alone. The earlier reasoning (a fact should not be separated from its
+    // label) was overruled: in the rendered card the parenthetical made the longest label in
+    // the column carry an ioctl name, which read as part of the verdict.
     v4l2diag::TestResult t01 = test_of("t01-device-compliance");
     t01.name = "V4L2 Device Compliance";
     t01.metrics.push_back(mv("format_count", 2, ""));
@@ -338,18 +341,22 @@ int main() {
     t01.details.push_back("format: UYVY - UYVY 4:2:2 - single-plane");
     const std::string html = v4l2diag::render_test_content(t01);
 
-    ok &= check(contains(html, "Device Evidence \xC2\xB7 Capability"),
-                "T01 has no Device Evidence \xC2\xB7 Capability section");
-    const std::size_t backend_at = html.find("Backend support");
+    ok &= check(contains(html, "Device Capability"), "T01 has no Device Capability section");
+    const std::size_t backend_at = html.find("Backend Support");
     const std::size_t capture_at = html.find("Capture support");
     const std::size_t streaming_at = html.find("Streaming support");
     ok &= check(backend_at != std::string::npos && capture_at != std::string::npos && streaming_at != std::string::npos,
                 "T01 is missing one of the three capabilities");
     ok &=
         check(backend_at < capture_at && capture_at < streaming_at, "T01's capabilities are out of the approved order");
-    // 5.1.5: the probe method rides on the capability's own line.
-    ok &= check(contains(html, "Backend support (VIDIOC_REQBUFS accepted)"),
-                "the backend probe method is not on the capability line");
+    // The probe method is its own row beneath the capability, naming the ioctl and nothing
+    // else -- not folded into the label, and not restating the verdict.
+    ok &= check(!contains(html, "Backend Support (") && !contains(html, "Backend support ("),
+                "the probe method is still folded into the capability label");
+    ok &= check(contains(html, "Accepted ioctl") && contains(html, "VIDIOC_REQBUFS"),
+                "the backend probe method is not on its own row");
+    // "Backend supported" was the run's spelling; the label is "Backend Support".
+    ok &= check(!contains(html, "Backend supported"), "the capability label lost its capital S");
     ok &= check(contains(html, "SUPPORTED"), "no capability state is shown");
 
     // 5.1.6: FOURCC values are unique. "UYVY, NV16, UYVY" is two formats, not three.
@@ -393,12 +400,21 @@ int main() {
     t02.details.push_back("control: Exposure|0x009a0902|ro|0..10000 step 1|100|Unavailable (EINVAL)");
     const std::string html = v4l2diag::render_test_content(t02);
 
-    // 5.2.4: three summary values, and the word "count" is not repeated beside them.
-    for (const char *key : {"Controls", "Writable", "Read-only"}) {
-      ok &= check(contains(html, key), std::string("T02 is missing the ") + key + " summary value");
+    // User decision 2026-08-10: NO summary strip. The approved t02 preview is the section
+    // heading followed directly by the table. The strip was also wrong -- "Read-only" resolved
+    // {"writable_count", "read_only"} in that order and printed the WRITABLE count -- so both
+    // the unapproved content and the wrong number leave together. The counts stay in
+    // Measurement Result, which is where the verdict reads them.
+    {
+      const std::size_t table_at = html.find("grid-head");
+      const std::string before = table_at == std::string::npos ? html : html.substr(0, table_at);
+      ok &= check(before.find("<dt>Controls</dt>") == std::string::npos,
+                  "T02 still renders the unapproved Controls summary value");
+      ok &= check(before.find("<dt>Writable</dt>") == std::string::npos,
+                  "T02 still renders the unapproved Writable summary value");
+      ok &= check(before.find("<dt>Read-only</dt>") == std::string::npos,
+                  "T02 still renders the Read-only summary value (which read the writable count)");
     }
-    ok &= check(!contains(html, "14 count") && !contains(html, "count</"),
-                "T02 repeats the word \"count\" beside its summary values");
 
     // 5.2.5: the approved five columns, replacing the monospace detail list.
     for (const char *column : {"Control", "Access", "Range", "Default", "Current"}) {
@@ -700,11 +716,14 @@ int main() {
     t07.details.push_back("sample_interval: 200ms");
     const std::string html = v4l2diag::render_test_content(t07);
 
-    // 5.7.4: the one-sentence allocation behaviour, then the aggregate capture summary --
-    // NOT written as "miss=0/20", which conflates the aggregate with a per-request result.
-    ok &= check(contains(html, "effective depth of 2 buffers") || contains(html, "allocated"),
-                "T07 has no allocation-behaviour sentence");
-    ok &= check(contains(html, "100/100"), "T07 does not show the aggregate captured/attempted summary");
+    // User decision 2026-08-10: the card opens with evidence, not with a sentence. The
+    // approved t07 preview carries no paragraph in any of its three cards, so the
+    // allocation-behaviour sentence and the bare "100/100 frames captured" line are gone.
+    ok &= check(!contains(html, "effective depth of 2 buffers"), "T07 still opens with an allocation sentence");
+    ok &= check(!contains(html, "frames captured</strong>"), "T07 still prints the bare capture-total line");
+    // The finding itself is NOT lost (project rule 4c): the ratio stays in Measurement Result
+    // and the per-request rows still carry each allocation.
+    ok &= check(contains(html, "100/100"), "T07 lost the aggregate captured/attempted ratio entirely");
     ok &= check(!contains(html, "miss=0/20"), "T07 writes the aggregate as \"miss=N/M\"");
 
     // 5.7.5: the five approved columns, Title Case in the markup (CSS may transform it).

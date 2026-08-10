@@ -120,15 +120,86 @@ std::string display_number(double value) {
 // not measurements, and printing "500.000 milliseconds" claims a microsecond-resolution
 // setting that was never made. Fabricating precision is worse than losing it.
 //
-// The remaining fractional divergences (t06 "44.81", t13 "45.0", t07 "0.40", t11 "5.11")
-// are a separate open question -- one rule cannot produce 1, 2 and 3 decimals for the same
-// unit, so they are recorded in the plan rather than guessed at here.
-std::string display_number_ms(double value) {
-  if (value == static_cast<double>(static_cast<long long>(value))) {
+// The number of decimals is NOT a property of the unit -- it is a property of what the metric
+// measures, which is why one rule could never reproduce the approved set. Read off the
+// hardware-trigger cards:
+//
+//   3 decimals  t14/t15 distribution statistics -- "44.778", "44.800", "44.823", "44.836",
+//               "0.012", "0.021", "0.058", "55.164", and t15's paired columns "44.796" vs
+//               "44.799". These exist to be compared against each other and they differ in
+//               the THIRD decimal; at two the comparison disappears.
+//   2 decimals  t06 "44.81"/"44.83", t07 "44.00"/"0.40", t11 "5.11" -- single reported
+//               figures, not a distribution being compared term by term.
+//   1 decimal   t13 "45.0", "44.0", "48.5", "3.5", "50.0" -- poll-timeout boundaries. These
+//               are configured half-millisecond steps, so a third decimal would claim a
+//               resolution the sweep never had.
+//
+// So the precision is chosen per metric below, and anything not named keeps 3 decimals --
+// losing precision silently is worse than carrying a digit too many.
+// The decimal count for a millisecond metric. These are substring PATTERNS matched against a
+// metric name, not metric names themselves -- they are declared as arrays rather than inline
+// braced lists so a static scan cannot mistake them for a `{label, metric, ...}` spec.
+struct MsPrecisionRule {
+  const char *pattern;
+  int decimals;
+};
+
+// One rule per line, first match wins. Declared this way on purpose: a braced list of bare
+// strings looks exactly like a `{label, metric, ...}` verdict spec to the static metric-name
+// scan in tests/metric_name_contract_test.cpp, which then demands that the runner record
+// "estimated_copy" as a metric. These are substring patterns, not metric names.
+const MsPrecisionRule kMsPrecision[] = {
+    // Configured inputs and counts: whole, never dressed up with decimals.
+    {"warmup", 0},
+    {"rounds", 0},
+    {"frames_per", 0},
+    {"interval_ms", 0},
+    {"capture_timeout", 0},
+    {"settle", 0},
+    {"deadline", 0},
+    {"guard", 0},
+    {"configured_", 0},
+    // Poll-timeout boundaries (t13 "48.5", "3.5"): the sweep resolves to half-milliseconds.
+    {"cliff", 1},
+    {"production_timeout", 1},
+    {"safety_margin", 1},
+    {"timeout_headroom", 1},
+    {"minimum_target", 1},
+    // Single reported figures (t06 "44.81", t07 "44.00"/"0.40", t11 "5.11"): two decimals.
+    {"latency_spread", 2},
+    {"estimated_copy", 2},
+    {"capture_mean", 2},
+    {"capture_max", 2},
+    {"mean_latency", 2},
+};
+
+int ms_decimals_for(const std::string &name) {
+  for (const auto &rule : kMsPrecision) {
+    if (name.find(rule.pattern) != std::string::npos) {
+      return rule.decimals;
+    }
+  }
+  // Distribution statistics and everything unnamed (t14/t15/t17/t24): three decimals, because
+  // these are compared against each other and differ in the third place.
+  return 3;
+}
+
+std::string display_number_ms(double value, int decimals) {
+  // `decimals == 0` means "this metric is a count or a configured setting" -- a whole number
+  // stays whole. The approved t13 configuration block prints "Configured safe margin 5" and
+  // "Warmup frames 10" as ints, and printing "5.000 milliseconds" would claim a
+  // microsecond-resolution setting nobody made. Fabricating precision is worse than losing it.
+  //
+  // A NAMED metric keeps its decimals even when the value lands on a whole number: t13's
+  // "Reliable cliff" and "First miss" print "45.0" and "44.0", because the sweep resolves to
+  // half-milliseconds and "45" would read as an exact integer boundary. The renderer infers
+  // the Type column from the printed text, so this is also what makes those rows read "float"
+  // rather than "int" -- one decision, both columns.
+  if (decimals == 0 || value == static_cast<double>(static_cast<long long>(value))) {
     return display_number(value);
   }
   char buffer[64];
-  std::snprintf(buffer, sizeof(buffer), "%.3f", value);
+  std::snprintf(buffer, sizeof(buffer), "%.*f", decimals, value);
   std::string text(buffer);
   // Apply thousands separator to the integer part (same logic as display_number).
   const std::size_t dot = text.find('.');
@@ -190,7 +261,8 @@ std::string value_of(const TestResult &test, const std::string &name) {
   // earlier "§5.14.3" citation here pointed at a section that does not exist.
   const bool is_ms = metric->unit == "ms" || metric->unit == "ms/buffer" || metric->unit == "ms / buffer" ||
                      metric->unit == "milliseconds" || metric->unit == "milliseconds per buffer";
-  std::string text = is_ms ? display_number_ms(metric->value) : display_number(metric->value);
+  std::string text =
+      is_ms ? display_number_ms(metric->value, ms_decimals_for(metric->name)) : display_number(metric->value);
   if (!metric->unit.empty()) {
     text += " " + metric->unit;
   }
@@ -1164,7 +1236,11 @@ std::string render_t01(const TestResult &test) {
   // 5.1.5: the probe method belongs on the capability's own line, in parentheses. The
   // method differs per backend -- DMABUF probes with VIDIOC_EXPBUF, not REQBUFS -- so it
   // is chosen from the backend this card belongs to (5.1.2).
-  const std::string probe = test.memory_backend == "dmabuf" ? "VIDIOC_EXPBUF accepted" : "VIDIOC_REQBUFS accepted";
+  // User decision 2026-08-10: the capability label is "Backend Support" alone. The ioctl the
+  // backend accepted is stated on its OWN row directly beneath, not crammed into the label
+  // in parentheses. The method differs per backend -- DMABUF probes with VIDIOC_EXPBUF, not
+  // REQBUFS -- so it is still chosen from the backend this card belongs to (5.1.2).
+  const std::string probe = test.memory_backend == "dmabuf" ? "VIDIOC_EXPBUF" : "VIDIOC_REQBUFS";
   struct Capability {
     std::string label;
     // Two spellings are in use for each capability; both are recognised, because guessing
@@ -1172,7 +1248,7 @@ std::string render_t01(const TestResult &test) {
     std::vector<std::string> metrics;
   };
   const std::vector<Capability> capabilities = {
-      {"Backend support (" + probe + ")",
+      {"Backend Support",
        {"selected_backend_supported", "selected_backend_supported", "backend_supported", "backend_mmap",
         "backend_dmabuf", "backend_userptr"}},
       {"Capture support", {"capture_supported", "supports_capture"}},
@@ -1185,11 +1261,14 @@ std::string render_t01(const TestResult &test) {
   // wraps them in `.three-col`. Production emitted them as three full-width sections in a
   // column, which is the same content on a visibly different page -- measured on the
   // 2026-08-09 device run.
+  // User decision 2026-08-10: the shared "Device Evidence ·" prefix is dropped. Each heading
+  // names its own subject, so the three columns read Information / Capability / Pixel
+  // Formats without repeating the same two words three times across one row.
   std::string out = "<div class=\"three-col\">";
-  out += kv_section("Device Evidence \xC2\xB7 Information", {{"Driver", detail_value(test, "driver")},
-                                                             {"Card", detail_value(test, "card")},
-                                                             {"Bus", detail_value(test, "bus")}});
-  out += section_open("Device Evidence \xC2\xB7 Capability");
+  out += kv_section("Device Information", {{"Driver", detail_value(test, "driver")},
+                                           {"Card", detail_value(test, "card")},
+                                           {"Bus", detail_value(test, "bus")}});
+  out += section_open("Device Capability");
   out += "<dl class=\"capability-list\">";
   for (const auto &capability : capabilities) {
     const MetricValue *metric = nullptr;
@@ -1206,6 +1285,11 @@ std::string render_t01(const TestResult &test) {
     const std::string tone = metric == nullptr ? "unknown" : (metric->value != 0.0 ? "good" : "bad");
     out += "<div class=\"capability-row\"><dt>" + html_escape(capability.label) + "</dt><dd class=\"" + tone + "\">" +
            state + "</dd></div>";
+    // The probe method is its own row beneath the capability it belongs to, naming the ioctl
+    // that was accepted rather than restating the verdict.
+    if (capability.label == "Backend Support" && metric != nullptr && metric->value != 0.0) {
+      out += "<div class=\"capability-row probe-row\"><dt>Accepted ioctl</dt><dd>" + html_escape(probe) + "</dd></div>";
+    }
   }
   out += "</dl>" + section_close();
 
@@ -1218,7 +1302,7 @@ std::string render_t01(const TestResult &test) {
                             : count_metric != nullptr && count_metric->value >= 0.0
                                 ? static_cast<std::size_t>(count_metric->value)
                                 : 0;
-  out += section_open("Device Evidence \xC2\xB7 Pixel Formats");
+  out += section_open("Device Pixel Formats");
   out += "<p class=\"section-count\">" +
          (formats.empty() && count_metric == nullptr ? std::string("Unavailable")
                                                      : std::to_string(count) + (count == 1 ? " format" : " formats")) +
@@ -1245,16 +1329,13 @@ std::string render_t01(const TestResult &test) {
 // structured table whose rows are the controls and whose group headings are the
 // V4L2_CTRL_TYPE_CTRL_CLASS records -- which are NOT controls and carry no current value.
 std::string render_t02(const TestResult &test) {
-  // 5.2.4: three values, without repeating the word "count" beside each one.
+  // User decision 2026-08-10: no summary strip. The approved t02 preview is the section
+  // heading followed directly by the table, and the strip was unapproved content on a report
+  // that goes to the customer (project rule 4b). It was also wrong: "Read-only" resolved
+  // {"writable_count", "read_only"} in that order, so it printed the WRITABLE count -- 13
+  // beside 13 in the 2026-08-09 run, for a table holding 14 writable and 1 read-only control.
+  // Both counts remain in Measurement Result, which is where the verdict reads them.
   std::string out = section_open("Control Evidence");
-  out += "<dl class=\"kv\">";
-  out +=
-      "<div class=\"kv-row\"><dt>Controls</dt><dd>" + value_of_any(test, {"control_count", "controls"}) + "</dd></div>";
-  out += "<div class=\"kv-row\"><dt>Writable</dt><dd>" + value_of_any(test, {"writable_count", "writable"}) +
-         "</dd></div>";
-  out += "<div class=\"kv-row\"><dt>Read-only</dt><dd>" + value_of_any(test, {"writable_count", "read_only"}) +
-         "</dd></div>";
-  out += "</dl>";
 
   // 5.2.5: the approved five columns. The runner records each control as one pipe-separated
   // detail line, and each class record as its own line. No item label: the approved
@@ -1992,39 +2073,15 @@ std::vector<T07Request> t07_requests(const TestResult &test) {
 std::string render_t07(const TestResult &test) {
   const std::vector<T07Request> requests = t07_requests(test);
 
-  // 5.7.4: the one-sentence allocation behaviour, then the aggregate capture summary. Kept
-  // apart from the per-request table cells on purpose: "miss=0/20" would conflate a single
-  // request's result with the run's total.
+  // User decision 2026-08-10: this card opens with its evidence, not with prose. The approved
+  // t07 preview carries no paragraph in any of its three cards -- the entry position belongs
+  // to the result banner, which a PASS card does not have. The two sentences that used to sit
+  // here are both already in the evidence below: the allocation range is one row per request
+  // in "Latency by buffer count", and the capture total is the "Capture success" ratio in
+  // Measurement Result. "Unavailable" stays, because a card with no rows at all has to say so.
   std::string out = measurement_open();
   if (requests.empty()) {
     out += "<p>Unavailable</p>";
-  } else {
-    bool uniform = true;
-    for (const auto &request : requests) {
-      if (request.allocated != requests.front().allocated) {
-        uniform = false;
-        break;
-      }
-    }
-    if (uniform) {
-      out += "<p>This run allocated an effective depth of " + std::to_string(requests.front().allocated) +
-             " buffers for every request from " + std::to_string(requests.front().requested) + " through " +
-             std::to_string(requests.back().requested) + ".</p>";
-    } else {
-      out += "<p>Requested and allocated buffer counts matched across the complete " +
-             std::to_string(requests.front().requested) + " through " + std::to_string(requests.back().requested) +
-             " range.</p>";
-    }
-    // Summed from the per-request rows rather than read from a metric: the runner records
-    // only granted_for_<N>, so this line printed "Unavailable/Unavailable frames captured".
-    int captured_total = 0;
-    int attempted_total = 0;
-    for (const auto &request : requests) {
-      captured_total += request.captured;
-      attempted_total += request.attempted;
-    }
-    out += "<p><strong>" + std::to_string(captured_total) + "/" + std::to_string(attempted_total) +
-           " frames captured</strong></p>";
   }
 
   // No chart: T07's approved preview has none in any of its three cards. Production drew
@@ -2681,6 +2738,28 @@ struct T11Copy {
   bool cache_sized = false;
 };
 
+// The runner names each copy region after its METRIC key -- "mmap_full", "mmap_4k",
+// "mmap_64k" -- because the same string also keys `<label>_mbps`. The approved t11 preview
+// labels the same three rows "Full frame", "4 KiB sample" and "64 KiB sample", so the metric
+// id stays exactly as it is (project rule: technical ids do not change) and the display name
+// is derived here from the size suffix, which is what the reader actually needs to see.
+std::string t11_display_label(const std::string &label) {
+  const std::size_t underscore = label.rfind('_');
+  const std::string suffix = underscore == std::string::npos ? label : label.substr(underscore + 1);
+  if (suffix == "full") {
+    return "Full frame";
+  }
+  if (suffix == "4k") {
+    return "4 KiB sample";
+  }
+  if (suffix == "64k") {
+    return "64 KiB sample";
+  }
+  // An unrecognised region keeps the runner's own name rather than being renamed into
+  // something the run never measured; the series it belongs to still reads from the chart.
+  return label;
+}
+
 std::vector<T11Copy> t11_copies(const TestResult &test) {
   std::vector<T11Copy> copies;
   for (const auto &detail : test.details) {
@@ -2701,7 +2780,7 @@ std::vector<T11Copy> t11_copies(const TestResult &test) {
       continue;
     }
     T11Copy copy;
-    copy.label = fields[0];
+    copy.label = t11_display_label(trim_of(fields[0]));
     copy.bytes = std::strtod(fields[1].c_str(), nullptr);
     copy.mib_s = std::strtod(fields[2].c_str(), nullptr);
     copy.cache_sized = trim_of(fields[3]) == "cache";
@@ -2816,10 +2895,12 @@ std::string render_t11(const TestResult &test) {
   }
   out += table_close();
 
-  // 5.11.4: the cache-sized reads named as secondary evidence, in words.
-  out +=
-      "<p>The 4 KiB and 64 KiB figures are repeated reads of the same small region, so they measure hot-cache "
-      "copy behaviour. They are not camera throughput and not frame-rate estimates.</p>";
+  // 5.11.4: the cache-sized reads are named as secondary evidence by the CHART, not by a
+  // paragraph. User decision 2026-08-10: the approved t11 preview carries no prose in the
+  // card, so the three-sentence caveat that used to sit here is gone. The finding it carried
+  // is not lost (project rule 4c): the legend labels the two series "Full frame (primary)"
+  // and "Cache-sized reads", and each bar is drawn in its series colour, so the distinction
+  // the sentences spelled out is what the reader sees first.
   out += buffer_part;
   out += section_close();
 
