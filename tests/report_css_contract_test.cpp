@@ -434,6 +434,68 @@ int main() {
     ok &= check(undefined.empty(), "classes used in markup with NO CSS rule (renders unstyled): " + joined);
   }
 
+  // --- 6.1b3: the same check over EVERY renderer, read from the source ------
+  //
+  // 6.1b above can only see what this fixture renders: nine of twenty-six tests. The T08
+  // rewrite deleted `.evidence-row` as part of retiring T08's old slot markup -- but T10 also
+  // emits that class, and T10 is not in the fixture, so the whole suite stayed green while a
+  // real report rendered T10's flag evidence unstyled (browser-default 16px, no grid). It
+  // showed up only in the 2026-08-11 device run.
+  //
+  // Scanning test_content.cpp for every `class="..."` literal closes that gap without needing
+  // a fixture per test. Observed: class tokens in the renderer source against the stylesheet.
+  {
+    const std::string renderer = read_file("source/backend/core/src/test_content.cpp");
+    ok &= check(!renderer.empty(), "test_content.cpp not readable; run from the repository root");
+    std::set<std::string> emitted;
+    const std::string needle = "class=\\\"";
+    for (std::size_t at = renderer.find(needle); at != std::string::npos; at = renderer.find(needle, at + 1)) {
+      const std::size_t start = at + needle.size();
+      const std::size_t end = renderer.find("\\\"", start);
+      if (end == std::string::npos) {
+        break;
+      }
+      // Only literal class lists: a `" + expr + "` splice means the tokens are computed and
+      // cannot be read statically, so that attribute is skipped rather than guessed at.
+      const std::string list = renderer.substr(start, end - start);
+      if (list.find('"') != std::string::npos || list.find('+') != std::string::npos) {
+        continue;
+      }
+      std::istringstream tokens(list);
+      std::string token;
+      while (tokens >> token) {
+        emitted.insert(token);
+      }
+    }
+    ok &= check(emitted.size() > 60,
+                "only " + std::to_string(emitted.size()) + " class tokens scanned from the renderer; scan is broken");
+    std::vector<std::string> undefined;
+    for (const auto &name : emitted) {
+      if (defined.count(name) == 0) {
+        undefined.push_back(name);
+      }
+    }
+    std::string joined;
+    for (const auto &name : undefined) {
+      joined += (joined.empty() ? "" : ", ") + name;
+    }
+    ok &= check(undefined.empty(),
+                "classes emitted by SOME renderer with no CSS rule (renders unstyled on a card this "
+                "fixture does not cover): " +
+                    joined);
+
+    // The eight status-word hooks this scan first surfaced are gone for good: T13's YES/NO,
+    // T12's VERIFIED / OBSERVED ONLY plus its protocol diagram, and T20-T22's CLEAR/GAP. The
+    // approved previews put plain descriptive text in the Detail column and leave the verdict to
+    // the Status column's `.verdict` class, so re-introducing one of these names would mean
+    // re-introducing a second, competing verdict -- styled or not.
+    for (const char *retired : {"ok", "no", "verified", "observed", "protocol", "step", "sync", "warn-text"}) {
+      ok &= check(emitted.count(retired) == 0,
+                  std::string("the retired status hook '") + retired +
+                      "' is emitted again; the Detail column carries plain text, the Status column the verdict");
+    }
+  }
+
   // --- 6.1b2: a card carries AT MOST ONE result block ---------------------
   // design-spec: "Kart statusu ile class birebir eslesir" -- one card, one verdict line.
   // T13/T19/T25 shipped two identical banners in the 2026-08-09 run: the dispatcher emits

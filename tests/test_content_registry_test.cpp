@@ -1222,6 +1222,111 @@ int main() {
                 "T15 'Non-block captures' shows '" + nonblock + "'; expected the ratio 30/30");
   }
 
+  // --- Detail cells carry descriptive text, not a second verdict -----------------
+  //
+  // T13/T12/T20-T22 rendered status words into the Detail column through eight styling hooks
+  // that no CSS rule ever defined -- `ok`, `no`, `verified`, `observed`, `warn-text`, plus
+  // T12's `protocol`/`step`/`sync` diagram. Found by the source-level CSS scan after the T08
+  // rewrite; the report showed them at browser-default weight.
+  //
+  // The approved previews put PLAIN text in this column: t13's round table reads "Boundary
+  // confirmed" with no class at all, and t12/t20 carry values like "0" and "20/20" while the
+  // verdict lives in the dedicated Status column, which has its own styled `.verdict` class.
+  // Pairing an unstyled `warn-text` against a styled `pass` also meant the WARN case rendered
+  // plainer than the PASS case -- the opposite of what a warning should do.
+  {
+    for (const char *slug : {"t13-poll-timeout-cliff", "t12-dmabuf-cache-sync", "t20-sequence-continuity"}) {
+      v4l2diag::TestResult test = test_of(slug, v4l2diag::TestStatus::Pass);
+      test.name = slug;
+      // Enough evidence for each card to render its tables; the assertion is about the CLASSES
+      // in the output, so exact values do not matter here.
+      test.metrics.push_back(mv("cliff_ms", 45, "ms"));
+      test.metrics.push_back(mv("first_miss_ms", 44, "ms"));
+      test.metrics.push_back(mv("safety_margin_ms", 3.5, "ms"));
+      test.metrics.push_back(mv("stability_rounds_passed", 5, "count"));
+      test.metrics.push_back(mv("sequence_gaps", 0, "count"));
+      test.metrics.push_back(mv("max_sequence_gap", 0, "count"));
+      test.metrics.push_back(mv("sync_match", 20, "count"));
+      test.metrics.push_back(mv("samples_tested", 20, "count"));
+      test.details.push_back("production_timeout: 48.5");
+      test.details.push_back("stability round 1: @45ms=10/10, @44ms=0/10 YES");
+      const std::string html = v4l2diag::render_test_content(test);
+
+      for (const char *hook : {"ok", "no", "verified", "observed", "warn-text", "protocol", "step"}) {
+        ok &= check(!contains(html, std::string("class=\"") + hook + "\""),
+                    std::string(slug) + " still emits the unstyled '" + hook + "' status hook");
+      }
+      ok &= check(!contains(html, "class=\"step sync\""), std::string(slug) + " still emits the 'step sync' hook");
+    }
+  }
+
+  // --- Test Configuration lists INPUTS, never per-iteration results --------------
+  //
+  // User finding 2026-08-11: "t03 deki Test Configuration kismindaki variableler bence yanlis.
+  // Cycle 1 diye variable olamaz." Correct -- and it was the widest deviation in the report. A
+  // scan of the approved set against the 2026-08-11 device run found 24 measurement rows sitting
+  // in Test Configuration across six tests: T03's and T26's per-cycle lines, T23's per-window
+  // lines, T18's control combinations, T19's resolution line, and a row literally named
+  // "Unavailable" on T21.
+  //
+  // The section answers "what settings produced this report", so its Source column reads
+  // `param` / `threshold`. A per-iteration measurement there contradicts that column, and the
+  // same numbers already appear in Measurement -- T03's cycle timings are the stacked chart.
+  //
+  // The generic reader did filter `cycle`, but the runner writes "cycle 1: ..." -- key "cycle 1",
+  // which never equalled "cycle". Observed here: the Variable cell of every rendered row.
+  {
+    struct Case {
+      const char *slug;
+      const char *detail;
+      const char *forbidden;
+    };
+    // Each detail line is in the runner's own wording, taken from the device run's JSON.
+    const std::vector<Case> cases = {
+        {"t03-pipeline-ready", "cycle 1: STREAMON=1140ms, first frame=145ms, pulses=2", "Cycle 1"},
+        {"t26-cold-start", "cycle 1: warmup=1 frames", "Cycle 1"},
+        {"t23-sustained-capture", "Win0 0-10s: n=65 mean=44ms stddev=0 miss=0", "Win0 0-10s"},
+        {"t19-resolution-sweep", "1920x1280: mean=44ms p95=44ms throughput=1068MB/s", "1920x1280"},
+    };
+    for (const auto &c : cases) {
+      v4l2diag::TestResult test = test_of(c.slug, v4l2diag::TestStatus::Pass);
+      test.name = c.slug;
+      test.details.push_back(c.detail);
+      // A real input beside it, so the table still renders and the check is not observing an
+      // empty section.
+      test.details.push_back("capture_timeout: 100ms");
+      const std::string html = v4l2diag::render_test_content(test);
+      const std::size_t cfg = html.find("Test Configuration");
+      ok &= check(cfg != std::string::npos, std::string(c.slug) + " renders no Test Configuration section");
+      if (cfg == std::string::npos) {
+        continue;
+      }
+      const std::string section = html.substr(cfg);
+      ok &= check(section.find(std::string("<span>") + c.forbidden + "</span>") == std::string::npos,
+                  std::string(c.slug) + " lists the measurement row '" + c.forbidden + "' as a configuration variable");
+      // ...and the genuine input is still there: the filter must not swallow the whole table.
+      ok &= check(section.find("Capture timeout") != std::string::npos,
+                  std::string(c.slug) + " lost its real 'Capture timeout' input row");
+    }
+  }
+
+  // A row named "Unavailable" is never a variable. T21 recorded no configuration at all, so the
+  // metric fallback offered `non_monotonic` and the empty-state row landed in the Variable
+  // column instead of being the table's only content.
+  {
+    v4l2diag::TestResult t21 = test_of("t21-timestamp-monotonicity", v4l2diag::TestStatus::Pass);
+    t21.name = "t21-timestamp-monotonicity";
+    t21.metrics.push_back(mv("non_monotonic", 0, ""));
+    t21.metrics.push_back(mv("delta_mean", 44.8, "ms"));
+    const std::string html = v4l2diag::render_test_content(t21);
+    const std::size_t cfg = html.find("Test Configuration");
+    if (cfg != std::string::npos) {
+      const std::string section = html.substr(cfg);
+      ok &= check(section.find("<span>Non monotonic</span>") == std::string::npos,
+                  "T21 lists the measurement 'non_monotonic' as a configuration variable");
+    }
+  }
+
   if (ok) {
     std::cout << "test_content_registry_test: all checks passed\n";
   }

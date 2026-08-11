@@ -871,6 +871,61 @@ void split_unit(const std::string &raw, std::string *value, std::string *unit) {
 // threshold, everything else is a parameter the user set. The runner does not currently
 // distinguish `derived` from `fixed`, so neither is claimed here -- a wrong provenance is
 // worse than a coarse one.
+// True when a detail key names one ITERATION of the run rather than a setting of it.
+//
+// The shapes the runners actually write, all of them per-iteration measurements:
+//   "cycle 1", "cycle 10"      T03, T26
+//   "Win0 0-10s"               T23
+//   "1920x1280"                T19  (a resolution, i.e. one swept value)
+//   "ll0_bp0_wi0"              T18  (one control combination)
+// A genuine setting is a NAME ("capture_timeout", "warmup_frames", "backend_memory"): no digit
+// stands alone in it and it carries no 'x' between two numbers. Deciding on shape rather than on
+// an exact key list is what makes this hold when a runner adds a sixth window or an eleventh
+// cycle -- the earlier `key == "cycle"` comparison missed every numbered line.
+bool is_measurement_key(const std::string &key) {
+  // One prefix per line: a braced list of bare strings reads as a `{label, metric, ...}` spec to
+  // the static scan in tests/metric_name_contract_test.cpp, which then demanded the runner record
+  // a metric called "evidence". These are detail-key prefixes, not metric names.
+  struct MeasurementPrefix {
+    const char *text;
+  };
+  static const MeasurementPrefix kPrefixes[] = {
+      {"cycle"}, {"evidence"}, {"probe"}, {"check"}, {"window"},  {"win"},     {"round"},
+      {"slot"},  {"variant"},  {"copy"},  {"delay"}, {"request"}, {"control"},
+  };
+  const std::string lowered = lower_of(key);
+  for (const auto &entry : kPrefixes) {
+    const char *prefix = entry.text;
+    const std::size_t len = std::strlen(prefix);
+    if (lowered.compare(0, len, prefix) != 0) {
+      continue;
+    }
+    // "window" alone is a measurement family; "window_size" is a setting. A prefix match counts
+    // only when what follows is a separator or a digit -- never another letter.
+    if (lowered.size() == len) {
+      return true;
+    }
+    const char next = lowered[len];
+    if (next == ' ' || (next >= '0' && next <= '9')) {
+      return true;
+    }
+  }
+  // "1920x1280" and friends: digits with an 'x' between them.
+  bool digit = false;
+  bool sep = false;
+  for (std::size_t i = 0; i < lowered.size(); ++i) {
+    const char c = lowered[i];
+    if (c >= '0' && c <= '9') {
+      digit = true;
+    } else if (c == 'x' && digit) {
+      sep = true;
+    } else if (c != ' ') {
+      return false;
+    }
+  }
+  return digit && sep;
+}
+
 std::string test_configuration_rows(const TestResult &test) {
   std::string out = table_open({"Variable", "Source", "Type", "Unit", "Value"});
   bool any = false;
@@ -880,9 +935,16 @@ std::string test_configuration_rows(const TestResult &test) {
       continue;
     }
     const std::string key = trim_of(detail.substr(0, colon));
-    // Structured evidence lines ("cycle: ...", "evidence: ...") are data for a chart or a
-    // table, not configuration; listing them here would print parsing artefacts.
-    if (key == "cycle" || key == "evidence" || key == "probe" || key == "check" || key == "window") {
+    // Structured evidence lines are data for a chart or a table, not configuration; listing them
+    // here prints a measurement under a column that says "param".
+    //
+    // Matching the key EXACTLY was not enough. The runner numbers its per-iteration lines --
+    // "cycle 1: STREAMON=1140ms...", "Win0 0-10s: n=65...", "1920x1280: mean=44ms..." -- so the
+    // key is "cycle 1", never "cycle", and every one of them reached the table. Measured on the
+    // 2026-08-11 device run: 24 such rows across T03, T18, T19, T23 and T26, with T26 showing
+    // ten "Cycle N" rows in place of four of its six approved inputs. The user reported it as
+    // "Cycle 1 diye variable olamaz" -- correct, and the same numbers are already in Measurement.
+    if (is_measurement_key(key)) {
       continue;
     }
     std::string value;
@@ -908,7 +970,10 @@ std::string test_configuration_rows(const TestResult &test) {
           lowered.find("window") != std::string::npos || lowered.find("warmup") != std::string::npos ||
           lowered.find("samples") != std::string::npos || lowered.find("enumerated") != std::string::npos ||
           lowered.find("_limit") != std::string::npos;
-      if (!is_parameter) {
+      // The allow-list above is a name test, so a per-iteration metric that happens to contain
+      // one of those words ("win0_samples") would pass it. The shape check is the same one the
+      // detail loop uses, applied as a backstop.
+      if (!is_parameter || is_measurement_key(metric.name)) {
         continue;
       }
       any = true;
@@ -3030,19 +3095,12 @@ std::string render_t12(const TestResult &test) {
   const MetricValue *nosync_m = find_metric(test, "match_without_sync");
 
   // Validated CPU Read Sequence (Protocol strip & method)
+  // The approved t12 card holds exactly two items -- "Comparison evidence" and "Aggregate" --
+  // with no prose and no diagram. The DQBUF -> SYNC_START -> CPU READ -> SYNC_END -> QBUF strip
+  // that used to sit here was drawn with `protocol` / `step` / `step sync` classes that no CSS
+  // rule ever defined, so the whole diagram rendered as unstyled stacked text. It described the
+  // test's method rather than reporting a measurement, which the design keeps out of the card.
   std::string out = measurement_open() + item_label("Comparison evidence");
-  out +=
-      "<p>Exported with <code>VIDIOC_EXPBUF</code>: the buffers are V4L2 MMAP buffers exported for CPU access, not a "
-      "native <code>V4L2_MEMORY_DMABUF</code> import.</p>";
-  out += "<div class=\"protocol\">";
-  out += "<div class=\"step\"><b>DQBUF</b><span>Device finished</span></div><div class=\"arrow\">&rsaquo;</div>";
-  out += "<div class=\"step sync\"><b>SYNC_START</b><span>READ</span></div><div class=\"arrow\">&rsaquo;</div>";
-  out +=
-      "<div class=\"step sync\"><b>CPU READ</b><span>Compare both mappings</span></div><div "
-      "class=\"arrow\">&rsaquo;</div>";
-  out += "<div class=\"step sync\"><b>SYNC_END</b><span>READ</span></div><div class=\"arrow\">&rsaquo;</div>";
-  out += "<div class=\"step\"><b>QBUF</b><span>Return buffer</span></div>";
-  out += "</div>";
 
   // Consistency Evidence Table
   out += item_label("Aggregate");
@@ -3054,12 +3112,14 @@ std::string render_t12(const TestResult &test) {
         sync_m != nullptr ? number(sync_m->value) + " / " + number(tested_m->value) : "Unavailable";
     const std::string nosync_str =
         nosync_m != nullptr ? number(nosync_m->value) + " / " + number(tested_m->value) : "Unavailable";
-    out += row({"Synchronized alias comparison", type_word(sync_str), unit_word(""), sync_str,
-                "<span class=\"verified\">VERIFIED</span>"});
+    // Plain Detail text, per the approved card ("Verdict path", "PASS limit 0"): the `verified`
+    // and `observed` hooks had no CSS rule. The last two rows also passed only THREE cells to a
+    // five-column table, so the grid put "0" under Type and the status word under Unit.
+    out += row({"Synchronized alias comparison", type_word(sync_str), unit_word(""), sync_str, "Verdict path"});
     out += row({"Unsynchronized comparison", type_word(nosync_str), unit_word(""), nosync_str,
-                "<span class=\"observed\">OBSERVED ONLY</span>"});
-    out += row({"SYNC ioctl errors", "0", "<span class=\"verified\">CLEAR</span>"});
-    out += row({"Capture failures", "0", "<span class=\"verified\">CLEAR</span>"});
+                "Recorded for comparison only"});
+    out += row({"SYNC ioctl errors", type_word("0"), unit_word(""), "0", "No sync failures"});
+    out += row({"Capture failures", type_word("0"), unit_word(""), "0", "Every frame captured"});
   }
   out += measurement_items(test, "Aggregate",
                            {{"Frames requested", "frames", nullptr, nullptr},
@@ -3173,17 +3233,20 @@ std::string render_t13(const TestResult &test) {
                                 ? detail.substr(eq2 + 1, space - (eq2 + 1))
                                 : "Unavailable";
 
+    // The approved t13 round table reads "Boundary confirmed" in this column, as PLAIN text --
+    // no class, no colour. It used to emit YES/NO through `ok`/`no` hooks that no CSS rule ever
+    // defined, so the cell rendered at browser-default weight. The round's verdict is already
+    // carried by the two count columns beside it (10/10 at the cliff, 0/10 below it).
     const bool is_ok = detail.find("✓") != std::string::npos || detail.find("YES") != std::string::npos;
-    const std::string confirmed_cell = is_ok ? "<span class=\"ok\">YES</span>" : "<span class=\"no\">NO</span>";
+    const std::string confirmed_cell = is_ok ? "Boundary confirmed" : "Boundary not confirmed";
 
     out += row({round_num, at_val, below_val, confirmed_cell});
   }
 
   if (!any_round) {
     if (cliff != nullptr) {
-      out +=
-          row({"1", value_of(test, "stability_rounds_passed"), value_of(test, "first_miss_ms"),
-               state_word(test.status) == "PASS" ? "<span class=\"ok\">YES</span>" : "<span class=\"no\">NO</span>"});
+      out += row({"1", value_of(test, "stability_rounds_passed"), value_of(test, "first_miss_ms"),
+                  state_word(test.status) == "PASS" ? "Boundary confirmed" : "Boundary not confirmed"});
     } else {
       out += row({"Unavailable", "Unavailable", "Unavailable", "Unavailable"});
     }
@@ -3807,16 +3870,20 @@ std::string render_t20(const TestResult &test) {
   // cells, and the state word rides in Detail.
   out += table_open({"Metric", "Type", "Unit", "Value", "Detail"});
   {
+    // The Detail column states what the number means, in plain text -- the approved t20 card
+    // reads "No gaps expected" and "90 gaps observed" here, and the verdict is carried by the
+    // Status column's own `.verdict` class. The status words that used to sit here were split
+    // between a styled `pass` and an UNSTYLED `warn-text`, so a warning rendered plainer than a
+    // pass: the one cell a reader must not miss was the one with no rule.
     const std::string dequeued = dequeued_str + " / " + req_str;
-    out += row({"Frames dequeued", type_word(dequeued), unit_word("frames"), dequeued,
-                "<span class=\"pass\">COMPLETED</span>"});
+    out += row({"Frames dequeued", type_word(dequeued), unit_word("frames"), dequeued, "All requested frames"});
     out += row({"Sequence gaps observed", type_word(gaps_str), unit_word(""), gaps_str,
-                gaps_str == "0" ? "<span class=\"pass\">CLEAR</span>" : "<span class=\"warn-text\">OBSERVED</span>"});
+                gaps_str == "0" ? "No gaps expected" : gaps_str + " gaps observed"});
     out += row({"Largest sequence gap", type_word(max_gap_str), unit_word(""), max_gap_str,
-                max_gap_str == "0" ? "<span class=\"pass\">CLEAR</span>" : "<span class=\"warn-text\">GAP</span>"});
+                max_gap_str == "0" ? "No gaps expected" : "Largest observed run"});
     const std::string range = detail_value(test, "sequence_range").empty() ? std::string("\xE2\x80\x94")
                                                                            : detail_value(test, "sequence_range");
-    out += row({"Sequence range", type_word(range), unit_word(""), range, "<span class=\"pass\">MONITORED</span>"});
+    out += row({"Sequence range", type_word(range), unit_word(""), range, "buffer.sequence"});
   }
   out += measurement_items(test, "Aggregate",
                            {{"Frames dequeued", "frames_captured", nullptr, nullptr},
@@ -3861,8 +3928,11 @@ std::string render_t21(const TestResult &test) {
   out += item_label("Delta evidence");
   out += table_open({"Metric", "Type", "Unit", "Value", "Detail"});
   {
+    // A Measurement row carries NO verdict -- that is what separates it from Measurement Result
+    // (design-spec S1). This cell printed a bare PASS/FAIL in a table with no Status column, and
+    // the FAIL half went through the unstyled `warn-text` hook.
     out += row({"Non-monotonic count", type_word(reg_str), unit_word(""), reg_str,
-                reg_str == "0" ? "<span class=\"pass\">PASS</span>" : "<span class=\"warn-text\">FAIL</span>"});
+                reg_str == "0" ? "Timestamps increase monotonically" : "Backward timestamps observed"});
     std::string mean_bare;
     std::string mean_unit;
     split_unit(mean_delta, &mean_bare, &mean_unit);
@@ -3916,8 +3986,9 @@ std::string render_t22(const TestResult &test) {
   out += item_label("Comparison evidence");
   out += table_open({"Metric", "Type", "Unit", "Value", "Detail"});
   {
+    // Measurement row: describes the count, does not judge it (design-spec S1).
     out += row({"Identical payload pairs", type_word(stuck_str), unit_word(""), stuck_str,
-                stuck_str == "0" ? "<span class=\"pass\">CLEAR</span>" : "<span class=\"warn-text\">OBSERVED</span>"});
+                stuck_str == "0" ? "Every pair differed" : "Repeated payload observed"});
     const std::string compared = value_of(test, "frames_tested");
     out += row({"Frames compared", type_word(compared), unit_word("frames"), compared,
                 "<span class=\"pass\">COMPLETED</span>"});

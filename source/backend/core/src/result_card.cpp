@@ -165,11 +165,18 @@ std::string render_backend_band(const std::string &memory_backend, bool first) {
   }
   // Upper-case the wire spelling for display: "DMABUF", not "dmabuf" (plan 3.6). The
   // anchor and the JSON keep the lower-case form -- this is a label, not an identifier.
-  // review-plan 3.2 / 4.2 list exactly what the band carries: background, left accent,
-  // the BACKEND label and the value. Nothing else -- the method explanation for DMABUF
-  // belongs to T12's own card (5.12.2), not to a band that heads every DMABUF test.
   out << "<div class=\"backend\"><span class=\"backend-label\">Backend</span> <strong>"
-      << html_escape(upper_case(memory_backend)) << "</strong></div>";
+      << html_escape(upper_case(memory_backend)) << "</strong>";
+  // The DMABUF band names how the buffers were obtained, verbatim from the approved preview:
+  // `<span class="backend-note">MMAP buffers exported with VIDIOC_EXPBUF</span>`. This backend
+  // is not a native V4L2_MEMORY_DMABUF import, and saying so once per band is what the design
+  // does -- an earlier note here claimed the explanation belonged inside T12's card instead, but
+  // the approved t12 card carries no such paragraph and its band carries this note. The
+  // `backend-note` rule existed in the stylesheet with nothing emitting it.
+  if (upper_case(memory_backend) == "DMABUF") {
+    out << "<span class=\"backend-note\">MMAP buffers exported with VIDIOC_EXPBUF</span>";
+  }
+  out << "</div>";
   return out.str();
 }
 

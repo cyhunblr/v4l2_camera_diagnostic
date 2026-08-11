@@ -687,6 +687,15 @@ table.overview .status-cell { font-weight: 700; font-size: 12px; text-transform:
 .slot-seq { color: #596776; font-variant-numeric: tabular-nums; }
 .slot-flag { margin-left: auto; color: #7a8693; font-size: 9px; font-variant-numeric: tabular-nums; }
 .slot-error .slot-flag { color: #8a4a47; }
+/* T10's decoded flag evidence row. This is NOT part of T08's retired slot markup: T08 stopped
+   using it when its card was rewritten, but T10 still emits it for the combined-mask and
+   unknown-bits lines. Deleting it with the rest of the T08 family left T10's flag evidence
+   unstyled on the 2026-08-11 device run -- the CSS contract fixture renders neither T10 nor
+   T09, so nothing observed the break until a real report did. */
+.evidence-row { display: grid; grid-template-columns: 100px 1fr 1fr; gap: 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid #e5eaee; font-size: 11px; }
+.evidence-row:last-child { border-bottom: 0; }
+.evidence-row .flags { color: #354352; }
+.evidence-row .raw { text-align: right; color: #64717e; font-family: 'JetBrains Mono', ui-monospace, monospace; }
 /* review-plan 5.7: two charts side by side, per the approved preview's ".charts" rule. */
 /* One chart per row (design-spec: no side-by-side panels). Two charts sharing a row
    render the SAME viewBox at half the width, so one SVG unit stops being one CSS pixel

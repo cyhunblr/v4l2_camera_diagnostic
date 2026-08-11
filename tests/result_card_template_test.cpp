@@ -400,24 +400,32 @@ int main() {
     on_dmabuf.memory_backend = "dmabuf";
     const std::string band = v4l2diag::render_backend_band(on_dmabuf.memory_backend, true);
     ok &= check(contains(band, "DMABUF"), "the DMABUF band does not name the backend in the visible form: " + band);
-    // review-plan 3.2 / 4.2 list exactly four things in the band: background, left accent,
-    // the BACKEND label and the value. The method explanation belongs to T12's own card
-    // (5.12.2) -- in the band it would repeat above every DMABUF test.
-    ok &= check(!contains(band, "VIDIOC_EXPBUF"), "the band carries a method note: " + band);
+    // The method note lives in the BAND, not inside T12's card. Observed on the approved
+    // preview: `<div class="backend">Backend <strong>DMABUF</strong><span
+    // class="backend-note">MMAP buffers exported with VIDIOC_EXPBUF</span></div>`.
+    //
+    // This assertion previously required the opposite, citing review-plan 5.12.2 -- and T12's
+    // card carried a paragraph plus a DQBUF/SYNC/QBUF diagram drawn with `protocol`/`step`
+    // classes that no CSS rule defined. The approved t12 card holds two items and no prose, so
+    // the artifact decides (project rule 6) and the note moved to the band, where the
+    // `backend-note` rule had been sitting unused.
+    ok &= check(contains(band, "VIDIOC_EXPBUF"), "the DMABUF band does not state the export method: " + band);
+    ok &= check(contains(band, "backend-note"), "the DMABUF band's method note is not in a backend-note span");
     ok &= check(contains(band, "backend-label\">Backend<"), "the band has no visible BACKEND label: " + band);
 
     const std::string mmap_band = v4l2diag::render_backend_band("mmap", true);
     ok &= check(contains(mmap_band, "MMAP"), "the MMAP band does not name the backend: " + mmap_band);
+    // Only DMABUF carries it: MMAP buffers are not exported, so the note would be false there.
     ok &= check(!contains(mmap_band, "VIDIOC_EXPBUF"), "the MMAP band carries the DMABUF method note");
+    ok &= check(!contains(mmap_band, "backend-note"), "the MMAP band carries an empty method note span");
 
-    // The method IS stated, on T12's card.
+    // ...and T12's card no longer repeats it, nor the unstyled protocol diagram.
     v4l2diag::TestResult t12 = test_of(v4l2diag::TestStatus::Pass);
     t12.id = "t12-dmabuf-cache-sync";
     t12.memory_backend = "dmabuf";
     const std::string t12_html = v4l2diag::render_test_content(t12);
-    ok &= check(contains(t12_html, "VIDIOC_EXPBUF"), "T12's card does not state the export method");
-    ok &= check(contains(t12_html, "V4L2_MEMORY_DMABUF"),
-                "T12's card does not distinguish export from a native DMABUF import");
+    ok &= check(!contains(t12_html, "class=\"protocol\""), "T12's card still draws the unstyled protocol strip");
+    ok &= check(!contains(t12_html, "<p>"), "T12's card still opens with prose; the approved card has none");
 
     // The anchor keeps the lower-case wire spelling: it is an id, not a label, and
     // changing it would break every link into an existing report.
