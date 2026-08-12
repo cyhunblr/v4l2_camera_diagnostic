@@ -900,30 +900,83 @@ bool is_measurement_key(const std::string &key) {
     if (lowered.compare(0, len, prefix) != 0) {
       continue;
     }
-    // "window" alone is a measurement family; "window_size" is a setting. A prefix match counts
-    // only when what follows is a separator or a digit -- never another letter.
+    // "window" alone is a measurement family; "Window size" is a setting. What separates them is a
+    // NUMBER identifying the iteration -- "cycle 1", "round 3", "Win0" -- not merely another word.
+    //
+    // An earlier version accepted any following space, which swallowed three legitimate rows once
+    // the runner started recording them: "Probe samples per timeout", "Window size" and "Round
+    // deadline" all begin with a filtered prefix and are settings, not measurements. Requiring a
+    // digit keeps the numbered lines out and lets the named settings through.
     if (lowered.size() == len) {
       return true;
     }
-    const char next = lowered[len];
-    if (next == ' ' || (next >= '0' && next <= '9')) {
+    std::size_t at = len;
+    while (at < lowered.size() && lowered[at] == ' ') {
+      ++at;
+    }
+    if (at < lowered.size() && lowered[at] >= '0' && lowered[at] <= '9') {
       return true;
     }
   }
   // "1920x1280" and friends: digits with an 'x' between them.
-  bool digit = false;
-  bool sep = false;
-  for (std::size_t i = 0; i < lowered.size(); ++i) {
-    const char c = lowered[i];
-    if (c >= '0' && c <= '9') {
-      digit = true;
-    } else if (c == 'x' && digit) {
-      sep = true;
-    } else if (c != ' ') {
-      return false;
+  {
+    bool digit = false;
+    bool sep = false;
+    bool other = false;
+    for (const char c : lowered) {
+      if (c >= '0' && c <= '9') {
+        digit = true;
+      } else if (c == 'x' && digit) {
+        sep = true;
+      } else if (c != ' ') {
+        other = true;
+        break;
+      }
+    }
+    if (!other && digit && sep) {
+      return true;
     }
   }
-  return digit && sep;
+
+  // "ll0_bp0_wi0": a control combination, one measured point of T18's sweep. Every underscore
+  // segment is letters followed by a digit, which is what separates it from a setting name --
+  // "warmup_frames" and "capture_timeout" have no digit in any segment, and "hits_5ms" (a real
+  // measurement family) is caught by its trailing unit rather than reaching here.
+  //
+  // Requiring EVERY segment to fit the shape matters: "max_observation_window" is a genuine T26
+  // input and must not be filtered, and a single-segment key like "cliff" is handled above.
+  {
+    std::size_t segments = 0;
+    std::size_t start = 0;
+    while (start <= lowered.size()) {
+      const std::size_t underscore = lowered.find('_', start);
+      const std::string part =
+          lowered.substr(start, underscore == std::string::npos ? std::string::npos : underscore - start);
+      if (part.size() < 2) {
+        return false;
+      }
+      // letters, then at least one digit, and nothing else
+      std::size_t at = 0;
+      while (at < part.size() && part[at] >= 'a' && part[at] <= 'z') {
+        ++at;
+      }
+      if (at == 0 || at == part.size()) {
+        return false;
+      }
+      for (std::size_t i = at; i < part.size(); ++i) {
+        if (part[i] < '0' || part[i] > '9') {
+          return false;
+        }
+      }
+      ++segments;
+      if (underscore == std::string::npos) {
+        break;
+      }
+      start = underscore + 1;
+    }
+    // One segment alone ("wi0") is too thin to call a sweep point; two or more is the shape.
+    return segments >= 2;
+  }
 }
 
 std::string test_configuration_rows(const TestResult &test) {
@@ -947,15 +1000,46 @@ std::string test_configuration_rows(const TestResult &test) {
     if (is_measurement_key(key)) {
       continue;
     }
+    // A recorded NOTE is prose the card renders in its own place (T05's capture-rate observation),
+    // not a setting. Listing it here put a sentence in the Value column under a "param" source.
+    if (lower_of(key).find("note") != std::string::npos) {
+      continue;
+    }
     std::string value;
     std::string unit;
     split_unit(detail.substr(colon + 1), &value, &unit);
     const std::string lowered = lower_of(key);
+    // The approved previews use THREE source kinds in this column, not two. A `derived` row is a
+    // value the run computed rather than one it was given -- t18's "Controls discovered", t19's
+    // "Pixel format", t17's "Sizeimage". Inferring the kind from the label cannot express that
+    // ("Sizeimage" reads like neither a param nor a threshold), so the recorder marks it: a value
+    // ending in the sentinel below is derived, and the sentinel never reaches the page.
+    // split_unit() has already run, and where the mark lands depends on the value's shape: a bare
+    // count ("11  @derived") leaves unit "@derived", a value with a unit ("4.69 mebibytes
+    // @derived") leaves it at the end of the unit, and a string value ("UYVY  @derived") puts the
+    // whole thing in the unit. Stripping the marker wherever it sits covers all three -- keying on
+    // the exact two-space form matched only one of them.
+    static const std::string kDerivedMark = "@derived";
+    bool is_derived = false;
+    for (std::string *field : {&value, &unit}) {
+      const std::size_t mark = field->find(kDerivedMark);
+      if (mark == std::string::npos) {
+        continue;
+      }
+      is_derived = true;
+      field->erase(mark, kDerivedMark.size());
+      *field = trim_of(*field);
+    }
+    if (is_derived && value.empty()) {
+      // A non-numeric value ("UYVY") ends up entirely in the unit; it is the value, not a unit.
+      value = unit;
+      unit.clear();
+    }
     const bool is_threshold =
         lowered.find("threshold") != std::string::npos || lowered.find("limit") != std::string::npos;
     any = true;
-    out += row({html_escape(humanize(key)), is_threshold ? "threshold" : "param", type_word(value), unit_word(unit),
-                html_escape(value)});
+    const char *source = is_derived ? "derived" : (is_threshold ? "threshold" : "param");
+    out += row({html_escape(humanize(key)), source, type_word(value), unit_word(unit), html_escape(value)});
   }
   // A run may record its parameters as METRICS rather than as detail lines. Reading only
   // the detail lines rendered a one-row "No parameters were recorded" table for five
@@ -990,29 +1074,6 @@ std::string test_configuration_rows(const TestResult &test) {
     out += row({"Unavailable", "\xE2\x80\x94", "string", "\xE2\x80\x94", "No parameters were recorded"});
   }
   return out + table_close();
-}
-
-// Test Configuration from EXPLICIT rows, for the renderers whose parameters come from
-// metrics rather than from "key: value" detail lines. Reading only the detail lines lost
-// those rows entirely -- the table rendered, just without the parameters it exists for.
-std::string config_items(const std::vector<std::pair<std::string, std::string>> &rows) {
-  std::string out = configuration_open();
-  out += table_open({"Variable", "Source", "Type", "Unit", "Value"});
-  for (const auto &entry : rows) {
-    std::string value;
-    std::string unit;
-    split_unit(entry.second, &value, &unit);
-    if (value.empty()) {
-      value = "Unavailable";
-    }
-    const std::string lowered = lower_of(entry.first);
-    const bool is_threshold =
-        lowered.find("threshold") != std::string::npos || lowered.find("limit") != std::string::npos ||
-        lowered.find("minimum") != std::string::npos || lowered.find("maximum") != std::string::npos;
-    out += row({html_escape(entry.first), is_threshold ? "threshold" : "param", type_word(value), unit_word(unit),
-                html_escape(value)});
-  }
-  return out + table_close() + section_close();
 }
 
 // Defined below, next to the other detail-line readers.
@@ -1831,8 +1892,7 @@ std::string render_t04(const TestResult &test) {
                     test.status);
   out += table_close() + section_close();
 
-  out += config_items({{"Buffers requested", detail_value(test, "buffers_requested")},
-                       {"Poll timeout", detail_value(test, "poll_timeout_ms")}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -1914,12 +1974,7 @@ std::string render_t05(const TestResult &test) {
                     note.empty() ? std::string("Frames captured after re-STREAMON") : note, test.status);
   out += table_close() + section_close();
 
-  out += config_items({{"Baseline frames", value_of_any(test, {"baseline_ok", "baseline_frames"})},
-                       {"Recovery frames", value_of_any(test, {"recovery_ok", "recovery_frames"})},
-                       {"Warmup frames", detail_value(test, "warmup_frames")},
-                       {"Minimum recovery", detail_value(test, "min_recovery_frames")},
-                       {"Poll timeout", detail_value(test, "poll_timeout_ms")},
-                       {"Backend memory", detail_value(test, "backend_memory")}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2065,12 +2120,7 @@ std::string render_t06(const TestResult &test) {
                {"Rapid phase", rapid_phase_spec.c_str(), nullptr, nullptr},
                {"Start failures", "full_cycle_failures", "full_cycle_failures", "full_start_fail"},
                {"Slow-start guard", guard_spec.c_str(), nullptr, nullptr}});
-    out += config_items({{"Full cycles", full_cfg},
-                         {"Rapid cycles", rapid_cfg},
-                         {"Full warmup", detail_value(test, "full_warmup")},
-                         {"Rapid warmup", detail_value(test, "rapid_warmup")},
-                         {"Slow-start guard", detail_value(test, "slow_start_guard_limit")},
-                         {"Backend memory", detail_value(test, "backend_memory")}});
+    out += test_configuration(test);
   }
   return out;
 }
@@ -2239,12 +2289,7 @@ std::string render_t07(const TestResult &test) {
       test, {{"Allocation honored", honored_spec.c_str(), nullptr, "Driver granted the requested depth"},
              {"Capture success", success_spec.c_str(), nullptr, "Frames captured across every configuration"},
              {"Latency spread", spread_spec.c_str(), nullptr, "Across the tested buffer counts"}});
-  out += config_items({{"Requested range", detail_value(test, "requested_range")},
-                       {"Samples per request", detail_value(test, "samples_per_request")},
-                       {"Backend memory", detail_value(test, "backend_memory")},
-                       {"Warmup", detail_value(test, "warmup")},
-                       {"Capture timeout", detail_value(test, "capture_timeout")},
-                       {"Sample interval", detail_value(test, "sample_interval")}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2333,24 +2378,6 @@ std::string t08_decode_flags(const std::string &hex) {
     add("MONOTONIC");
   }
   return out;
-}
-
-// The trigger count or the interval from a variant's config line. The runner writes one string
-// ("100 triggers at 100ms") while the approved card gives each number its own row with its own
-// unit, so the two halves are separated here rather than printed as one opaque value.
-std::string t08_config_field(const TestResult &test, const std::string &key, bool want_triggers) {
-  const std::string line = detail_value(test, key);
-  if (line.empty()) {
-    return std::string();
-  }
-  if (want_triggers) {
-    return std::to_string(std::atoi(line.c_str()));
-  }
-  const std::size_t at = line.find(" at ");
-  if (at == std::string::npos) {
-    return std::string();
-  }
-  return trim_of(line.substr(at + 4));
 }
 
 std::vector<T08Slot> t08_slots(const TestResult &test) {
@@ -2498,14 +2525,7 @@ std::string render_t08(const TestResult &test) {
              {"Variants passed", passed_spec.c_str(), nullptr, "Variants with no error-flagged buffer"}});
   // 5.8.9: the approved eight rows. The variant load is split into a trigger count and an
   // interval, as the preview does, rather than one "100 triggers at 100ms" string.
-  out += config_items({{"Buffer count", detail_value(test, "allocated_buffers")},
-                       {"Variant A triggers", t08_config_field(test, "variant_a", true)},
-                       {"Variant A interval", t08_config_field(test, "variant_a", false)},
-                       {"Variant B triggers", t08_config_field(test, "variant_b", true)},
-                       {"Variant B interval", t08_config_field(test, "variant_b", false)},
-                       {"Settle time", detail_value(test, "settle_time")},
-                       {"Max error flags", detail_value(test, "error_threshold")},
-                       {"Backend memory", detail_value(test, "backend_memory")}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2762,14 +2782,7 @@ std::string render_t09(const TestResult &test) {
                           {"Cliff delay", "value:safe_delay_threshold", nullptr, "Lowest delay that still captured"},
                           {"Safe cliff margin", "value:capture_timeout", nullptr, "Configured safe margin"}});
   // 5.9.9: the eight configuration parameters.
-  out += config_items({{"Allocated buffers", detail_value(test, "allocated_buffers")},
-                       {"Repetitions per delay", detail_value(test, "repetitions_per_delay")},
-                       {"Warmup frames", detail_value(test, "warmup_frames")},
-                       {"Capture timeout", detail_value(test, "capture_timeout")},
-                       {"Inter-repetition interval", detail_value(test, "inter_repetition_interval")},
-                       {"Availability threshold", detail_value(test, "availability_threshold")},
-                       {"Safe-delay threshold", detail_value(test, "safe_delay_threshold")},
-                       {"Backend memory", detail_value(test, "backend_memory")}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -2864,12 +2877,7 @@ std::string render_t10(const TestResult &test) {
   out += verdict_section(test, {{"Capture completeness", "captured", "requested", "Samples the run inspected"},
                                 {"Error-flagged frames", "captured", "requested", "Frames carrying an error flag"},
                                 {"Source consistency", "detail:flag", nullptr, "Same flags in all samples"}});
-  out += config_items({{"Requested samples", detail_value(test, "requested_samples")},
-                       {"Warmup", detail_value(test, "warmup")},
-                       {"Backend memory", detail_value(test, "backend_memory")},
-                       {"Capture timeout", detail_value(test, "capture_timeout")},
-                       {"Sample interval", detail_value(test, "sample_interval")},
-                       {"Error threshold", detail_value(test, "error_threshold")}});
+  out += test_configuration(test);
 
   // 5.10.8: the boundary against T21. A declared clock type is metadata the driver reports;
   // it is not evidence that timestamp VALUES never went backwards.
@@ -3082,10 +3090,7 @@ std::string render_t11(const TestResult &test) {
       {{"Copy regions tested", "detail:copy", nullptr, nullptr},
        {"Full-frame throughput", "detail:copy", nullptr, "Sustained memcpy rate"},
        {"Buffer utilization", "sizeimage_bytes", "mapped_capacity_bytes", "Payload against mapped capacity"}});
-  out += config_items({{"Repetitions", detail_value(test, "repetitions")},
-                       {"Warm-up copies", detail_value(test, "warmup_copies")},
-                       {"Timer", detail_value(test, "timer")},
-                       {"Backend memory", detail_value(test, "backend_memory")}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -3136,13 +3141,7 @@ std::string render_t12(const TestResult &test) {
   out += verdict_section(test, {{"Synchronized match", "frames", "mismatches", "Bytes identical after SYNC"},
                                 {"SYNC ioctl errors", "non_monotonic", "mismatches", "DMA_BUF_IOCTL_SYNC failures"},
                                 {"Capture failures", "delta_max", "sync_max_ms", nullptr}});
-  out += config_items(
-      {{"Requested samples",
-        req_val.empty() ? (tested_m != nullptr ? number(tested_m->value) + " frames" : "Unavailable") : req_val},
-       {"Compared data", cmp_val.empty() ? "Full bytesused" : cmp_val},
-       {"Warmup frames", warm_val.empty() ? "\xE2\x80\x94" : warm_val},
-       {"Capture timeout", tout_val.empty() ? "\xE2\x80\x94" : tout_val},
-       {"Buffer count", buf_val.empty() ? "\xE2\x80\x94" : buf_val}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -3271,15 +3270,7 @@ std::string render_t13(const TestResult &test) {
       verdict_section(test, {{"Safety margin", "safety_margin_ms", nullptr, "Production timeout against the cliff"},
                              {"Boundary stability", "stability_confirmed", "stability", "Rounds agreeing on the cliff"},
                              {"Timeout headroom", "cliff_ms", nullptr, "Cliff + 5 ms margin"}});
-  out += config_items({{"Probe samples", "10 / timeout"},
-                       {"Stability", "5 x 10 frames"},
-                       {"Warmup frames", "10 frames"},
-                       {"Safe margin", "5 ms"},
-                       // Never falls back to the safety margin: they are different quantities and
-                       // the fallback printed 3.5 here on the 2026-08-10 run.
-                       {"Production timeout", prod_val.empty() ? std::string("Unavailable") : prod_val},
-                       {"Backend memory",
-                        detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
+  out += test_configuration(test);
 
   return out;
 }
@@ -3489,16 +3480,7 @@ std::string render_t15(const TestResult &test) {
   out += verdict_section(test, {{"Non-block captures", nonblock_spec.c_str(), nullptr, nullptr},
                                 {"Blocking captures", blocking_spec.c_str(), nullptr, nullptr},
                                 {"Modes compared", modes_spec.c_str(), nullptr, "Both capture modes measured"}});
-  out += config_items(
-      {{"Samples / mode",
-        detail_value(test, "samples_per_mode").empty() ? "\xE2\x80\x94" : detail_value(test, "samples_per_mode")},
-       {"Spin deadline",
-        detail_value(test, "spin_deadline").empty() ? "\xE2\x80\x94" : detail_value(test, "spin_deadline")},
-       {"Sample interval",
-        detail_value(test, "sample_interval").empty() ? "\xE2\x80\x94" : detail_value(test, "sample_interval")},
-       {"Warmup frames", detail_value(test, "warmup").empty() ? "\xE2\x80\x94" : detail_value(test, "warmup")},
-       {"Backend memory",
-        detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -3578,15 +3560,7 @@ std::string render_t16(const TestResult &test) {
 
   out += verdict_section(test, {{"Sweep reliability", "hits_20ms", "hits_13ms", "Captures across every pulse width"},
                                 {"Samples per width", "hits_5ms", "hits_10ms", nullptr}});
-  out += config_items(
-      {{"Pulse widths", std::to_string(widths.size()) + " levels"},
-       {"Samples / width",
-        detail_value(test, "samples_per_width").empty() ? "\xE2\x80\x94" : detail_value(test, "samples_per_width")},
-       {"Total captures",
-        detail_value(test, "total_captures").empty() ? "\xE2\x80\x94" : detail_value(test, "total_captures")},
-       {"Trigger edge", detail_value(test, "trigger_edge").empty() ? "Rising" : detail_value(test, "trigger_edge")},
-       {"Backend memory",
-        detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -3669,14 +3643,7 @@ std::string render_t17(const TestResult &test) {
       verdict_section(test, {{"UYVY mean latency", "uyvy_latency_mean", nullptr, "Mean capture latency in this format"},
                              {"NV16 mean latency", "nv16_latency_mean", nullptr, "Mean capture latency in this format"},
                              {"Formats tested", "formats_tested", "format_count", nullptr}});
-  out +=
-      config_items({{"Samples / format", detail_value(test, "samples_per_format")},
-                    {"Memcpy reps", detail_value(test, "memcpy_reps")},
-                    {"Sizeimage", detail_value(test, "sizeimage")},
-                    {"Timeout", detail_value(test, "capture_timeout").empty() ? "\xE2\x80\x94"
-                                                                              : detail_value(test, "capture_timeout")},
-                    {"Backend memory",
-                     detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
+  out += test_configuration(test);
   return out;
 }
 
@@ -4005,11 +3972,7 @@ std::string render_t22(const TestResult &test) {
 
   out +=
       verdict_section(test, {{"Identical pairs", "identical_pairs", nullptr, "Consecutive frames with equal content"}});
-  out += config_items({{"Compared frames", value_of(test, "frames_tested")},
-                       {"Identical run threshold", detail_value(test, "identical_run_threshold")},
-                       {"Comparison window", cmp_win},
-                       {"Backend memory",
-                        detail_value(test, "backend_memory").empty() ? "MMAP" : detail_value(test, "backend_memory")}});
+  out += test_configuration(test);
 
   return out;
 }

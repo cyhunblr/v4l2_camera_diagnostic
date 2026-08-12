@@ -243,7 +243,7 @@ bool migrate_profile_json(const Json::Value &root, DeviceProfile *profile, Migra
   parsed.schema_version = root.get("schema_version", 2).asInt();
   parsed.id = root.get("id", "").asString();
   // Not defaulted to the id: a missing name is reported as required so the user
-  // supplies one, rather than silently becoming "anvil" for profile "anvil".
+  // supplies one, rather than silently becoming "bench-rig" for profile "bench-rig".
   parsed.name = root.get("name", "").asString();
   parsed.description = root.get("description", "").asString();
 

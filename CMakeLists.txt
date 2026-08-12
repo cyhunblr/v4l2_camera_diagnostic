@@ -242,6 +242,16 @@ v4l2diag_apply_warnings(v4l2diag_report_css_contract_test)
 add_test(NAME report_css_contract COMMAND v4l2diag_report_css_contract_test
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(v4l2diag_test_configuration_contract_test tests/test_configuration_contract_test.cpp)
+target_include_directories(v4l2diag_test_configuration_contract_test PRIVATE ${JSONCPP_INCLUDE_DIRS})
+target_link_directories(v4l2diag_test_configuration_contract_test PRIVATE ${JSONCPP_LIBRARY_DIRS})
+target_link_libraries(v4l2diag_test_configuration_contract_test PRIVATE v4l2diag_core ${JSONCPP_LIBRARIES})
+v4l2diag_apply_warnings(v4l2diag_test_configuration_contract_test)
+# Reads diagnostic_runner.cpp to check each body still records its derived rows,
+# so it must run from the repository root.
+add_test(NAME test_configuration_contract COMMAND v4l2diag_test_configuration_contract_test
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(v4l2diag_metric_name_contract_test tests/metric_name_contract_test.cpp)
 v4l2diag_apply_warnings(v4l2diag_metric_name_contract_test)
 # Reads the two source files, so it must run from the repository root.

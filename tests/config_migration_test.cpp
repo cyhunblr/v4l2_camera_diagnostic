@@ -72,7 +72,8 @@ bool has(const std::vector<std::string> &values, const std::string &needle) {
 std::string join(const std::vector<std::string> &values) {
   std::string out;
   for (const auto &value : values) {
-    if (!out.empty()) out += ", ";
+    if (!out.empty())
+      out += ", ";
     out += value;
   }
   return out;
@@ -80,11 +81,12 @@ std::string join(const std::vector<std::string> &values) {
 
 // A complete v2 profile: everything the old schema required, including the
 // `enabled` flag that v3 removes.
-std::string v2_profile(const std::string &id = "anvil") {
+std::string v2_profile(const std::string &id = "bench-rig") {
   return R"({
   "schema_version": 2,
-  "id": ")" + id + R"(",
-  "name": "Anvil",
+  "id": ")" +
+         id + R"(",
+  "name": "Bench-rig",
   "description": "hardware rig",
   "enabled": true,
   "camera_match": {"driver": "uvcvideo", "card": "USB Camera", "bus_info": "usb-1"},
@@ -106,11 +108,12 @@ std::string v2_profile(const std::string &id = "anvil") {
 
 // A v3 profile: Legacy now. Carries the physical matcher and camera_bindings that
 // v4 dropped, so it exercises the 2.5.2 migration rules.
-std::string v3_profile(const std::string &id = "anvil") {
+std::string v3_profile(const std::string &id = "bench-rig") {
   return R"({
   "schema_version": 3,
-  "id": ")" + id + R"(",
-  "name": "Anvil",
+  "id": ")" +
+         id + R"(",
+  "name": "Bench-rig",
   "description": "hardware rig",
   "camera_match": {"driver": "uvcvideo", "card": "USB Camera", "bus_info": "usb-1"},
   "defaults": {
@@ -132,11 +135,12 @@ std::string v3_profile(const std::string &id = "anvil") {
 // The current schema (v5): no defaults.report_formats -- every run writes all three
 // artifacts, so there is no preference to store (plan 2.10.2b: current fixtures must
 // not carry the field).
-std::string v4_profile(const std::string &id = "anvil") {
+std::string v4_profile(const std::string &id = "bench-rig") {
   return R"({
   "schema_version": 5,
-  "id": ")" + id + R"(",
-  "name": "Anvil",
+  "id": ")" +
+         id + R"(",
+  "name": "Bench-rig",
   "description": "hardware rig",
   "defaults": {
     "trigger_mode": "hardware",
@@ -236,15 +240,15 @@ int main() {
     ok &= check(report.required.empty(), "a current profile demanded user input");
     ok &= check(report.usable_for_run(), "a current profile was not usable for a run");
     ok &= check(profile.schema_version == v4l2diag::kProfileSchemaVersion, "the loaded profile has the wrong version");
-    ok &= check(profile.id == "anvil" && profile.trigger_channels.size() == 1, "a current profile lost content");
+    ok &= check(profile.id == "bench-rig" && profile.trigger_channels.size() == 1, "a current profile lost content");
   }
 
   // --- 4. v2 -> v3 reports migrated, dropped and required separately ------
   {
     DeviceProfile profile;
     MigrationReport report;
-    ok &= check(v4l2diag::migrate_profile_json(parse(v2_profile()), &profile, &report),
-                "a v2 profile failed to migrate");
+    ok &=
+        check(v4l2diag::migrate_profile_json(parse(v2_profile()), &profile, &report), "a v2 profile failed to migrate");
     ok &= check(report.state == ConfigVersionState::Legacy, "a v2 profile was not reported Legacy");
     ok &= check(report.source_version == 2 && report.target_version == v4l2diag::kProfileSchemaVersion,
                 "the migration reported the wrong version pair");
@@ -255,7 +259,7 @@ int main() {
     ok &= check(!has(report.required, "enabled"), "\"enabled\" was reported as required");
 
     // Content the user configured survives.
-    ok &= check(profile.id == "anvil" && profile.name == "Anvil", "migration lost the profile identity");
+    ok &= check(profile.id == "bench-rig" && profile.name == "Bench-rig", "migration lost the profile identity");
     ok &= check(profile.trigger_channels.size() == 1 && profile.trigger_channels.front().id == "channel-a",
                 "migration lost the trigger channel");
     ok &= check(profile.defaults.trigger_rate_hz == 10.0 && profile.defaults.pulse_width_ms == 5.0,
@@ -297,16 +301,15 @@ int main() {
     const std::string dir = make_temp_dir();
     write_file(dir + "/disabled.json", text);
     v4l2diag::ProfileRegistry registry(dir);
-    ok &= check(registry.list_profiles().empty(),
-                "a v2 profile with enabled:false was listed as runnable");
+    ok &= check(registry.list_profiles().empty(), "a v2 profile with enabled:false was listed as runnable");
     DeviceProfile fetched;
-    ok &= check(!registry.get_profile("anvil", &fetched), "a disabled v2 profile was selectable by id");
+    ok &= check(!registry.get_profile("bench-rig", &fetched), "a disabled v2 profile was selectable by id");
     // But its values are available as a draft, so the migration form can prefill.
     const auto configs = registry.stored_configs();
     ok &= check(configs.size() == 1 && configs.front().report.has_draft(),
                 "no draft was kept for the disabled v2 profile");
-    ok &= check(configs.front().profile_id == "anvil", "the draft carried no reliable config id");
-    ok &= check(configs.front().draft.name == "Anvil", "the draft lost the stored values");
+    ok &= check(configs.front().profile_id == "bench-rig", "the draft carried no reliable config id");
+    ok &= check(configs.front().draft.name == "Bench-rig", "the draft lost the stored values");
     unlink((dir + "/disabled.json").c_str());
     rmdir(dir.c_str());
   }
@@ -322,8 +325,7 @@ int main() {
     ok &= check(loaded, "an incomplete legacy profile was refused outright instead of reported");
     ok &= check(report.state == ConfigVersionState::Legacy, "an incomplete legacy profile reported the wrong state");
     ok &= check(has(report.required, "name"), "a missing name was not reported as required");
-    ok &= check(has(report.required, "trigger_channels"),
-                "a missing trigger channel was not reported as required");
+    ok &= check(has(report.required, "trigger_channels"), "a missing trigger channel was not reported as required");
     ok &= check(report.needs_user_input(), "an incomplete profile was not marked as needing input");
     ok &= check(!report.usable_for_run(),
                 "an incomplete profile was usable for a run: required={" + join(report.required) + "}");
@@ -341,8 +343,7 @@ int main() {
                     !has(filled_report.required, "trigger_channels"),
                 "the completed profile still reported fields the file supplied: required={" +
                     join(filled_report.required) + "}");
-    ok &= check(has(filled_report.required, "role_bindings"),
-                "role_bindings was not the remaining required field");
+    ok &= check(has(filled_report.required, "role_bindings"), "role_bindings was not the remaining required field");
     ok &= check(!filled_report.usable_for_run(), "a completed Legacy profile became runnable without a save");
   }
 
@@ -364,9 +365,9 @@ int main() {
     ok &= check(has(report.dropped, "pdf"),
                 "the dropped report_formats report lost its old value: dropped={" + join(report.dropped) + "}");
     // role_bindings is expected (v4); nothing else should be flagged.
-    ok &= check(report.required.size() == 1 && has(report.required, "role_bindings"),
-                "a pdf-only legacy profile reported unrelated required fields: required={" +
-                    join(report.required) + "}");
+    ok &=
+        check(report.required.size() == 1 && has(report.required, "role_bindings"),
+              "a pdf-only legacy profile reported unrelated required fields: required={" + join(report.required) + "}");
     ok &= check(report.invalid.empty(), "a pdf-only legacy profile reported an invalid field");
     ok &= check(!report.usable_for_run(), "a pdf-only legacy profile became runnable without a save");
   }
@@ -374,7 +375,7 @@ int main() {
   // --- 7. Loading a legacy profile never rewrites the stored file ----------
   {
     const std::string dir = make_temp_dir();
-    const std::string path = dir + "/anvil.json";
+    const std::string path = dir + "/bench-rig.json";
     write_file(path, v2_profile());
     const std::string before = read_file(path);
 
@@ -383,7 +384,7 @@ int main() {
       // Not runnable, and not selectable by id.
       ok &= check(registry.list_profiles().empty(), "a legacy profile was listed as runnable");
       DeviceProfile fetched;
-      ok &= check(!registry.get_profile("anvil", &fetched), "a legacy profile was selectable by id");
+      ok &= check(!registry.get_profile("bench-rig", &fetched), "a legacy profile was selectable by id");
 
       // Its migrated values are available as a draft, at the current version.
       const auto configs = registry.stored_configs();
@@ -391,7 +392,7 @@ int main() {
       ok &= check(configs.front().report.state == ConfigVersionState::Legacy,
                   "the stored config was not reported Legacy");
       ok &= check(configs.front().report.has_draft(), "the legacy config carried no draft");
-      ok &= check(configs.front().profile_id == "anvil", "the stored config carried no reliable id");
+      ok &= check(configs.front().profile_id == "bench-rig", "the stored config carried no reliable id");
       ok &= check(configs.front().draft.schema_version == v4l2diag::kProfileSchemaVersion,
                   "the draft was not migrated to the current version");
       ok &= check(configs.front().draft.trigger_channels.size() == 1, "the draft lost the trigger channel");
@@ -408,8 +409,7 @@ int main() {
       // The draft alone is not saveable: v4 needs a routing, and migration
       // deliberately did not invent one. This is the user completing the form.
       std::string refusal;
-      ok &= check(!registry.add_or_update_profile(draft, &refusal),
-                  "a draft with no role_bindings was saved as-is");
+      ok &= check(!registry.add_or_update_profile(draft, &refusal), "a draft with no role_bindings was saved as-is");
       v4l2diag::RoleBinding chosen;
       chosen.role = "master";
       chosen.trigger_channel_id = draft.trigger_channels.front().id;
@@ -422,7 +422,7 @@ int main() {
     {
       v4l2diag::ProfileRegistry registry(dir);
       DeviceProfile fetched;
-      ok &= check(registry.get_profile("anvil", &fetched), "the saved profile is still not selectable");
+      ok &= check(registry.get_profile("bench-rig", &fetched), "the saved profile is still not selectable");
       ok &= check(fetched.schema_version == v4l2diag::kProfileSchemaVersion,
                   "the saved profile is not at the current version");
       const auto configs = registry.stored_configs();
@@ -460,8 +460,10 @@ int main() {
     bool saw_future = false;
     bool saw_malformed = false;
     for (const auto &entry : reports) {
-      if (entry.report.state == ConfigVersionState::Future) saw_future = true;
-      if (entry.report.state == ConfigVersionState::Malformed) saw_malformed = true;
+      if (entry.report.state == ConfigVersionState::Future)
+        saw_future = true;
+      if (entry.report.state == ConfigVersionState::Malformed)
+        saw_malformed = true;
     }
     ok &= check(saw_future, "the Future config was not reported");
     ok &= check(saw_malformed, "the malformed config was not reported");
@@ -494,11 +496,9 @@ int main() {
     };
     const Case cases[] = {
         {"negative GPIO line", R"("line_number": 108)", R"("line_number": -3)", "line_number"},
-        {"out-of-range trigger rate", R"("trigger_rate_hz": 10.0)", R"("trigger_rate_hz": 5000.0)",
-         "trigger_rate_hz"},
+        {"out-of-range trigger rate", R"("trigger_rate_hz": 10.0)", R"("trigger_rate_hz": 5000.0)", "trigger_rate_hz"},
         {"out-of-range pulse width", R"("pulse_width_ms": 5.0)", R"("pulse_width_ms": 900.0)", "pulse_width_ms"},
-        {"unknown trigger mode", R"("trigger_mode": "hardware")", R"("trigger_mode": "telepathy")",
-         "trigger_mode"},
+        {"unknown trigger mode", R"("trigger_mode": "hardware")", R"("trigger_mode": "telepathy")", "trigger_mode"},
         {"unknown memory backend", R"("memory_backends": ["mmap"])", R"("memory_backends": ["papyrus"])",
          "memory_backends"},
         {"unknown channel type", R"("type": "hardware")", R"("type": "smoke-signal")", "type"},
@@ -516,9 +516,9 @@ int main() {
       DeviceProfile profile;
       MigrationReport report;
       v4l2diag::migrate_profile_json(parse(text), &profile, &report);
-      ok &= check(has(report.invalid, item.expect),
-                  std::string(item.what) + " was not reported as an invalid field: invalid={" +
-                      join(report.invalid) + "}");
+      ok &= check(
+          has(report.invalid, item.expect),
+          std::string(item.what) + " was not reported as an invalid field: invalid={" + join(report.invalid) + "}");
       ok &= check(!report.usable_for_run(), std::string(item.what) + " did not block the run");
       ok &= check(report.needs_user_input(), std::string(item.what) + " did not ask for user input");
     }
@@ -538,9 +538,9 @@ int main() {
       DeviceProfile profile;
       MigrationReport report;
       v4l2diag::migrate_profile_json(parse(text), &profile, &report);
-      ok &= check(has(report.invalid, "control_device.kind"),
-                  "an unknown control_device.kind was guessed at instead of reported: invalid={" +
-                      join(report.invalid) + "}");
+      ok &= check(
+          has(report.invalid, "control_device.kind"),
+          "an unknown control_device.kind was guessed at instead of reported: invalid={" + join(report.invalid) + "}");
       ok &= check(!report.usable_for_run(), "an unknown control_device.kind did not block the run");
       ok &= check(report.needs_user_input(), "an unknown control_device.kind did not ask for user input");
     }
@@ -560,9 +560,8 @@ int main() {
       DeviceProfile profile;
       MigrationReport report;
       v4l2diag::migrate_profile_json(parse(text), &profile, &report);
-      ok &= check(report.invalid.empty(),
-                  std::string("control_device.kind \"") + kind + "\" was rejected: invalid={" +
-                      join(report.invalid) + "}");
+      ok &= check(report.invalid.empty(), std::string("control_device.kind \"") + kind + "\" was rejected: invalid={" +
+                                              join(report.invalid) + "}");
     }
 
     // A software channel with no fire control, and a dangling binding.
@@ -623,8 +622,8 @@ int main() {
     v4l2diag::migrate_profile_json(parse(v2_profile()), &profile, &report);
     const Json::Value json = v4l2diag::migration_report_to_json(report);
 
-    for (const char *field : {"state", "source_version", "target_version", "migrated", "dropped", "required",
-                              "invalid", "usable_for_run", "needs_user_input", "has_draft", "error"}) {
+    for (const char *field : {"state", "source_version", "target_version", "migrated", "dropped", "required", "invalid",
+                              "usable_for_run", "needs_user_input", "has_draft", "error"}) {
       ok &= check(json.isMember(field), std::string("the wire model is missing \"") + field + "\"");
     }
     ok &= check(json["state"].asString() == "legacy", "the wire model reported the wrong state string");
@@ -640,11 +639,11 @@ int main() {
     ok &= check(json["has_draft"].asBool(), "the wire model does not advertise the Legacy draft");
 
     // The three states the UI must distinguish all round-trip.
-    for (const auto &pair : std::vector<std::pair<ConfigVersionState, const char *>>{
-             {ConfigVersionState::Current, "current"},
-             {ConfigVersionState::Legacy, "legacy"},
-             {ConfigVersionState::Future, "future"},
-             {ConfigVersionState::Malformed, "malformed"}}) {
+    for (const auto &pair :
+         std::vector<std::pair<ConfigVersionState, const char *>>{{ConfigVersionState::Current, "current"},
+                                                                  {ConfigVersionState::Legacy, "legacy"},
+                                                                  {ConfigVersionState::Future, "future"},
+                                                                  {ConfigVersionState::Malformed, "malformed"}}) {
       ok &= check(std::string(v4l2diag::to_string(pair.first)) == pair.second,
                   std::string("state string changed for ") + pair.second);
     }
@@ -653,7 +652,7 @@ int main() {
   // --- 10. Disk and API/import paths agree --------------------------------
   {
     const std::string dir = make_temp_dir();
-    const std::string path = dir + "/anvil.json";
+    const std::string path = dir + "/bench-rig.json";
     write_file(path, v2_profile());
 
     DeviceProfile from_disk;
@@ -690,8 +689,7 @@ int main() {
     ok &= check(legacy.state == ConfigVersionState::Legacy, "a versionless runs index was not classified Legacy");
     ok &= check(legacy.source_version == 0, "a versionless runs index reported a version");
 
-    const auto current = v4l2diag::classify_runs_index(
-        parse(R"({"schema_version": 1, "runs": [{"id": "run-1"}]})"));
+    const auto current = v4l2diag::classify_runs_index(parse(R"({"schema_version": 1, "runs": [{"id": "run-1"}]})"));
     ok &= check(current.state == ConfigVersionState::Current, "a current runs index was not classified Current");
     ok &= check(current.source_version == v4l2diag::kRunsIndexSchemaVersion,
                 "a current runs index reported the wrong version");
@@ -718,22 +716,21 @@ int main() {
     DeviceProfile profile;
     MigrationReport report;
     v4l2diag::migrate_profile_json(parse(text), &profile, &report);
-    ok &= check(has(report.required, "role_bindings"),
-                "a slave-only profile did not report role_bindings as required: required={" +
-                    join(report.required) + "}");
+    ok &= check(
+        has(report.required, "role_bindings"),
+        "a slave-only profile did not report role_bindings as required: required={" + join(report.required) + "}");
     ok &= check(!report.usable_for_run(), "a slave-only profile was runnable");
 
     // And the central validator refuses to save it.
     std::string error;
     ok &= check(!v4l2diag::validate_device_profile(profile, &error),
                 "validate_device_profile() accepted a slave-only triggered profile");
-    ok &= check(error.find("master") != std::string::npos,
-                "the refusal does not name the missing master role: " + error);
+    ok &=
+        check(error.find("master") != std::string::npos, "the refusal does not name the missing master role: " + error);
 
     const std::string dir = make_temp_dir();
     v4l2diag::ProfileRegistry registry(dir);
-    ok &= check(!registry.add_or_update_profile(profile, &error),
-                "the registry saved a slave-only triggered profile");
+    ok &= check(!registry.add_or_update_profile(profile, &error), "the registry saved a slave-only triggered profile");
     ok &= check(!file_exists(dir + "/slaveonly.json"), "a slave-only profile reached the disk");
     rmdir(dir.c_str());
   }
@@ -753,8 +750,7 @@ int main() {
     ok &= check(v4l2diag::migrate_profile_json(parse(text), &profile, &report),
                 "a v3 profile with a hand-added role_bindings failed to migrate");
     ok &= check(report.state == ConfigVersionState::Legacy, "the hand-edited v3 file was not classified Legacy");
-    ok &= check(profile.role_bindings.empty(),
-                "role_bindings was read from a v3 file, which predates the field");
+    ok &= check(profile.role_bindings.empty(), "role_bindings was read from a v3 file, which predates the field");
     ok &= check(has(report.required, "role_bindings"),
                 "a v3 file with a hand-added role_bindings skipped the required check: required={" +
                     join(report.required) + "}");
@@ -778,7 +774,7 @@ int main() {
   // was left behind, still reported as needing migration.
   {
     const std::string dir = make_temp_dir();
-    write_file(dir + "/rig-alpha.json", v2_profile());  // id inside is "anvil"
+    write_file(dir + "/rig-alpha.json", v2_profile());  // id inside is "bench-rig"
     v4l2diag::ProfileRegistry registry(dir);
     ok &= check(registry.stored_configs().size() == 1, "the source config was not enumerated");
     ok &= check(registry.list_profiles().empty(), "the legacy config was runnable before the migration");
@@ -786,14 +782,13 @@ int main() {
     DeviceProfile draft = registry.stored_configs().front().draft;
     complete_routing(&draft);
     std::string error;
-    ok &= check(registry.migrate_config("rig-alpha.json", draft, &error),
-                "committing the migration failed: " + error);
+    ok &= check(registry.migrate_config("rig-alpha.json", draft, &error), "committing the migration failed: " + error);
     ok &= check(!file_exists(dir + "/rig-alpha.json"), "the source file survived the migration");
-    ok &= check(file_exists(dir + "/anvil.json"), "the migrated profile was not written under its id");
+    ok &= check(file_exists(dir + "/bench-rig.json"), "the migrated profile was not written under its id");
     ok &= check(registry.stored_configs().size() == 1, "the migration left a second config behind");
     ok &= check(registry.list_profiles().size() == 1, "the migrated profile is not runnable");
 
-    unlink((dir + "/anvil.json").c_str());
+    unlink((dir + "/bench-rig.json").c_str());
     rmdir(dir.c_str());
   }
 
@@ -801,15 +796,15 @@ int main() {
     // Same file name as the id: the source must not be deleted after being
     // rewritten in place.
     const std::string dir = make_temp_dir();
-    write_file(dir + "/anvil.json", v2_profile());
+    write_file(dir + "/bench-rig.json", v2_profile());
     v4l2diag::ProfileRegistry registry(dir);
     DeviceProfile draft = registry.stored_configs().front().draft;
     complete_routing(&draft);
     std::string error;
-    ok &= check(registry.migrate_config("anvil.json", draft, &error), "in-place migration failed: " + error);
-    ok &= check(file_exists(dir + "/anvil.json"), "migrating in place deleted the file it had just written");
+    ok &= check(registry.migrate_config("bench-rig.json", draft, &error), "in-place migration failed: " + error);
+    ok &= check(file_exists(dir + "/bench-rig.json"), "migrating in place deleted the file it had just written");
     ok &= check(registry.list_profiles().size() == 1, "the in-place migrated profile is not runnable");
-    unlink((dir + "/anvil.json").c_str());
+    unlink((dir + "/bench-rig.json").c_str());
     rmdir(dir.c_str());
   }
 
@@ -819,7 +814,7 @@ int main() {
     const std::string dir = make_temp_dir();
     write_file(dir + "/future.json", R"({"schema_version": 99, "id": "future", "name": "Newer"})");
     write_file(dir + "/broken.json", "{ not json");
-    write_file(dir + "/current.json", v4_profile());  // id "anvil", runnable
+    write_file(dir + "/current.json", v4_profile());  // id "bench-rig", runnable
     v4l2diag::ProfileRegistry registry(dir);
 
     DeviceProfile takeover;
@@ -832,8 +827,8 @@ int main() {
       std::string error;
       ok &= check(!registry.migrate_config(file, takeover, &error),
                   std::string("an ineligible config was migrated: ") + file);
-      ok &= check(read_file(dir + "/" + file) == before,
-                  std::string("migrating an ineligible config modified ") + file);
+      ok &=
+          check(read_file(dir + "/" + file) == before, std::string("migrating an ineligible config modified ") + file);
     }
     ok &= check(!file_exists(dir + "/takeover.json"), "an ineligible migration still wrote a new profile");
 
@@ -859,10 +854,10 @@ int main() {
                 "validate_device_profile() accepted a profile with no trigger channels");
     ok &= check(!registry.add_or_update_profile(channel_less, &error),
                 "add_or_update_profile() saved a profile with no trigger channels");
-    ok &= check(!file_exists(dir + "/anvil.json"), "a channel-less profile reached the disk");
+    ok &= check(!file_exists(dir + "/bench-rig.json"), "a channel-less profile reached the disk");
     // The complete one still saves, so the rule did not reject everything.
     ok &= check(registry.add_or_update_profile(complete, &error), "a complete profile was refused: " + error);
-    unlink((dir + "/anvil.json").c_str());
+    unlink((dir + "/bench-rig.json").c_str());
     rmdir(dir.c_str());
   }
 
@@ -882,10 +877,9 @@ int main() {
 
     v4l2diag::ProfileRegistry registry(dir);
     const auto configs = registry.stored_configs();
-    const auto source = std::find_if(configs.begin(), configs.end(),
-                                     [](const v4l2diag::ProfileRegistry::StoredConfig &c) {
-                                       return c.file == "twin.json";
-                                     });
+    const auto source =
+        std::find_if(configs.begin(), configs.end(),
+                     [](const v4l2diag::ProfileRegistry::StoredConfig &c) { return c.file == "twin.json"; });
     if (check(source != configs.end(), "twin.json was not enumerated")) {
       // Completed, so the refusal comes from the id collision rather than from the
       // missing routing an earlier check would catch first.
@@ -952,21 +946,21 @@ int main() {
     // Only files this registry enumerated are addressable, so a path cannot be
     // traversed out of the config directory and an invalid draft is refused.
     const std::string dir = make_temp_dir();
-    write_file(dir + "/anvil.json", v2_profile());
+    write_file(dir + "/bench-rig.json", v2_profile());
     v4l2diag::ProfileRegistry registry(dir);
     DeviceProfile draft = registry.stored_configs().front().draft;
     complete_routing(&draft);
     std::string error;
-    ok &= check(!registry.migrate_config("../escape.json", draft, &error),
-                "a traversing source file name was accepted");
+    ok &=
+        check(!registry.migrate_config("../escape.json", draft, &error), "a traversing source file name was accepted");
     ok &= check(!registry.migrate_config("/etc/passwd", draft, &error), "an absolute source path was accepted");
     ok &= check(!registry.migrate_config("absent.json", draft, &error), "an unknown source file was accepted");
 
     DeviceProfile broken = draft;
     broken.trigger_channels.clear();
-    ok &= check(!registry.migrate_config("anvil.json", broken, &error), "an invalid draft was committed");
-    ok &= check(file_exists(dir + "/anvil.json"), "a refused migration removed the source file");
-    unlink((dir + "/anvil.json").c_str());
+    ok &= check(!registry.migrate_config("bench-rig.json", broken, &error), "an invalid draft was committed");
+    ok &= check(file_exists(dir + "/bench-rig.json"), "a refused migration removed the source file");
+    unlink((dir + "/bench-rig.json").c_str());
     rmdir(dir.c_str());
   }
 

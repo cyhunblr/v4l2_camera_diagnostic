@@ -254,8 +254,8 @@ v4l2diag::RunResult css_run() {
   run.kernel_version = "#1 SMP";
   run.threshold_config_file = "default.json";
   run.trigger_mode = v4l2diag::TriggerMode::Hardware;
-  run.trigger_profile_id = "anvil";
-  run.trigger_profile_file = "anvil.json";
+  run.trigger_profile_id = "bench-rig";
+  run.trigger_profile_file = "bench-rig.json";
   run.run_id = "web-run-css";
 
   v4l2diag::CameraRunResult camera;

@@ -71,11 +71,11 @@ int main() {
 
   // --- 2. Free-run normalisation ------------------------------------------
   {
-    ok &= check(v4l2diag::effective_trigger_profile_id(TriggerMode::FreeRun, "anvil").empty(),
+    ok &= check(v4l2diag::effective_trigger_profile_id(TriggerMode::FreeRun, "bench-rig").empty(),
                 "free-run kept a trigger profile id");
-    ok &= check(v4l2diag::effective_trigger_profile_id(TriggerMode::Hardware, "anvil") == "anvil",
+    ok &= check(v4l2diag::effective_trigger_profile_id(TriggerMode::Hardware, "bench-rig") == "bench-rig",
                 "a hardware run lost its trigger profile id");
-    ok &= check(v4l2diag::effective_trigger_profile_id(TriggerMode::Software, "anvil") == "anvil",
+    ok &= check(v4l2diag::effective_trigger_profile_id(TriggerMode::Software, "bench-rig") == "bench-rig",
                 "a software run lost its trigger profile id");
   }
 
@@ -85,10 +85,10 @@ int main() {
     // those normalise too, so this is the case that proves the runner does not
     // simply trust them.
     const std::string config_dir = make_temp_dir("config");
-    write_file(config_dir + "/anvil.json", R"({
+    write_file(config_dir + "/bench-rig.json", R"({
   "schema_version": 4,
-  "id": "anvil",
-  "name": "Anvil",
+  "id": "bench-rig",
+  "name": "Bench-rig",
   "description": "",
   "defaults": {
     "trigger_mode": "hardware", "memory_backends": ["mmap"], "test_selectors": ["stable"],
@@ -108,7 +108,7 @@ int main() {
     v4l2diag::RunConfig config;
     config.trigger_mode = TriggerMode::FreeRun;
     // The contradiction: free-run, yet a profile is named.
-    config.trigger_profile_id = "anvil";
+    config.trigger_profile_id = "bench-rig";
     config.master.path = "/dev/null";
     config.output_directory = report_dir;
     // One fast test: the point is the run-level contract, not the verdict. Against
@@ -118,9 +118,9 @@ int main() {
     const v4l2diag::RunResult result = runner.run(config);
 
     ok &= check(result.trigger_mode == TriggerMode::FreeRun, "the runner changed the trigger mode");
-    ok &= check(result.trigger_profile_id.empty(),
-                "the runner produced a free-run result naming a trigger profile: \"" + result.trigger_profile_id +
-                    "\"");
+    ok &=
+        check(result.trigger_profile_id.empty(),
+              "the runner produced a free-run result naming a trigger profile: \"" + result.trigger_profile_id + "\"");
     ok &= check(result.role_bindings.empty(), "the runner produced a free-run result carrying role bindings");
     // The fields still HOLD values here -- they are plain doubles, so absence is not
     // representable -- but they must be the struct defaults rather than the
@@ -133,24 +133,23 @@ int main() {
     // and "!= 17" would pass without proving anything. The triggered case below is
     // what shows the field is filled at all.
     const v4l2diag::RunResult untouched;
-    ok &= check(result.trigger_rate_hz == untouched.trigger_rate_hz &&
-                    result.pulse_width_ms == untouched.pulse_width_ms,
-                "a free-run result carries profile timing instead of the default: " +
-                    std::to_string(result.trigger_rate_hz) + " Hz / " + std::to_string(result.pulse_width_ms) +
-                    " ms");
+    ok &= check(
+        result.trigger_rate_hz == untouched.trigger_rate_hz && result.pulse_width_ms == untouched.pulse_width_ms,
+        "a free-run result carries profile timing instead of the default: " + std::to_string(result.trigger_rate_hz) +
+            " Hz / " + std::to_string(result.pulse_width_ms) + " ms");
 
     // And a triggered run DOES carry all of it, so the normalisation is not just
     // blanking everything.
     v4l2diag::RunConfig triggered = config;
     triggered.trigger_mode = TriggerMode::Hardware;
     const v4l2diag::RunResult armed = runner.run(triggered);
-    ok &= check(armed.trigger_profile_id == "anvil", "a hardware run lost its trigger profile id");
+    ok &= check(armed.trigger_profile_id == "bench-rig", "a hardware run lost its trigger profile id");
     ok &= check(armed.role_bindings.size() == 1 && armed.role_bindings.front().role == "master",
                 "a hardware run lost its resolved routing");
     ok &= check(armed.trigger_rate_hz == 17.0, "a hardware run did not take the profile's trigger rate");
     ok &= check(armed.pulse_width_ms == 4.0, "a hardware run did not take the profile's pulse width");
 
-    unlink((config_dir + "/anvil.json").c_str());
+    unlink((config_dir + "/bench-rig.json").c_str());
     rmdir(config_dir.c_str());
     rmdir(report_dir.c_str());
   }

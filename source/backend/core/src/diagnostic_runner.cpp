@@ -106,6 +106,35 @@ double tpv(const TestThresholds &tp, const std::string &test_id, const std::stri
   return 0.0;
 }
 
+// Reads a parameter AND records it, so the report can state the settings the run used.
+//
+// Every runner already resolved its parameters through tpv()/thv(); none of them wrote the values
+// into the result. Measured on the 2026-08-11 device run: 83 of the 154 Test Configuration rows
+// the approved previews specify were absent, and six tests (T02, T03, T12, T15, T20, T21, T25)
+// recorded no configuration at all -- so their cards printed "No parameters were recorded" while
+// the values sat in the runner's own locals. A reader cannot reproduce a run from such a report.
+//
+// Recording at the point of USE is what keeps the two in step: a parameter that changes value, or
+// a new one, appears in the report without a second edit somewhere else.
+//
+// `unit` is the display unit the approved rows carry ("milliseconds", "" for a bare count); the
+// renderer reads it back through split_unit(), so "500ms" and "500 milliseconds" are equivalent
+// on the page but the former keeps the detail line compact.
+std::string param_text(double value, const char *unit) {
+  std::ostringstream out;
+  // Whole values print whole: a count of 5 is "5", never "5.0". Only a genuinely fractional
+  // setting (t13's 48.5 ms production timeout) keeps a decimal.
+  if (value == static_cast<double>(static_cast<long long>(value))) {
+    out << static_cast<long long>(value);
+  } else {
+    out << std::fixed << std::setprecision(1) << value;
+  }
+  if (unit != nullptr && unit[0] != '\0') {
+    out << unit;
+  }
+  return out.str();
+}
+
 // Log callback helper — emits a fine-grained log line if the callback is set.
 using LogFn = std::function<void(const std::string &severity, const std::string &camera, const std::string &test,
                                  const std::string &message, const std::string &log_type)>;
@@ -838,6 +867,14 @@ void run_format_comparison(const std::string &camera_path, MemoryBackend backend
       continue;
     }
     r.details.push_back(entry.name + ": sizeimage=" + std::to_string(fmt.fmt.pix.sizeimage));
+    // t17's `derived` row, in the mebibytes the approved card shows. The driver reports this per
+    // format; the first one measured stands for the buffer the throughput figures divide by.
+    if (r.details.end() == std::find_if(r.details.begin(), r.details.end(),
+                                        [](const std::string &d) { return d.compare(0, 11, "Sizeimage: ") == 0; })) {
+      char mib[32];
+      std::snprintf(mib, sizeof(mib), "%.2f", static_cast<double>(fmt.fmt.pix.sizeimage) / 1048576.0);
+      record_derived_config(&r, "Sizeimage", mib, "mebibytes");
+    }
 
     if (!s.start(2, backend, &err)) {
       r.details.push_back(entry.name + ": start failed: " + err);
@@ -2258,6 +2295,11 @@ void run_gpio_pulse_width(const std::string &camera_path, MemoryBackend backend,
   r.details.push_back("samples_per_width: " + std::to_string(SAMPLES));
   r.details.push_back("warmup_frames: " + std::to_string(WARMUP_COUNT));
   r.details.push_back("poll_timeout_ms: " + std::to_string(POLL_TIMEOUT_MS));
+  // t16 sweeps its own width list (pws[]), so the level count is a property of the test rather than
+  // a configurable parameter; "Total captures" is the sweep's size, N x SAMPLES. Both are `derived`
+  // rows in the approved card, and both are recorded from the real values rather than restated.
+  record_derived_config(&r, "Pulse width levels", std::to_string(N));
+  record_derived_config(&r, "Total captures", std::to_string(N * SAMPLES));
   // Note: this test intentionally sweeps its own pulse-width values (pws[]) to
   // find the minimum reliable width, so it does not use the profile's
   // pulse_width_ms for the sweep captures — only for the initial warmup.
@@ -2494,6 +2536,10 @@ void run_control_sweep(const std::string &camera_path, TriggerSource &trigger, M
   r.metrics.push_back(metric("control_count", "count", static_cast<double>(ctrl_count), "Total controls."));
   r.metrics.push_back(metric("writable_count", "count", static_cast<double>(writable_count), "Writable controls."));
   r.metrics.push_back(metric("isx021_found", "bool", has_isx ? 1.0 : 0.0, "ISX021-specific controls found."));
+  // Two of t18's approved configuration rows are `derived`: what the enumeration found, rather
+  // than anything the run was told. Recorded here, where the counts exist.
+  record_derived_config(&r, "Controls discovered", std::to_string(ctrl_count));
+  record_derived_config(&r, "Writable controls", std::to_string(writable_count));
 
   if (!has_isx) {
     ::close(fd);
@@ -2517,6 +2563,8 @@ void run_control_sweep(const std::string &camera_path, TriggerSource &trigger, M
   };
   const int o_ll = get_c(ISX_LL), o_bp = get_c(ISX_BP), o_wi = get_c(ISX_WI);
 
+  double combo_mean_min = std::numeric_limits<double>::max();
+  double combo_mean_max = std::numeric_limits<double>::lowest();
   for (int ll = 0; ll <= 1; ll++)
     for (int bp = 0; bp <= 1; bp++)
       for (int wi = 0; wi <= 1; wi++) {
@@ -2544,12 +2592,22 @@ void run_control_sweep(const std::string &camera_path, TriggerSource &trigger, M
           const Stats st = compute_stats(lats);
           r.metrics.push_back(metric(k + "_mean_ms", "ms", st.mean, k + " latency mean."));
           r.details.push_back(k + ": n=" + std::to_string(lats.size()) + " mean=" + std::to_string(st.mean) + "ms");
+          // The spread ACROSS combinations is what the test is for -- whether these controls move
+          // capture latency at all. The per-combination means were recorded without ever being
+          // compared, so the approved "Measured max difference" row had no value to read.
+          combo_mean_min = std::min(combo_mean_min, st.mean);
+          combo_mean_max = std::max(combo_mean_max, st.mean);
         }
       }
   set_c(ISX_LL, o_ll);
   set_c(ISX_BP, o_bp);
   set_c(ISX_WI, o_wi);
   ::close(fd);
+  if (combo_mean_max >= combo_mean_min) {
+    char spread[32];
+    std::snprintf(spread, sizeof(spread), "%.3f", combo_mean_max - combo_mean_min);
+    record_derived_config(&r, "Measured max difference", spread, "milliseconds");
+  }
   r.status = TestStatus::Pass;
   r.summary = "ISX021 control sweep complete. " + std::to_string(ctrl_count) + " total controls.";
 }
@@ -2622,6 +2680,11 @@ void run_stuck_frame(const std::string &camera_path, MemoryBackend backend, Trig
   r.metrics.push_back(
       metric("identical_pairs", "count", static_cast<double>(identical), "Identical consecutive pairs."));
   r.metrics.push_back(metric("max_identical_run", "count", static_cast<double>(max_run), "Max identical run length."));
+  // t22's `derived` row. The comparison is between CONSECUTIVE frames, so N frames yield N-1 pairs
+  // -- the approved card shows 49 against 50 requested frames.
+  if (tested > 1) {
+    record_derived_config(&r, "Pairs compared", std::to_string(tested - 1));
+  }
 
   if (tested < 2) {
     r.status = TestStatus::Fail;
@@ -2883,6 +2946,11 @@ void run_resolution_sweep(const std::string &camera_path, MemoryBackend backend,
 
   r.metrics.push_back(
       metric("resolution_count", "count", static_cast<double>(resolutions.size()), "Resolutions tested."));
+  // Both of t19's `derived` configuration rows: how many frame sizes the device enumerated, and
+  // which pixel format the sweep ran in. The format is the device's, not a setting -- the run takes
+  // whatever the driver reports first.
+  record_derived_config(&r, "Resolutions enumerated", std::to_string(resolutions.size()));
+  record_derived_config(&r, "Pixel format", fourcc_to_string(frmsize.pixel_format));
 
   int tested = 0;
   for (const auto &res : resolutions) {
@@ -3162,6 +3230,9 @@ void run_multi_camera(const std::vector<MultiCamParticipant> &participants, Memo
   const int POLL_TIMEOUT = static_cast<int>(tpv(tp, "t25-multi-camera", "poll_timeout_ms"));
   const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t25-multi-camera", "warmup_count"));
   const uint64_t pulse_ns = pulse_ns_from(tp);
+  // t25's `derived` row: how many cameras actually took part (master plus the selected slaves).
+  // A run-level fact, not a setting -- the count comes from the run's own camera selection.
+  record_derived_config(&r, "Participants", std::to_string(participants.size()));
   emit(
       log, participants[0].camera_path, "t25",
       "Multi-camera: " + std::to_string(participants.size()) + " devices x " + std::to_string(SAMPLES) + " samples...");
@@ -3412,6 +3483,251 @@ int multi_buffer_usable_count(const std::vector<MultiBufferOutcome> &outcomes) {
     }
   }
   return usable;
+}
+
+namespace {
+
+// One Test Configuration row: the label the approved preview shows, the parameter key that holds
+// its value, whether it is a threshold, and the display unit.
+//
+// `key == nullptr` marks a row whose value is not a number from the parameter tables -- a fixed
+// statement about the method ("Latency basis", "Continuity signal") or a value only the run itself
+// knows ("Backend memory", "Resolutions enumerated"). Those carry `text` instead, and the ones the
+// run discovers are recorded by the test body rather than here.
+struct ConfigRow {
+  const char *label;
+  const char *key;
+  bool threshold;
+  const char *unit;
+  const char *text;
+};
+
+struct TestConfigSpec {
+  const char *slug;
+  std::vector<ConfigRow> rows;
+};
+
+// Transcribed from the approved previews' hardware-trigger cards, in their order. The label is what
+// the reader sees; the key is what the runner already resolves through tpv()/thv().
+const std::vector<TestConfigSpec> &config_specs() {
+  static const std::vector<TestConfigSpec> table = {
+      {"t03-pipeline-ready",
+       {{"Cycles", "cycles", false, "", nullptr},
+        {"Buffer count", "buffer_count", false, "", nullptr},
+        {"First-frame deadline", "first_frame_deadline_ms", false, "ms", nullptr},
+        {"Settle time", "settle_ms", false, "ms", nullptr},
+        {"Trigger retry interval", "trigger_retry_ms", false, "ms", nullptr},
+        {"Slow-start guard", "slow_start_ms", false, "ms", nullptr},
+        {"PASS threshold", "pass_first_frame_ms", true, "ms", nullptr},
+        {"WARN threshold", "warn_first_frame_ms", true, "ms", nullptr}}},
+      {"t04-no-streamon",
+       {{"Buffer count", "buffer_count", false, "", nullptr},
+        {"Poll timeout", "poll_timeout_ms", false, "ms", nullptr}}},
+      {"t05-pollerr-handling",
+       {{"Baseline captures", "baseline_captures", false, "", nullptr},
+        {"Recovery captures", "recovery_captures", false, "", nullptr},
+        {"Warmup count", "warmup_count", false, "", nullptr},
+        {"Minimum recovery", "min_recovery_ok", true, "", nullptr},
+        {"Poll timeout", "poll_timeout_ms", false, "ms", nullptr}}},
+      {"t06-stream-cycles",
+       {{"Full cycles", "full_cycles", false, "", nullptr},
+        {"Rapid cycles", "rapid_cycles", false, "", nullptr},
+        {"Full warmup", "full_warmup", false, "", nullptr},
+        {"Rapid warmup", "rapid_warmup", false, "", nullptr},
+        {"Full timeout", "full_timeout_ms", false, "ms", nullptr},
+        {"Rapid timeout", "rapid_timeout_ms", false, "ms", nullptr},
+        {"Rapid pacing", "rapid_pacing_ms", false, "ms", nullptr},
+        {"Slow-start guard", "slow_start_ms", false, "ms", nullptr},
+        {"Full pass threshold", "max_full_failures_pass", true, "", nullptr},
+        {"Full warn threshold", "max_full_failures_warn", true, "", nullptr},
+        {"Rapid pass threshold", "rapid_pct_pass", true, "", nullptr},
+        {"Rapid warn threshold", "rapid_pct_warn", true, "", nullptr}}},
+      {"t07-multi-buffer",
+       {{"Sample count", "sample_count", false, "", nullptr},
+        {"Max buffers", "max_buffers", false, "", nullptr},
+        {"Warmup count", "warmup_count", false, "", nullptr},
+        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
+        {"Sample interval", "sample_interval_ms", false, "ms", nullptr}}},
+      {"t08-buffer-overwrite",
+       {{"Buffer count", "buffer_count", false, "", nullptr},
+        {"Variant A triggers", "variant_a_triggers", false, "", nullptr},
+        {"Variant A interval", "variant_a_interval_ms", false, "ms", nullptr},
+        {"Variant B triggers", "variant_b_triggers", false, "", nullptr},
+        {"Variant B interval", "variant_b_interval_ms", false, "ms", nullptr},
+        {"Settle time", "settle_ms", false, "ms", nullptr},
+        {"Max error flags", "max_error_flags", true, "", nullptr}}},
+      // T09 did not run on the 2026-08-11 device (no trigger match), so it was absent from the
+      // deviation scan; its preview does carry these six rows.
+      {"t09-buffer-recycling",
+       {{"Reps per delay", "reps_per_delay", false, "", nullptr},
+        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
+        {"Inter-rep interval", "inter_rep_interval_ms", false, "ms", nullptr},
+        {"Warmup count", "warmup_count", false, "", nullptr},
+        {"Min safe cliff delay", "min_safe_cliff_delay_ms", true, "ms", nullptr}}},
+      {"t10-buffer-flags",
+       {{"Sample count", "sample_count", false, "", nullptr},
+        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
+        {"Sample interval", "sample_interval_ms", false, "ms", nullptr},
+        {"Warmup count", "warmup_count", false, "", nullptr},
+        {"Max error flags", "max_error_flags", true, "", nullptr}}},
+      {"t11-memory-throughput",
+       {// T11 opens its session with a fixed depth of 2 (see run_memory_throughput); it is not a
+        // configurable parameter, so it is stated rather than looked up.
+        {"Allocated buffers", nullptr, false, "", "2"},
+        {"Minimum repetitions", "benchmark_reps", false, "", nullptr},
+        {"Target sample time", nullptr, false, "", "100ms"},
+        {"Timer", nullptr, false, "", "CLOCK_MONOTONIC"},
+        {"Stream state", nullptr, false, "", "Streaming"}}},
+      {"t12-dmabuf-cache-sync",
+       {{"Requested samples", "sample_count", false, "", nullptr},
+        {"Compared data", nullptr, false, "", "Full bytesused"},
+        {"Warmup frames", "warmup_count", false, "", nullptr},
+        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
+        {"Buffer count", nullptr, false, "", "2"}}},
+      {"t13-poll-timeout-cliff",
+       {{"Probe samples per timeout", "probe_frames", false, "", nullptr},
+        {"Stability rounds", "stability_rounds", false, "", nullptr},
+        {"Frames per round", "stability_frames", false, "", nullptr},
+        {"Warmup frames", "warmup_count", false, "", nullptr},
+        {"Configured safe margin", "safe_margin_ms", true, "ms", nullptr},
+        {"Production timeout", "production_timeout_ms", false, "ms", nullptr}}},
+      {"t14-trigger-latency",
+       {{"Latency samples", "sample_count", false, "", nullptr},
+        {"Warmup triggers", "warmup_count", false, "", nullptr},
+        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
+        {"Sample interval", "sample_interval_ms", false, "ms", nullptr},
+        // The trigger profile's pulse width. run_test() injects it into `tp` in NANOseconds, and
+        // the approved row shows milliseconds, so it is scaled below rather than printed raw.
+        {"Pulse width", "__pulse_width_ns", false, "ms", nullptr}}},
+      {"t15-nonblock-vs-block",
+       {{"Samples per mode", "sample_count", false, "", nullptr},
+        {"Spin deadline", "spin_deadline_ms", false, "ms", nullptr},
+        {"Sample interval", "sample_interval_ms", false, "ms", nullptr},
+        {"Warmup frames", "warmup_count", false, "", nullptr}}},
+      {"t16-gpio-pulse-width",
+       {// "Pulse width levels" and "Total captures" are recorded by the test body: they come from
+        // the sweep's own width list, not from the parameter tables.
+        {"Samples per width", "samples_per_width", false, "", nullptr},
+        {"Poll timeout", "poll_timeout_ms", false, "ms", nullptr},
+        {"Warmup frames", "warmup_count", false, "", nullptr},
+        {"LOW edge reference", "edge_margin_ms", false, "ms", nullptr},
+        {"Trigger edge", nullptr, false, "", "Rising"}}},
+      {"t17-format-comparison",
+       {{"Samples per format", "sample_count", false, "", nullptr},
+        {"Memcpy repetitions", "throughput_reps", false, "", nullptr},
+        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
+        {"Latency basis", nullptr, false, "", "Trigger to DQBUF"},
+        {"Throughput divisor", nullptr, false, "", "bytesused"}}},
+      {"t18-control-sweep",
+       {{"Captures per value", "sample_count", false, "", nullptr},
+        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
+        {"Practical impact threshold", nullptr, true, "", "1ms"}}},
+      {"t19-resolution-sweep",
+       {{"Samples per resolution", "sample_count", false, "", nullptr},
+        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
+        {"Latency basis", nullptr, false, "", "Trigger to DQBUF"}}},
+      {"t20-sequence-continuity",
+       {{"Requested frames", "sample_count", false, "", nullptr},
+        {"Warmup frames", "warmup_count", false, "", nullptr},
+        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
+        {"Max allowed gaps", "max_dropped_frames", true, "", nullptr},
+        {"Continuity signal", nullptr, false, "", "buffer.sequence"}}},
+      {"t21-timestamp-monotonicity",
+       {{"Requested frames", "sample_count", false, "", nullptr},
+        {"Warmup frames", "warmup_count", false, "", nullptr},
+        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
+        {"Max non-monotonic events", "max_non_monotonic", true, "", nullptr},
+        {"Ordering signal", nullptr, false, "", "buffer.timestamp"}}},
+      {"t22-stuck-frame",
+       {{"Frames requested", "sample_count", false, "", nullptr},
+        {"Compare bytes", "compare_bytes", false, "", nullptr},
+        {"Identical threshold", "max_identical_run", true, "", nullptr},
+        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr}}},
+      {"t23-sustained-capture",
+       {{"Test duration", "duration_sec", false, "s", nullptr},
+        {"Window size", "window_sec", false, "s", nullptr},
+        {"Sample interval", "sample_interval_ms", false, "ms", nullptr},
+        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
+        {"Warmup frames", "warmup_count", false, "", nullptr},
+        {"Drift PASS limit", "pass_drift_ms", true, "ms", nullptr}}},
+      {"t24-latency-under-load",
+       {{"Samples per phase", "sample_count", false, "", nullptr},
+        {"Load threads", "load_threads", false, "", nullptr},
+        {"Baseline timeout", "baseline_timeout_ms", false, "ms", nullptr},
+        {"Load phase timeout", "load_timeout_ms", false, "ms", nullptr},
+        {"P95 delta PASS limit", "pass_delta_p95_ms", true, "ms", nullptr},
+        {"P95 delta FAIL limit", "warn_delta_p95_ms", true, "ms", nullptr}}},
+      {"t25-multi-camera",
+       {{"Requested rounds", "sample_count", false, "", nullptr},
+        {"Round deadline", "poll_timeout_ms", false, "ms", nullptr},
+        {"Capture PASS limit", nullptr, true, "", "100%"},
+        {"Capture FAIL limit", nullptr, true, "", "90%"},
+        {"Sync PASS limit", nullptr, true, "", "1ms"},
+        {"Sync FAIL limit", nullptr, true, "", "5ms"}}},
+      {"t26-cold-start",
+       {{"Fresh cycles", "cycles", false, "", nullptr},
+        {"Observation window (frames)", "max_frames_per_cycle", false, "", nullptr},
+        {"Reference window", "stability_threshold_pct", false, "", nullptr},
+        {"Latency tolerance", "inter_frame_interval_ms", false, "ms", nullptr},
+        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr}}},
+  };
+  return table;
+}
+
+}  // namespace
+
+void record_run_parameters(TestResult *test, const TestThresholds &configured_thresholds,
+                           const TestThresholds &configured_params) {
+  if (test == nullptr) {
+    return;
+  }
+  for (const auto &spec : config_specs()) {
+    if (test->id != spec.slug) {
+      continue;
+    }
+    for (const auto &row : spec.rows) {
+      if (row.key == nullptr) {
+        // A fixed statement about the method, or a value the run does not compute.
+        test->details.push_back(std::string(row.label) + ": " + row.text);
+        continue;
+      }
+      double value =
+          row.threshold ? thv(configured_thresholds, spec.slug, row.key) : tpv(configured_params, spec.slug, row.key);
+      // The injected keys carry the units run_test() uses, not the units the row displays.
+      if (std::string(row.key) == "__pulse_width_ns") {
+        if (value <= 0.0) {
+          value = 13'000'000.0;  // pulse_ns_from()'s default, so an unconfigured run still states it
+        }
+        value /= 1'000'000.0;
+      }
+      test->details.push_back(std::string(row.label) + ": " + param_text(value, row.unit));
+    }
+    // Every approved card ends its Test Configuration with the backend the cards belong to. Only
+    // 13 of 24 runners recorded it, so the other 11 cards omitted a row the design always shows --
+    // and the backend is already on the TestResult, so no runner needs to remember to write it.
+    if (!test->memory_backend.empty()) {
+      std::string display;
+      for (const char c : test->memory_backend) {
+        display.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+      }
+      test->details.push_back("Backend memory: " + display);
+    }
+    return;
+  }
+}
+
+void record_derived_config(TestResult *test, const std::string &label, const std::string &value,
+                           const std::string &unit) {
+  if (test == nullptr || value.empty()) {
+    return;
+  }
+  // The renderer strips this sentinel and stamps the row's Source column "derived"; it is appended
+  // rather than passed alongside because the transport is a flat "key: value" detail line.
+  std::string text = value;
+  if (!unit.empty()) {
+    text += " " + unit;
+  }
+  test->details.push_back(label + ": " + text + "  @derived");
 }
 
 // See the rule and its authority in diagnostic_runner.hpp.
@@ -3717,6 +4033,15 @@ TestResult DiagnosticRunner::run_test(const std::string &camera_path, MemoryBack
   // pulses or trigger rates is wrong there. Tests read this to word their notes
   // for the mode they actually ran in.
   tp["__externally_triggered"] = config.trigger_mode == TriggerMode::FreeRun ? 0.0 : 1.0;
+  // Record the settings this test runs with, BEFORE the body runs. Placed here, at the one point
+  // every test passes through, rather than in 24 bodies: a body that forgot the call would render
+  // an empty Test Configuration and nothing would notice, which is how 106 of the 154 approved rows
+  // came to be missing. `tp` is already carrying the injected profile values at this point, so the
+  // recorded pulse width is the one the run will actually fire.
+  //
+  // The SKIP paths above return before this, and correctly so: a test that never ran has no
+  // settings to report, and its card is the banner alone.
+  record_run_parameters(&result, thresholds_for(definition.id), tp);
   emit_section(log, camera_path, definition.id,
                "\xe2\x96\xb6 " + definition.id + " \xe2\x80\x94 " + definition.name + " [" + to_string(backend) + "]");
 

@@ -16,7 +16,7 @@ bool safe_name_char(char c) {
 
 // The user's file name, reduced to something usable in a filename:
 //   * only the basename (a path never reaches the result)
-//   * the last extension removed ("anvil.json" -> "anvil", "a.tar.gz" -> "a.tar")
+//   * the last extension removed ("bench-rig.json" -> "bench-rig", "a.tar.gz" -> "a.tar")
 //   * unsafe characters replaced
 //   * leading dots stripped, so ".json" cannot become a hidden-file fragment
 //

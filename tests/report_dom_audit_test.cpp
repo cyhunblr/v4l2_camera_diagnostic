@@ -140,8 +140,8 @@ v4l2diag::RunResult audit_run() {
   run.kernel_version = "#1 SMP";
   run.threshold_config_file = "stress-test.json";
   run.trigger_mode = v4l2diag::TriggerMode::Hardware;
-  run.trigger_profile_id = "anvil";
-  run.trigger_profile_file = "anvil.json";
+  run.trigger_profile_id = "bench-rig";
+  run.trigger_profile_file = "bench-rig.json";
   run.run_id = "web-run-audit";
 
   v4l2diag::CameraRunResult camera;

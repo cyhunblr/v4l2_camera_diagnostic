@@ -76,11 +76,11 @@ int main() {
   // Run-level trigger contract (plan 2.5, report model (a)): stated once here, not
   // repeated per camera.
   result.trigger_mode = v4l2diag::TriggerMode::Hardware;
-  result.trigger_profile_id = "anvil";
+  result.trigger_profile_id = "bench-rig";
   // A triggered run must carry the profile's SOURCE FILE, not just its id: artifacts are
   // named from the file (plan 3.5.2) and a triggered run has no default. The id and the
-  // filename genuinely differ -- see the "anvil" / "anvil-v2.json" pairing here.
-  result.trigger_profile_file = "anvil-v2.json";
+  // filename genuinely differ -- see the "bench-rig" / "bench-rig-v2.json" pairing here.
+  result.trigger_profile_file = "bench-rig-v2.json";
   result.threshold_config_file = "stress-test.json";
   // Timing is a run-level field now, filled once by the runner.
   result.trigger_rate_hz = 12.5;
@@ -648,8 +648,8 @@ int main() {
     routing_ok &=
         require(Json::parseFromStream(builder, in, &parsed, &errors), "the JSON report does not parse: " + errors);
   }
-  routing_ok &=
-      require(parsed["trigger_profile_id"].asString() == "anvil", "JSON is missing the run-level trigger_profile_id");
+  routing_ok &= require(parsed["trigger_profile_id"].asString() == "bench-rig",
+                        "JSON is missing the run-level trigger_profile_id");
   routing_ok &= require(parsed["trigger_mode"].asString() == "hardware", "JSON is missing the run-level trigger_mode");
   routing_ok &= require(parsed["role_bindings"].isArray() && parsed["role_bindings"].size() == 2,
                         "JSON is missing the run-level role_bindings table");
@@ -700,7 +700,7 @@ int main() {
                         "the Markdown routing table lost the master row");
   routing_ok &= require(markdown.find("| slave-1 | trigger-channel-b |") != std::string::npos,
                         "the Markdown routing table lost the slave-1 row");
-  routing_ok &= require(markdown.find("- Trigger profile: `anvil`") != std::string::npos,
+  routing_ok &= require(markdown.find("- Trigger profile: `bench-rig`") != std::string::npos,
                         "Markdown is missing the run-level trigger profile");
   routing_ok &= require(markdown.find("- Role: `master`") != std::string::npos,
                         "the Markdown camera section does not state its role");
@@ -719,7 +719,7 @@ int main() {
   // HTML: the same model.
   routing_ok &=
       require(html.find("Trigger Profile") != std::string::npos, "HTML is missing the run-level Trigger Profile row");
-  routing_ok &= require(html.find(">anvil<") != std::string::npos, "HTML lost the trigger profile id");
+  routing_ok &= require(html.find(">bench-rig<") != std::string::npos, "HTML lost the trigger profile id");
   routing_ok &= require(html.find(">trigger-channel-a<") != std::string::npos, "HTML lost the master binding");
   routing_ok &= require(html.find(">slave-1<") != std::string::npos, "HTML lost the slave-1 role");
   routing_ok &= require(html.find(">Role<") != std::string::npos, "HTML does not label the camera's role");

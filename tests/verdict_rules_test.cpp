@@ -253,5 +253,43 @@ int main() {
     }
   }
 
+  // --- run_test() must RECORD the settings it resolves --------------------------
+  //
+  // record_run_parameters() is checked against the approved previews in
+  // tests/test_configuration_contract_test.cpp, but that only proves the function is right. If
+  // run_test() never calls it, every device report renders an empty Test Configuration and the
+  // whole suite still passes -- the same vacuous shape that let the t05 verdict and the t08 slot
+  // emission stay unused. Observed here: the call in the runner source, and its position relative
+  // to the `tp` map it must read.
+  {
+    const std::string runner = read_file("source/backend/core/src/diagnostic_runner.cpp");
+    ok &= check(!runner.empty(), "diagnostic_runner.cpp not readable; run from the repository root");
+    const std::size_t body = runner.find("TestResult DiagnosticRunner::run_test");
+    ok &= check(body != std::string::npos, "run_test not found; this guard would pass vacuously");
+    if (body != std::string::npos) {
+      const std::string tail = runner.substr(body);
+      const std::size_t call = tail.find("record_run_parameters(&result");
+      ok &= check(call != std::string::npos, "run_test() never records the settings it resolved");
+      // The call must be UNCONDITIONAL. `if (false) record_run_parameters(...)` leaves the text in
+      // place, so a check for the call alone passes while no report gets a single row -- measured:
+      // that exact sabotage passed the first version of this guard. The 60 characters before the
+      // call must not open a conditional.
+      if (call != std::string::npos) {
+        const std::string before = tail.substr(call > 60 ? call - 60 : 0, call - (call > 60 ? call - 60 : 0));
+        ok &= check(before.find("if (") == std::string::npos && before.find("if(") == std::string::npos &&
+                        before.find("? ") == std::string::npos,
+                    "run_test()'s settings recording is behind a condition; a guarded-out call records nothing");
+      }
+      // It must come AFTER the injected profile values are in `tp`, or the recorded pulse width is
+      // whatever the parameter table held rather than what the run fires.
+      const std::size_t inject = tail.find("tp[\"__pulse_width_ns\"]");
+      if (call != std::string::npos && inject != std::string::npos) {
+        ok &= check(inject < call,
+                    "run_test() records its settings before injecting the profile values into tp; "
+                    "the recorded pulse width would not be the one the run fires");
+      }
+    }
+  }
+
   return ok ? 0 : 1;
 }

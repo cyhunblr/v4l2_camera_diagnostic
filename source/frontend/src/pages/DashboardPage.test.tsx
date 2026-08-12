@@ -92,7 +92,7 @@ describe("DashboardPage guided-run copy", () => {
                 pass_count: 1, fail_count: 0, warn_count: 0, skip_count: 0, reports: []
               },
               {
-                id: "armed", status: "completed", trigger_mode: "hardware", trigger_profile_id: "anvil",
+                id: "armed", status: "completed", trigger_mode: "hardware", trigger_profile_id: "bench-rig",
                 role_bindings: [], camera_paths: ["/dev/video1"], started_at_utc: "2026-08-04T11:00:00Z",
                 finished_at_utc: "2026-08-04T11:01:00Z", duration_ms: 60000,
                 pass_count: 1, fail_count: 0, warn_count: 0, skip_count: 0, reports: []
@@ -107,7 +107,7 @@ describe("DashboardPage guided-run copy", () => {
 
     await waitFor(() => expect(screen.getByText("/dev/video0")).toBeInTheDocument());
     expect(screen.getByText("Not required (free-run)")).toBeInTheDocument();
-    expect(screen.getByText("anvil")).toBeInTheDocument();
+    expect(screen.getByText("bench-rig")).toBeInTheDocument();
   });
 
   it("survives a run summary whose collections are empty", async () => {
@@ -197,7 +197,7 @@ describe("DashboardPage guided-run copy", () => {
               {
                 id: "run-1",
                 status: "completed",
-                trigger_profile_id: "anvil",
+                trigger_profile_id: "bench-rig",
                 role_bindings: [],
                 camera_paths: ["/dev/video0"],
                 started_at_utc: "2026-08-04T10:00:00Z",

@@ -155,7 +155,7 @@ std::string v2_profile(const std::string &id, bool enabled = true) {
   "schema_version": 2,
   "id": ")" +
          id + R"(",
-  "name": "Anvil",
+  "name": "Bench-rig",
   "description": "hardware rig",
   "enabled": )" +
          (enabled ? "true" : "false") + R"(,
@@ -330,7 +330,7 @@ int main() {
       ok &= check((*legacy).isMember("draft_profile"), "the legacy config carries no draft_profile");
       const Json::Value &draft = (*legacy)["draft_profile"];
       ok &= check(draft["id"].asString() == "legacy", "the draft lost the profile id");
-      ok &= check(draft["name"].asString() == "Anvil", "the draft lost the stored name");
+      ok &= check(draft["name"].asString() == "Bench-rig", "the draft lost the stored name");
       ok &= check(draft["schema_version"].asInt() == v4l2diag::kProfileSchemaVersion,
                   "the draft is not at the current schema version");
       ok &= check(draft["trigger_channels"].size() == 1, "the draft lost the trigger channel");
@@ -1471,8 +1471,8 @@ int main() {
   // usable Trigger Profile source file (got \"\")".
   {
     // Add a fresh profile to the shared config_dir; clean it up at the end.
-    const std::string anvil_profile_path = config_dir + "/anvil-hw-regression.json";
-    write_file(anvil_profile_path, v4_profile("anvil-hw-regression"));
+    const std::string bench_rig_profile_path = config_dir + "/bench-rig-hw-regression.json";
+    write_file(bench_rig_profile_path, v4_profile("bench-rig-hw-regression"));
 
     const std::string hw_dir = make_temp_dir("hw-profile-file");
     v4l2diag::WebServerOptions hw_opts = options;
@@ -1486,7 +1486,7 @@ int main() {
 
       Json::Value body(Json::objectValue);
       body["trigger_mode"] = "hardware";
-      body["trigger_profile_id"] = "anvil-hw-regression";
+      body["trigger_profile_id"] = "bench-rig-hw-regression";
       body["master"]["path"] = "/dev/null";
       body["test_selectors"].append("t01-device-compliance");
       Json::StreamWriterBuilder builder;
@@ -1519,7 +1519,7 @@ int main() {
         for (const auto &entry : final_runs["runs"]) {
           if (entry["id"].asString() == run_id) {
             found = true;
-            ok &= check(entry["trigger_profile_file"].asString() == "anvil-hw-regression.json",
+            ok &= check(entry["trigger_profile_file"].asString() == "bench-rig-hw-regression.json",
                         "hardware-trigger run did not set trigger_profile_file in history: \"" +
                             entry["trigger_profile_file"].asString() + "\"");
             break;
@@ -1529,11 +1529,11 @@ int main() {
       }
       hw_server.stop();
     }
-    unlink(anvil_profile_path.c_str());
+    unlink(bench_rig_profile_path.c_str());
   }
 
   for (const char *name : {"legacy.json", "disabled.json", "current.json", "broken.json", "future.json",
-                           "invalid-current.json", "anvil-hw-regression.json"}) {
+                           "invalid-current.json", "bench-rig-hw-regression.json"}) {
     unlink((config_dir + "/" + name).c_str());
   }
   unlink((report_dir + "/runs-index.json").c_str());

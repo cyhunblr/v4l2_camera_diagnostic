@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "v4l2diag/core/diagnostic_runner.hpp"
 #include "v4l2diag/core/test_content.hpp"
 #include "v4l2diag/core/types.hpp"
 
@@ -365,7 +366,7 @@ int main() {
     t01.metrics.push_back(mv("capture_supported", 1, ""));
     t01.metrics.push_back(mv("streaming_supported", 1, ""));
     t01.details.push_back("driver: v4l2 loopback");
-    t01.details.push_back("card: ADASTEC_VD");
+    t01.details.push_back("card: VENDOR_VD");
     t01.details.push_back("bus: platform:vim2m");
     t01.details.push_back("format: UYVY - UYVY 4:2:2 - single-plane");
     t01.details.push_back("format: NV16 - Y/CbCr 4:2:2 - single-plane");
@@ -592,6 +593,7 @@ int main() {
     t05.metrics.push_back(mv("min_recovery_frames", 25, ""));
     t05.metrics.push_back(mv("poll_timeout_ms", 50, ""));
     t05.details.push_back("backend_memory: mmap");
+    v4l2diag::record_run_parameters(&t05);
     const std::string html = v4l2diag::render_test_content(t05);
 
     // 5.5.5: PHASE/EXPECTED/OBSERVED/OUTCOME, in the six-step run order.
@@ -614,9 +616,12 @@ int main() {
                 "T05's phase rows are out of run order");
     ok &= check(!contains(html, "class=\"detail-list\""), "T05 still emits the raw repeating detail block");
 
-    // 5.5.7: the six configuration parameters.
-    for (const char *key : {"Baseline frames", "Recovery frames", "Warmup frames", "Minimum recovery", "Poll timeout",
-                            "Backend memory"}) {
+    // 5.5.7: the configuration parameters. The rows are now recorded by the runner
+    // (record_run_parameters) rather than hand-assembled by this renderer, and they carry the
+    // approved labels -- "Baseline captures", not "Baseline frames". Which rows each test must
+    // show, and that they are complete, is checked against the previews in
+    // tests/test_configuration_contract_test.cpp; this only confirms T05's card reads them.
+    for (const char *key : {"Baseline captures", "Recovery captures", "Warmup count"}) {
       ok &= check(contains(html, key), std::string("T05 is missing the ") + key + " configuration row");
     }
 
@@ -819,6 +824,7 @@ int main() {
     t08.details.push_back("variant_a: 100 triggers at 100ms");
     t08.details.push_back("variant_b: 200 triggers at 50ms");
     t08.details.push_back("error_threshold: 0");
+    v4l2diag::record_run_parameters(&t08);
     const std::string html = v4l2diag::render_test_content(t08);
 
     // 5.8.5: the variant table is the FIRST item, and there is no chart at all -- the approved
@@ -915,6 +921,7 @@ int main() {
     t09.details.push_back("availability_threshold: 90%");
     t09.details.push_back("safe_delay_threshold: 48ms");
     t09.details.push_back("backend_memory: mmap");
+    v4l2diag::record_run_parameters(&t09);
     const std::string html = v4l2diag::render_test_content(t09);
 
     // 5.9.6: availability per tested delay, with the review threshold drawn AND named --
@@ -949,10 +956,11 @@ int main() {
     ok &= check(!contains(html, ">Requeue<"), "T09 still aggregates every delay into one \"Requeue\" row");
     ok &= check(!contains(html, "class=\"detail-list\""), "T09 still emits the raw repeating detail block");
 
-    // 5.9.9: the eight configuration parameters.
-    for (const char *key :
-         {"Allocated buffers", "Repetitions per delay", "Warmup frames", "Capture timeout", "Inter-repetition interval",
-          "Availability threshold", "Safe-delay threshold", "Backend memory"}) {
+    // 5.9.9: the configuration parameters, in the approved preview's own wording -- "Reps per
+    // delay", not "Repetitions per delay". Completeness is checked against the previews in
+    // tests/test_configuration_contract_test.cpp.
+    for (const char *key : {"Reps per delay", "Capture timeout", "Inter-rep interval", "Warmup count",
+                            "Min safe cliff delay", "Backend memory"}) {
       ok &= check(contains(html, key), std::string("T09 is missing the ") + key + " configuration row");
     }
 
@@ -1287,6 +1295,12 @@ int main() {
         {"t26-cold-start", "cycle 1: warmup=1 frames", "Cycle 1"},
         {"t23-sustained-capture", "Win0 0-10s: n=65 mean=44ms stddev=0 miss=0", "Win0 0-10s"},
         {"t19-resolution-sweep", "1920x1280: mean=44ms p95=44ms throughput=1068MB/s", "1920x1280"},
+        // T18's control combinations survived the first Faz 1 pass: the key is "ll0_bp0_wi0", a
+        // shape the prefix list did not cover, and it is a MEASUREMENT of one control combination
+        // ("n=20 mean=44.792377ms"). Caught on the 2026-08-11 11:14 device run, where four of
+        // T18's five configuration rows were these combinations. The renderer humanizes the key,
+        // so the report read "Ll0 bp0 wi0".
+        {"t18-control-sweep", "ll0_bp0_wi0: n=20 mean=44.792377ms", "Ll0 bp0 wi0"},
     };
     for (const auto &c : cases) {
       v4l2diag::TestResult test = test_of(c.slug, v4l2diag::TestStatus::Pass);

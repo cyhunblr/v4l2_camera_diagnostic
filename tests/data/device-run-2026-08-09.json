@@ -1774,6 +1774,6 @@
    "run_mode": "sequential",
    "started_at_utc": "2026-08-09T01:08:08Z",
    "trigger_mode": "hardware",
-   "trigger_profile_id": "anvil",
+   "trigger_profile_id": "bench-rig",
    "trigger_rate_hz": 10
 }

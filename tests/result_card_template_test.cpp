@@ -373,10 +373,10 @@ int main() {
     // A hardware run still names its profile, so the row is not simply hard-coded.
     v4l2diag::RunResult hardware = free_run;
     hardware.trigger_mode = v4l2diag::TriggerMode::Hardware;
-    hardware.trigger_profile_id = "anvil";
+    hardware.trigger_profile_id = "bench-rig";
     // A triggered run must carry the profile's source FILE: artifacts are named from it
     // and there is no default for a run that actually routed (plan 3.5.2).
-    hardware.trigger_profile_file = "anvil.json";
+    hardware.trigger_profile_file = "bench-rig.json";
     const std::string hw_dir = make_temp_dir();
     bool wrote_hw = true;
     try {
@@ -387,7 +387,7 @@ int main() {
     if (wrote_hw) {
       const std::string html = read_file(
           hw_dir + "/" + v4l2diag::report_artifact_filename(naming_of(hardware), v4l2diag::ReportFormat::Html));
-      ok &= check(contains(html, "anvil"), "a hardware run does not name its Trigger Profile");
+      ok &= check(contains(html, "bench-rig"), "a hardware run does not name its Trigger Profile");
       ok &= check(!contains(html, "Not required (free-run)"), "a hardware run claims no Trigger Profile is required");
       remove_report_directory(hw_dir, hardware);
     }
@@ -648,8 +648,8 @@ int main() {
     run.kernel_version = "#1 SMP";
     run.run_id = "web-run-7";
     run.trigger_mode = v4l2diag::TriggerMode::Hardware;
-    run.trigger_profile_id = "anvil";
-    run.trigger_profile_file = "anvil.json";
+    run.trigger_profile_id = "bench-rig";
+    run.trigger_profile_file = "bench-rig.json";
     v4l2diag::CameraRunResult camera;
     camera.camera_path = "/dev/video0";
     camera.role = "master";

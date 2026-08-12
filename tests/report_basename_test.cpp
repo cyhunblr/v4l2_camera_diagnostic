@@ -65,11 +65,11 @@ int main() {
                 "the free-run + default example changed: " +
                     v4l2diag::canonical_report_basename(naming(v4l2diag::TriggerMode::FreeRun, "", "")));
 
-    ok &=
-        check(v4l2diag::canonical_report_basename(naming(TriggerMode::Hardware, "anvil.json", "stress-test.json")) ==
-                  "2026-07-30_12-02-38_hardware-trigger_anvil_stress-test_v4l2_camera_diagnostic",
-              "the hardware-trigger example changed: " +
-                  v4l2diag::canonical_report_basename(naming(TriggerMode::Hardware, "anvil.json", "stress-test.json")));
+    ok &= check(
+        v4l2diag::canonical_report_basename(naming(TriggerMode::Hardware, "bench-rig.json", "stress-test.json")) ==
+            "2026-07-30_12-02-38_hardware-trigger_bench-rig_stress-test_v4l2_camera_diagnostic",
+        "the hardware-trigger example changed: " +
+            v4l2diag::canonical_report_basename(naming(TriggerMode::Hardware, "bench-rig.json", "stress-test.json")));
 
     ok &= check(v4l2diag::canonical_report_basename(naming(TriggerMode::Software, "softrig.json", "")) ==
                     "2026-07-30_12-02-38_software-trigger_softrig_default_v4l2_camera_diagnostic",
@@ -81,8 +81,8 @@ int main() {
   {
     // Even if a profile file is somehow set: free-run does not route, so naming it
     // would claim a routing the run never used.
-    const std::string named = v4l2diag::canonical_report_basename(naming(TriggerMode::FreeRun, "anvil.json", ""));
-    ok &= check(named.find("anvil") == std::string::npos, "free-run put a Trigger Profile in the name: " + named);
+    const std::string named = v4l2diag::canonical_report_basename(naming(TriggerMode::FreeRun, "bench-rig.json", ""));
+    ok &= check(named.find("bench-rig") == std::string::npos, "free-run put a Trigger Profile in the name: " + named);
     ok &= check(named == "2026-07-30_12-02-38_free-run_default_v4l2_camera_diagnostic",
                 "the free-run name is wrong when a profile file is present: " + named);
   }
@@ -97,11 +97,12 @@ int main() {
       const char *what;
     };
     const Case cases[] = {
-        {"anvil.json", "stress-test.json", "anvil", "stress-test", "plain filenames"},
-        {"anvil", "stress-test", "anvil", "stress-test", "already extensionless"},
-        {"/etc/v4l2diag/anvil.json", "/tmp/a/b/stress-test.json", "anvil", "stress-test", "absolute paths"},
-        {"../anvil.json", "./sub/stress-test.json", "anvil", "stress-test", "relative paths"},
-        {"anvil.tar.gz", "stress-test.config.json", "anvil.tar", "stress-test.config", "only the last extension"},
+        {"bench-rig.json", "stress-test.json", "bench-rig", "stress-test", "plain filenames"},
+        {"bench-rig", "stress-test", "bench-rig", "stress-test", "already extensionless"},
+        {"/etc/v4l2diag/bench-rig.json", "/tmp/a/b/stress-test.json", "bench-rig", "stress-test", "absolute paths"},
+        {"../bench-rig.json", "./sub/stress-test.json", "bench-rig", "stress-test", "relative paths"},
+        {"bench-rig.tar.gz", "stress-test.config.json", "bench-rig.tar", "stress-test.config",
+         "only the last extension"},
     };
     for (const auto &item : cases) {
       const std::string name =
@@ -145,9 +146,9 @@ int main() {
       const char *what;
     };
     const Case cases[] = {
-        {"anvil\r\nX-Injected: yes", "a CRLF header injection"},
-        {"anvil\nX-Injected: yes", "a bare LF"},
-        {"anvil\r", "a trailing CR"},
+        {"bench-rig\r\nX-Injected: yes", "a CRLF header injection"},
+        {"bench-rig\nX-Injected: yes", "a bare LF"},
+        {"bench-rig\r", "a trailing CR"},
         {"an\"vil", "a double quote"},
         {"an'vil", "a single quote"},
         {"an vil", "an embedded space"},
@@ -158,7 +159,7 @@ int main() {
         {"an*vil?", "shell globbing characters"},
         {"an|vil", "a pipe"},
         {"an$vil`", "shell expansion characters"},
-        {"anvil\x7f", "DEL"},
+        {"bench-rig\x7f", "DEL"},
     };
     for (const auto &item : cases) {
       // Every case here NORMALISES to something usable -- "an vil" becomes "an-vil" -- so
@@ -189,7 +190,7 @@ int main() {
       ok &= check(dmesg.rfind("_dmesg.log") != std::string::npos,
                   std::string("the dmesg name lost its suffix (") + item.what + ")");
       // And the run's identity is still recognisable rather than blanked out.
-      ok &= check(base.find("anvil") != std::string::npos || base.find("an-vil") != std::string::npos,
+      ok &= check(base.find("bench-rig") != std::string::npos || base.find("an-vil") != std::string::npos,
                   std::string("the name was destroyed rather than normalised (") + item.what + "): " + base);
     }
   }
@@ -212,7 +213,7 @@ int main() {
 
   // --- 6. Every artifact name comes from the one basename -----------------
   {
-    const v4l2diag::ReportNaming source = naming(TriggerMode::Hardware, "anvil.json", "stress-test.json");
+    const v4l2diag::ReportNaming source = naming(TriggerMode::Hardware, "bench-rig.json", "stress-test.json");
     const std::string base = v4l2diag::canonical_report_basename(source);
     ok &= check(v4l2diag::report_artifact_filename(source, v4l2diag::ReportFormat::Html) == base + ".html",
                 "the HTML artifact name is not the canonical base + .html");
@@ -222,7 +223,7 @@ int main() {
                 "the Markdown artifact name is not the canonical base + .md");
     // The DMESG log replaces the trailing "v4l2_camera_diagnostic" with "dmesg".
     ok &= check(
-        v4l2diag::dmesg_log_filename(source) == "2026-07-30_12-02-38_hardware-trigger_anvil_stress-test_dmesg.log",
+        v4l2diag::dmesg_log_filename(source) == "2026-07-30_12-02-38_hardware-trigger_bench-rig_stress-test_dmesg.log",
         "the DMESG name is wrong: " + v4l2diag::dmesg_log_filename(source));
     // The HTML <title> is the extensionless base.
     ok &= check(v4l2diag::report_document_title(source) == base,
@@ -251,9 +252,9 @@ int main() {
     // config, naming by id would produce "_default_" where the user's file is
     // "stress-test".
     const std::string by_file =
-        v4l2diag::canonical_report_basename(naming(TriggerMode::Hardware, "anvil.json", "stress-test.json"));
+        v4l2diag::canonical_report_basename(naming(TriggerMode::Hardware, "bench-rig.json", "stress-test.json"));
     const std::string by_id =
-        v4l2diag::canonical_report_basename(naming(TriggerMode::Hardware, "anvil.json", "default"));
+        v4l2diag::canonical_report_basename(naming(TriggerMode::Hardware, "bench-rig.json", "default"));
     ok &= check(by_file != by_id, "naming by filename and by id produced the same result, so the test proves nothing");
     ok &= check(by_file.find("stress-test") != std::string::npos, "the filename-based name lost the real file name");
 
@@ -283,7 +284,7 @@ int main() {
 
     // Resolving by id yields the real file, so the name is the user's file name and not
     // the id.
-    v4l2diag::ReportNaming from_registry = naming(TriggerMode::Hardware, "anvil.json", resolved);
+    v4l2diag::ReportNaming from_registry = naming(TriggerMode::Hardware, "bench-rig.json", resolved);
     ok &= check(v4l2diag::canonical_report_basename(from_registry).find("stress-test") != std::string::npos,
                 "the resolved file name did not reach the artifact name");
     ok &= check(v4l2diag::canonical_report_basename(from_registry).find("_harsh_") == std::string::npos,
@@ -299,7 +300,7 @@ int main() {
     }
     ok &= check(unknown.empty(), "an unknown id resolved to a file name");
     const std::string fallback =
-        v4l2diag::canonical_report_basename(naming(TriggerMode::Hardware, "anvil.json", unknown));
+        v4l2diag::canonical_report_basename(naming(TriggerMode::Hardware, "bench-rig.json", unknown));
     ok &= check(fallback.find("_default_") != std::string::npos,
                 "an unresolved config did not fall back to \"default\": " + fallback);
 
@@ -360,8 +361,8 @@ int main() {
 
       // Positive control: a resolvable profile still names the run. Without this the
       // checks above could pass because every triggered run throws.
-      const std::string named = v4l2diag::canonical_report_basename(naming(mode, "anvil.json", "stress-test.json"));
-      ok &= check(named.find("_anvil_") != std::string::npos,
+      const std::string named = v4l2diag::canonical_report_basename(naming(mode, "bench-rig.json", "stress-test.json"));
+      ok &= check(named.find("_bench-rig_") != std::string::npos,
                   std::string("a resolvable triggered run was not named: ") + named);
     }
 
@@ -372,10 +373,10 @@ int main() {
                 "free-run no longer omits the profile part: " + free_run);
     // A profile filename supplied under free-run is still ignored rather than rejected:
     // the run did not route, whatever was selected beforehand.
-    const std::string ignored =
-        v4l2diag::canonical_report_basename(naming(v4l2diag::TriggerMode::FreeRun, "anvil.json", "stress-test.json"));
-    ok &=
-        check(ignored.find("anvil") == std::string::npos, "free-run named a Trigger Profile it never used: " + ignored);
+    const std::string ignored = v4l2diag::canonical_report_basename(
+        naming(v4l2diag::TriggerMode::FreeRun, "bench-rig.json", "stress-test.json"));
+    ok &= check(ignored.find("bench-rig") == std::string::npos,
+                "free-run named a Trigger Profile it never used: " + ignored);
   }
 
   return ok ? 0 : 1;

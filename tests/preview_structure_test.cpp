@@ -421,7 +421,7 @@ int main() {
   v4l2diag::RunResult run;
   run.started_at_utc = "2026-08-09T01:08:08Z";
   run.trigger_mode = v4l2diag::TriggerMode::Hardware;
-  run.trigger_profile_file = "anvil.json";
+  run.trigger_profile_file = "bench-rig.json";
   run.threshold_config_file = "default.json";
   run.run_id = "preview-structure";
 

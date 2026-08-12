@@ -124,8 +124,8 @@ async function setField(user: ReturnType<typeof userEvent.setup>, label: RegExp,
 /** Fills the form. `role` is the canonical role the channel drives. */
 async function fillAndSave(user: ReturnType<typeof userEvent.setup>, role = "master") {
   await user.click(screen.getByTitle("New profile"));
-  await setField(user, /Profile ID/, "anvil");
-  await setField(user, /^Name/, "Anvil");
+  await setField(user, /Profile ID/, "bench-rig");
+  await setField(user, /^Name/, "Bench-rig");
   await setField(user, /Channel ID/, "channel-a");
   const roleSelect = screen.queryByLabelText(/Bind to role/);
   if (roleSelect && role) {
@@ -162,8 +162,8 @@ describe("ProfileSelectionPage create flow", () => {
     await fillAndSave(user);
 
     const profile = postedProfile(calls);
-    expect(profile.id).toBe("anvil");
-    expect(profile.name).toBe("Anvil");
+    expect(profile.id).toBe("bench-rig");
+    expect(profile.name).toBe("Bench-rig");
     expect(profile.defaults.trigger_mode).toBe("hardware");
     expect(profile.trigger_channels).toHaveLength(1);
     expect(profile.trigger_channels[0].id).toBe("channel-a");

@@ -82,12 +82,14 @@ std::string join(const std::vector<std::string> &values) {
 
 // A complete, valid v4 profile -- WITH report_formats, which is exactly what makes
 // it a legacy fixture (see plan 2.10.2b: only v4 legacy fixtures carry the field).
-std::string v4_profile(const std::string &id = "anvil", const std::string &extra = std::string()) {
+std::string v4_profile(const std::string &id = "bench-rig", const std::string &extra = std::string()) {
   return R"({
   "schema_version": 4,
-  "id": ")" + id + R"(",
-  "name": "Anvil",
-  "description": "hardware rig",)" + extra + R"(
+  "id": ")" +
+         id + R"(",
+  "name": "Bench-rig",
+  "description": "hardware rig",)" +
+         extra + R"(
   "defaults": {
     "trigger_mode": "hardware", "memory_backends": ["mmap"], "test_selectors": ["stable"],
     "report_formats": ["json", "html"], "trigger_rate_hz": 10.0, "pulse_width_ms": 5.0
@@ -130,17 +132,17 @@ int main() {
     ok &= check(report.usable_for_run(),
                 "a valid v4 profile whose only difference is report_formats is not usable for a run");
     ok &= check(!report.needs_user_input(), "a lossless v4 -> v5 migration asks for user input");
-    ok &= check(report.required.empty(), "the lossless migration produced required fields: {" +
-                                             join(report.required) + "}");
-    ok &= check(report.invalid.empty(), "the lossless migration produced invalid fields: {" +
-                                            join(report.invalid) + "}");
+    ok &= check(report.required.empty(),
+                "the lossless migration produced required fields: {" + join(report.required) + "}");
+    ok &=
+        check(report.invalid.empty(), "the lossless migration produced invalid fields: {" + join(report.invalid) + "}");
 
     // Reported with its old value, so the user can see what was discarded.
     ok &= check(has(report.dropped, "report_formats"),
                 "dropping report_formats was not reported: dropped={" + join(report.dropped) + "}");
-    ok &= check(has(report.dropped, "json") && has(report.dropped, "html"),
-                "the dropped report_formats report does not carry the old value: dropped={" +
-                    join(report.dropped) + "}");
+    ok &=
+        check(has(report.dropped, "json") && has(report.dropped, "html"),
+              "the dropped report_formats report does not carry the old value: dropped={" + join(report.dropped) + "}");
 
     // And the field is gone from the migrated profile.
     ok &= check(profile.schema_version == v4l2diag::kProfileSchemaVersion,
@@ -152,7 +154,7 @@ int main() {
     // "The original config file is never modified silently" survives from 2.4. The
     // exception makes the profile runnable; it does not make the loader a writer.
     const std::string dir = make_temp_dir();
-    const std::string path = dir + "/anvil.json";
+    const std::string path = dir + "/bench-rig.json";
     write_file(path, v4_profile());
     const std::string before = read_file(path);
 
@@ -160,7 +162,7 @@ int main() {
     ok &= check(registry.list_profiles().size() == 1,
                 "a valid v4 profile is not listed as runnable, got " + std::to_string(registry.list_profiles().size()));
     DeviceProfile fetched;
-    ok &= check(registry.get_profile("anvil", &fetched), "a valid v4 profile is not selectable by id");
+    ok &= check(registry.get_profile("bench-rig", &fetched), "a valid v4 profile is not selectable by id");
     ok &= check(read_file(path) == before, "loading a v4 profile rewrote the stored file");
 
     // The report still explains what happened.
@@ -182,8 +184,7 @@ int main() {
       ok &= check(after.find("\"schema_version\" : " + version) != std::string::npos ||
                       after.find("\"schema_version\": " + version) != std::string::npos,
                   "the saved file is not at schema v" + version);
-      ok &= check(after.find("report_formats") == std::string::npos,
-                  "the saved v5 file still writes report_formats");
+      ok &= check(after.find("report_formats") == std::string::npos, "the saved v5 file still writes report_formats");
     }
     unlink(path.c_str());
     rmdir(dir.c_str());
@@ -264,8 +265,8 @@ int main() {
     MigrationReport report;
     ok &= check(v4l2diag::migrate_profile_json(parse(v5), &profile, &report), "a v5 profile failed to load");
     ok &= check(report.state == ConfigVersionState::Current, "a v5 profile is not Current");
-    ok &= check(!report.changed(), "a v5 profile reported changes: migrated={" + join(report.migrated) +
-                                       "} dropped={" + join(report.dropped) + "}");
+    ok &= check(!report.changed(), "a v5 profile reported changes: migrated={" + join(report.migrated) + "} dropped={" +
+                                       join(report.dropped) + "}");
     ok &= check(report.usable_for_run(), "a v5 profile is not usable for a run");
 
     // Round-trips without the field reappearing.
@@ -303,8 +304,7 @@ int main() {
     DeviceProfile profile;
     MigrationReport report;
     v4l2diag::migrate_profile_json(parse(text), &profile, &report);
-    ok &= check(!report.lossless_upgrade,
-                "a v2 profile was treated as a lossless upgrade; the exception is v4-only");
+    ok &= check(!report.lossless_upgrade, "a v2 profile was treated as a lossless upgrade; the exception is v4-only");
     ok &= check(!report.usable_for_run(), "an otherwise-complete v2 profile became runnable");
     ok &= check(report.needs_user_input(), "an otherwise-complete v2 profile does not ask for review");
   }
@@ -317,9 +317,9 @@ int main() {
     DeviceProfile profile;
     MigrationReport report;
     v4l2diag::migrate_profile_json(parse(v4_profile("stray", R"(
-  "enabled": false,)")), &profile, &report);
-    ok &= check(!report.lossless_upgrade,
-                "a v4 profile with an extra dropped field was treated as a lossless upgrade");
+  "enabled": false,)")),
+                                   &profile, &report);
+    ok &= check(!report.lossless_upgrade, "a v4 profile with an extra dropped field was treated as a lossless upgrade");
   }
 
   // --- 9. A v4 file with no report_formats needs nothing dropped ----------
@@ -333,8 +333,8 @@ int main() {
     DeviceProfile profile;
     MigrationReport report;
     v4l2diag::migrate_profile_json(parse(text), &profile, &report);
-    ok &= check(!has(report.dropped, "report_formats"),
-                "a v4 file without report_formats still reported it as dropped");
+    ok &=
+        check(!has(report.dropped, "report_formats"), "a v4 file without report_formats still reported it as dropped");
     ok &= check(report.usable_for_run(), "a lean v4 profile is not usable for a run");
     ok &= check(!report.needs_user_input(), "a lean v4 profile asks for user input");
   }

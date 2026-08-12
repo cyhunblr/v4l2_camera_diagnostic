@@ -99,6 +99,30 @@ TestStatus multi_buffer_verdict(const std::vector<MultiBufferOutcome> &outcomes)
 // actually describes.
 TestStatus pollerr_recovery_verdict(bool dqbuf_failed, bool restreamon_ok, int recovery_ok, int min_recovery_ok);
 
+// Records the settings a test runs with, as the "key: value" detail lines the report's Test
+// Configuration section reads. Keyed on `test->id`, using the same default parameter and threshold
+// tables the test bodies resolve through -- so the report states the values the run actually used.
+//
+// Separate from the test bodies because those need a real V4L2 device: this is the part that can be
+// exercised without one, and tests/test_configuration_contract_test.cpp checks its output against
+// the rows the approved previews specify. Runners call it once at entry; calling it again is
+// harmless but appends duplicates, so it is called from one place per test.
+//
+// `configured` overrides the built-in defaults where the run was given explicit values (the
+// threshold config file, the trigger profile); pass empty maps to record the defaults.
+void record_run_parameters(TestResult *test, const TestThresholds &configured_thresholds = {},
+                           const TestThresholds &configured_params = {});
+
+// Records a Test Configuration row whose value the run COMPUTED rather than was given -- the
+// `derived` source kind the approved previews use for t17's "Sizeimage", t18's "Controls
+// discovered", t19's "Pixel format" and the rest.
+//
+// Separate from record_run_parameters() because the value is only known once the test body has
+// run: it cannot come from the parameter tables. Called from the body, after the measurement it
+// reports. `unit` is the display unit ("mebibytes", "milliseconds", "" for a bare count).
+void record_derived_config(TestResult *test, const std::string &label, const std::string &value,
+                           const std::string &unit = "");
+
 // One pulse width in the t16 sweep.
 struct PulseWidthOutcome {
   int width_ms = 0;

@@ -51,7 +51,7 @@ v4l2diag::RunResult sample() {
   result.output_directory = "/tmp/reports/run-1";
   result.run_mode = v4l2diag::RunMode::Sequential;
   result.trigger_mode = v4l2diag::TriggerMode::Hardware;
-  result.trigger_profile_id = "anvil";
+  result.trigger_profile_id = "bench-rig";
   result.trigger_rate_hz = 12.5;
   result.pulse_width_ms = 3.25;
   {
@@ -183,9 +183,9 @@ int main() {
         ok &= check(test.notes.size() == 1, "the test notes did not round-trip");
         ok &= check(test.warnings.size() == 1, "the test warnings did not round-trip");
         if (check(test.metrics.size() == 1, "the test metrics did not round-trip")) {
-          ok &= check(test.metrics[0].name == "latency_mean" && test.metrics[0].value == 4.25 &&
-                          test.metrics[0].unit == "ms",
-                      "a metric did not round-trip intact");
+          ok &= check(
+              test.metrics[0].name == "latency_mean" && test.metrics[0].value == 4.25 && test.metrics[0].unit == "ms",
+              "a metric did not round-trip intact");
         }
       }
     }
@@ -233,9 +233,9 @@ int main() {
     ok &= check(restored.cameras.empty() || restored.cameras[0].role.empty(),
                 "a camera role was invented for a legacy artifact");
     const v4l2diag::RunResult untouched;
-    ok &= check(restored.trigger_rate_hz == untouched.trigger_rate_hz &&
-                    restored.pulse_width_ms == untouched.pulse_width_ms,
-                "trigger timing was taken from a legacy artifact's per-camera fields");
+    ok &= check(
+        restored.trigger_rate_hz == untouched.trigger_rate_hz && restored.pulse_width_ms == untouched.pulse_width_ms,
+        "trigger timing was taken from a legacy artifact's per-camera fields");
   }
 
   // --- 7. A newer schema is refused, not parsed as current ---------------
@@ -265,8 +265,7 @@ int main() {
       std::string error;
       ok &= check(!v4l2diag::run_result_from_json(bad, &restored, &error),
                   "result_schema_version " + std::to_string(version) + " was accepted");
-      ok &= check(!error.empty(),
-                  "result_schema_version " + std::to_string(version) + " was refused without a reason");
+      ok &= check(!error.empty(), "result_schema_version " + std::to_string(version) + " was refused without a reason");
     }
     // Non-integral too.
     for (const char *text : {R"("one")", R"(1.5)", R"(null)", R"([1])"}) {
@@ -353,14 +352,14 @@ int main() {
     std::string error;
     ok &= check(!v4l2diag::run_result_from_json(bad, &restored, &error),
                 "an unknown memory backend was silently dropped instead of refused");
-    ok &= check(error.find("papyrus") != std::string::npos,
-                "the refusal does not name the offending backend: " + error);
+    ok &=
+        check(error.find("papyrus") != std::string::npos, "the refusal does not name the offending backend: " + error);
   }
 
   // --- 7f. role_bindings entries must be well-formed ---------------------
   {
-    for (const char *entry : {R"(["master"])", R"([{"role": "master"}])",
-                              R"([{"trigger_channel_id": "gpio-0"}])", R"([{"role": "", "trigger_channel_id": ""}])"}) {
+    for (const char *entry : {R"(["master"])", R"([{"role": "master"}])", R"([{"trigger_channel_id": "gpio-0"}])",
+                              R"([{"role": "", "trigger_channel_id": ""}])"}) {
       Json::Value bad = doc;
       bad["role_bindings"] = parse(entry);
       v4l2diag::RunResult restored;

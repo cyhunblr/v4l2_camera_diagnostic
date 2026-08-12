@@ -339,7 +339,7 @@ HTML, JSON, Markdown, `<title>`, Export linkleri **ve** DMESG adi ayni
 `canonical_report_basename()` sonucundan turer. Ayri string birlestirme kopyasi
 olusturulmaz.
 
-Testle kilitlenen ornekler: free-run + default; hardware-trigger + anvil +
+Testle kilitlenen ornekler: free-run + default; hardware-trigger + bench-rig +
 stress-test; software-trigger; uzantili config filename; path iceren filename
 girdisinin yalniz basename'e indirgenmesi; bos/uygunsuz filename icin guvenli
 fallback.
@@ -391,10 +391,10 @@ Free-run ornegi:
 Hardware-trigger ornegi:
 
 ```text
-2026-07-30_12-02-38_hardware-trigger_anvil_stress-test_v4l2_camera_diagnostic.html
-2026-07-30_12-02-38_hardware-trigger_anvil_stress-test_v4l2_camera_diagnostic.json
-2026-07-30_12-02-38_hardware-trigger_anvil_stress-test_v4l2_camera_diagnostic.md
-2026-07-30_12-02-38_hardware-trigger_anvil_stress-test_dmesg.log
+2026-07-30_12-02-38_hardware-trigger_bench-rig_stress-test_v4l2_camera_diagnostic.html
+2026-07-30_12-02-38_hardware-trigger_bench-rig_stress-test_v4l2_camera_diagnostic.json
+2026-07-30_12-02-38_hardware-trigger_bench-rig_stress-test_v4l2_camera_diagnostic.md
+2026-07-30_12-02-38_hardware-trigger_bench-rig_stress-test_dmesg.log
 ```
 
 ### 3.6. Rapor ici duzeltmeler
@@ -769,7 +769,7 @@ oturmadi" dalini `stabilized = true` yapinca build exit 0, test yakaladi.
 ## Faz 6 — Cihaz kosumu bulgulari: stilsiz sinif ailesi ve SKIP govdesi
 
 Durum: `ACIK`. Kaynak: kullanicinin 2026-08-09 cihaz kosumu
-(`hardware-trigger_anvil_default`, run `1786271499-87889`) ve o rapor uzerinde
+(`hardware-trigger_bench-rig_default`, run `1786271499-87889`) ve o rapor uzerinde
 yapilan olcum. Kural 10'un ucuncu seviyesi ilk kez veri uretti.
 
 ### 6.1. Decision Lock (P1)

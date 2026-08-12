@@ -117,7 +117,7 @@ int main() {
 
   // --- 1. Four actions, the approved labels, the approved order -----------
   {
-    const v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::Hardware, "anvil.json", "stress-test.json");
+    const v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::Hardware, "bench-rig.json", "stress-test.json");
     const std::string directory = make_temp_dir();
     const std::string html = write_and_read(run, directory, &ok);
 
@@ -210,12 +210,12 @@ int main() {
 
   // --- 4. The artifacts carry the canonical name, not the old fixed one --
   {
-    const v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::Hardware, "anvil.json", "stress-test.json");
+    const v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::Hardware, "bench-rig.json", "stress-test.json");
     const std::string directory = make_temp_dir();
     ok &= !write_and_read(run, directory, &ok).empty();
 
     // The exact name from plan 3.5's locked examples.
-    const std::string base = "2026-07-30_12-02-38_hardware-trigger_anvil_stress-test_v4l2_camera_diagnostic";
+    const std::string base = "2026-07-30_12-02-38_hardware-trigger_bench-rig_stress-test_v4l2_camera_diagnostic";
     for (const char *extension : {".html", ".json", ".md"}) {
       std::ifstream file(directory + "/" + base + extension);
       ok &= check(file.good(), std::string("missing canonically named artifact: ") + base + extension);
@@ -234,7 +234,7 @@ int main() {
     // The disabled-button model is GONE (implementation-plan 3.4, decision 2026-08-08).
     // DMESG is written alongside the other artifacts when the tests finish, so the report
     // links to a file that already exists instead of asking a server for it at click time.
-    const v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::Hardware, "anvil.json", "stress-test.json");
+    const v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::Hardware, "bench-rig.json", "stress-test.json");
     const std::string directory = make_temp_dir();
     const std::string html = write_and_read(run, directory, &ok);
 
@@ -309,7 +309,7 @@ int main() {
 
   // --- 5b. Print hides the export row -------------------------------------
   {
-    const v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::Hardware, "anvil.json", "stress-test.json");
+    const v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::Hardware, "bench-rig.json", "stress-test.json");
     const std::string directory = make_temp_dir();
     const std::string html = write_and_read(run, directory, &ok);
 
