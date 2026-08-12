@@ -14,9 +14,11 @@ Iki belgelik yapinin ilk parcasidir; her karar **tek** bir dosyada yasar:
 | `docs/report-ui-design-spec.md` (bu belge) | ne gorunmeli |
 | `docs/implementation-plan.md` | ne yapilacak |
 
-Ucuncu parca `docs/renderer-data-contract.md` idi; 2026-08-12'de kullanici
-karariyla kaldirildi. "Hangi veri, hangi test" sorusunu artik
-`docs/assets/refactored_previews/` icindeki 26 onayli preview yanitlar.
+Ucuncu parca `docs/renderer-data-contract.md` idi; onay araci olan 26 preview HTML
+ile birlikte 2026-08-12'de kullanici karariyla kaldirildi. "Hangi veri, hangi
+test" sorusunu artik sozlesme testleri yanitlar:
+`test_configuration_contract`, `report_card_contract`, `test_content_registry`,
+`metric_name_contract`.
 >
 > **Software-trigger notu:** Software-trigger raporu hardware-trigger ile ayni
 > kart yapisini kullanir. Fark yalnizca trigger timing etiketleri ve bazi
@@ -51,8 +53,7 @@ referans rapordaki gercek degerlerle render edilecek.
 0.6. Kullanici onizlemeyi tarayicida acar ve gorsel dogrulama yapar.
 Sonuc `OK` veya `NOT-OK` (geri bildirimle birlikte) olarak bildirilir.
 
-0.6.1. `assets/refactored_previews/` dizininde **PNG/screenshot uretilmez**.
-Dizin yalnizca HTML ve CSS tasir. Gorsel dogrulama 0.6'daki gibi kullanicinin
+0.6.1. Ajan **PNG/screenshot uretmez**. Gorsel dogrulama 0.6'daki gibi kullanicinin
 tarayicisinda yapilir; ajanin headless render alip PNG commit etmesi bu akisin
 parcasi degildir. Uretilmis PNG varsa silinir.
 
@@ -365,9 +366,9 @@ renderer'a uygulandi.
 **Bu bolumun ayrintili metni kaldirildi.** Teste ozgu tasarim kararlari artik
 iki yerde yasiyor ve ikisi de bu metinden daha guvenilir:
 
-- `docs/assets/refactored_previews/t01..t26-preview.html` — 26 onaylı preview,
-  uc trigger modu. Tasarimin **kendisi**, tarifi degil. Her testin bolumleri,
-  tablo sutun imzalari ve metric adlari buradan okunur.
+- Sozlesme testleri — her testin bolumleri, tablo sutun imzalari ve metric
+  adlari orada kilitli. Onay araci olan 26 preview HTML (uc trigger modu)
+  2026-08-12'de kaldirildi; tasarim onaylandiktan sonra kaydi bu testlerdir.
 
 Sozlesme ayrica testle kilitli: `report_card_contract` (S1-S8 yapisal
 sozlesme, 26 testi kapsayan fixture) ve `metric_name_contract` (renderer'in

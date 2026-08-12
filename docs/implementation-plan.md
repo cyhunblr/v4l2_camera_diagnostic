@@ -9,9 +9,10 @@ ureticisi (`source/backend/core/report_writer.cpp`), test/threshold registry'ler
 ve bunlarin dokundugu hw davranislari.
 
 Bu belge **ne yapilacak** sorusunu yanitlar. Tasarim otoritesi
-`docs/report-ui-design-spec.md`, veri sozlesmesi ise
-`docs/assets/refactored_previews/` icindeki 26 onayli preview'dir
-(`renderer-data-contract.md` 2026-08-12'de kullanici karariyla kaldirildi);
+`docs/report-ui-design-spec.md`, veri sozlesmesi ise sozlesme testleridir
+(`test_configuration_contract`, `report_card_contract`, `test_content_registry`,
+`metric_name_contract`). Onay araci olan 26 preview HTML ve
+`renderer-data-contract.md` 2026-08-12'de kullanici karariyla kaldirildi;
 bu belge onlari uygulamaya cevirir ve onlarla **celisemez**. Bir tasarim kurali buraya kopyalanmaz, atif verilir.
 
 Durum (2026-08-08): Faz 0-5 uygulandi; kalan is §6'da. Bitirilen fazlarin
@@ -455,7 +456,8 @@ Bu turda ayrica kapatildi:
 Fixture/runner boslugu backend'de olculdu ve **bosluk degil, ad uyusmazligi**
 oldugu bulundu. Bu, bu fazin en onemli bulgusudur.
 
-Olcum: `docs/assets/source-render/fixtures.py` 133 metrik adi tasiyor,
+Olcum (o tarihte, dizin 2026-08-12'de kaldirildi): `source-render/fixtures.py`
+133 metrik adi tasiyor,
 `diagnostic_runner.cpp` 150 ad uretiyor, **ortak olan 11**. Yani fixture,
 runner'in adlarini degil renderer'in **tahminlerini** tasiyordu. Her rapor
 fixture'dan tam gorunuyor, ayni renderer gercek bir kosumda sutunu bosaltiyordu.
@@ -489,8 +491,8 @@ runner'in bu metrikleri kaydedip kaydetmedigi olculmelidir — fixture'i hedefe
 gore doldurmak renderer'i kanitlamaz.
 
 Girdi: `docs/report-ui-design-spec.md` §"Section ve Grafik Sozlesmesi"
-(S1-S10) ve `docs/assets/refactored_previews/t01..t26-preview.html`
-(26 dosya, tasarim onaylandi 2026-08-07).
+(S1-S10) ve 26 onayli preview HTML (tasarim onaylandi 2026-08-07; dosyalar
+onay tamamlandiktan sonra 2026-08-12'de kaldirildi).
 
 **Onemli:** preview'lerin onaylanmasi implementation degildir (CLAUDE.md
 Kural 4). Bu faz kapanmadan sozlesme uygulanmis sayilmaz.
@@ -637,9 +639,8 @@ exit code ayrica olculdu (Kural 9):
 aldigi kosum sonucuyla yapilir: kullanici raporu paylasir, kontrol o zaman
 yapilir. Bu gerceklesene kadar madde `UYGULANDI` kalir, `DOGRULANDI` olmaz.
 
-`docs/assets/source-render/` su an arac dizinidir ve hedefi eski
-`docs/assets/previews` setidir; `refresh.sh`/`manifest_check.py` kapisi bu
-fazda **kullanilmadi** (bkz. o dizinin README'si).
+`source-render/` bir arac diziniydi ve `refresh.sh`/`manifest_check.py` kapisi bu
+fazda **kullanilmadi**; dizin 2026-08-12'de kaldirildi.
 
 ---
 
@@ -866,9 +867,11 @@ niteliklerinin **hicbirinde** virgul yok.
 
 Durum: `UYGULANDI` (2026-08-09).
 
-Onaylı kabuk `docs/assets/refactored_previews/detailed-result-card.css`
-dosyasidir; preview'ler onu `<link>` ile cagirir ve uzerine kendi
-`<style>`'lariyla ekleme yapar. Karsilastirma **o dosyaya** karsi yapildi.
+Onaylı kabuk o tarihte `refactored_previews/detailed-result-card.css`
+dosyasiydi; preview'ler onu `<link>` ile cagirir ve uzerine kendi
+`<style>`'lariyla ekleme yapardi. Karsilastirma **o dosyaya** karsi yapildi.
+Kabuk artik `report_css_contract` testinde kilitli; preview seti 2026-08-12'de
+kaldirildi.
 
 Kart, header, `h2`, `status`, `duration`, `section` ve `item-label`
 kurallari **birebir ayni** cikti. Iki gercek fark vardi:

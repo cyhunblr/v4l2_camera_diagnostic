@@ -26,23 +26,19 @@ body, DOM, dosya, callback, command count veya piksel ciktisi.
 Bir maddede acik fark, eksik renderer, basarisiz test veya **bekleyen kullanici
 gorsel onayi** varsa tamamlandi denmez. Dogru ara statu kullanilir.
 
-### 4. "Preview degismedi" implementation tamamlandi demek degildir
+### 4. Dosya degismedi implementation tamamlandi demek degildir
 
-Onaylı preview dosyalarinin degismemesi, canli renderer'in o icerigi urettigini
+Bir fixture'in veya kaynak dosyanin degismemesi, canli renderer'in o icerigi urettigini
 **kanitlamaz**. Uygulama, production `write_reports()` ciktisi uzerinde olculur.
-
-Kanit manifesti **iki yonlu** dogrulanir: README'nin adlandirdigi her dosya var
-mi, ve dizindeki her dosya adlandirilmis mi. Tek yonlu kontrol, tabloda yazili
-olup dosyasi olmayan bir artifact'i gecirir.
 
 ### 4b. Fazlalik da bir sapmadir
 
-Onaylı preview'de olmayan bir grafik, tablo veya bolum "fazlalik" diye kabul
+Onaylanmis tasarimda olmayan bir grafik, tablo veya bolum "fazlalik" diye kabul
 edilemez: rapor musteriye gidiyor ve orada onaylanmamis icerik bulunuyor.
 Eksik icerik gibi bu da kaldirilir veya onaya sunulur.
 
 Gercek ornek: chart selector `_mean_ms`/`_p95_ms`/`_max_ms` ailesini otomatik
-sectigi icin sekiz test preview'inde bulunmayan bir nokta grafigi uretiyordu.
+sectigi icin onaylanmamis bir nokta grafigi uretiyordu (sekiz test).
 
 ### 4c. Icerik kaldirirken yan etkiyi ara
 
@@ -52,18 +48,23 @@ icindeydi, yani grafiksiz testlerde artik hic uretilmiyordu.
 
 ### 5. Onaylı icerik kapsam disina cikarilamaz
 
-Preview'deki teste ozgu tablo, grafik ve aciklamalar acikca onaylandiysa generic
-fallback ile degistirilemez. "Teste ozgu kalir" ifadesi bunlarin kapsam disi
-birakilmasi anlamina **gelmez**; ortak dis kabugun icinde teste ozgu renderer
-bulunmasi anlamina gelir.
+Onaylanmis teste ozgu tablo, grafik ve aciklamalar generic fallback ile
+degistirilemez. "Teste ozgu kalir" ifadesi bunlarin kapsam disi birakilmasi
+anlamina **gelmez**; ortak dis kabugun icinde teste ozgu renderer bulunmasi
+anlamina gelir.
 
 ### 6. Karar otoritesi sirasi zorunludur
 
 1. Kullanicinin en son acik karari
 2. `docs/report-ui-design-spec.md`
 3. `docs/implementation-plan.md`
-4. Preview artifact'leri
+4. Testlerde kilitli sozlesmeler (`report_card_contract`,
+   `test_configuration_contract`, `report_css_contract`, `metric_name_contract`)
 5. Mevcut kaynak kod
+
+Onay araci olan preview HTML'leri 2026-08-12'de kullanici karariyla kaldirildi:
+gorevleri tamamlandi ve onaylanan tasarim yukaridaki 4. siradaki testlerde
+kilitli. Bir tasarim sorusunun cevabi artik o testlerin tablolarindadir.
 
 Alt siradaki kaynak ust siradaki karari **daraltamaz**. Kaynak kodun bir seyi
 yapmiyor olmasi, o seyin istenmedigi anlamina gelmez.
@@ -123,8 +124,8 @@ bolumu gecerlidir. Ozetle:
   **raporlanir**, duzeltilmez.
 - **P5** Tamamlandi demeden once Conformance Matrix.
 - **P6** Plan statusu kendiliginden yukseltilmez
-  (preview → `ONAY BEKLIYOR`; kullanici onayi → `TASARIM ONAYLANDI`;
-  kod+test → `UYGULANDI`/`DOGRULANDI`).
+  (kullanici onayi → `TASARIM ONAYLANDI`; kod+test → `UYGULANDI`;
+  cihaz kosumu → `DOGRULANDI`).
 - **P7** Yetki sirasi: yukaridaki Kural 6.
 - **P8** Sabotaj testleri reddedilen yerlesimlerin geri gelmedigini de
   dogrular; her sabotajda build exit code kontrol edilir.
@@ -133,7 +134,6 @@ bolumu gecerlidir. Ozetle:
 
 - `docs/report-ui-design-spec.md` **kullanicinin belgesidir**. Degistirmeden
   once sorulur; celiski cozulmez, yuzeye cikarilir.
-- Onaylı test icerigi preview'lerde degistirilmez.
 - Korlemesine toplu replace yapilmaz. Gercek PDF referanslari
   (`Export PDF`, `.pdf` dosya adlari, browser-print metni) korunur.
 - markdownlint: MD012 global olarak kapatilmaz;
@@ -181,40 +181,3 @@ cmake --build build-strict -j8 && (cd build-strict && ctest)
 
 `ctest --test-dir build-strict` bu projede test bulamaz; `build-strict` icinden
 calistirilir.
-
-Kanit dizini uretildiyse manifest de dogrulanir — kanit kendi manifestiyle
-tutarli olmadan gorsel onaya sunulamaz:
-
-```sh
-python3 docs/assets/source-render/manifest_check.py
-```
-
-## Kanit dizini tazeligi
-
-> **Durum 2026-08-08:** `docs/assets/source-render/` su an **arac dizinidir**;
-> uretilmis PNG/PDF/txt yoktur. Eski artifact'ler `docs/assets/previews/`
-> setine karsi olculmustu, o dizin artik yok. Yeni hedef
-> `docs/assets/refactored_previews/`; artifact'ler Faz 3b'de uretilecek.
-> Asagidaki kural o uretimden itibaren yeniden yururluge girer.
-
-`docs/assets/source-render/` icindeki her PNG/PDF/txt, **committed** kod
-tarafindan uretilmis olmali — ara denemeler icin `/tmp` kullanilir, bu dizin
-degil. Bir renderer/fixture degisikligi yapildiktan sonra kanit dizinine
-donmeden once mutlaka:
-
-```sh
-docs/assets/source-render/refresh.sh
-```
-
-calistirilir. Aksi halde dizin, artik var olmayan bir build'in kanitini tasir
-ve dosya adinda bunu soyleyen bir sey olmaz — Kural 4 tam bu hatayi tarif eder.
-
-Tazeligin kaniti: `refresh.sh`'i tekrar calistirip ciktinin (`md5sum`) veya
-`deviation-inventory.txt`'nin degismedigini gostermek. Degisirse committed
-dosyalar bayattir ve refresh sonucuyla degistirilir.
-
-## Preview render
-
-Chrome surumu **tam olarak** kaydedilir (`docs/assets/previews/RENDER.md`);
-render byte duzeyinde surume baglidir. `--hide-scrollbars` **zorunludur**:
-atlanirsa sayfa genisligi 1280 yerine 1265 olur ve her olcum kayar.

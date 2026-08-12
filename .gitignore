@@ -3,13 +3,10 @@
 /build-*/
 /Testing/
 
-# Docs
-/docs/assets/
-
 # Generated diagnostic reports
 /reports/*
-# Reports rendered from a fixture for preview comparison. Reproducible from the
-# committed tests/data/*.json, so the rendered HTML is never the evidence itself.
+# Reports produced by a real device run and dropped here for review. Never evidence
+# on their own: a report is measured against the contract tests, not against a file.
 /output/
 
 # Local device profiles (never commit hardware-specific wiring)

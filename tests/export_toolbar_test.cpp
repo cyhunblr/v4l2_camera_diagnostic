@@ -50,6 +50,44 @@ std::string make_temp_dir() {
   return path == nullptr ? std::string() : std::string(path);
 }
 
+// Forces `journalctl` to succeed or fail, whatever the machine underneath provides.
+//
+// Every DMESG assertion here used to depend on the HOST having a readable journal: the report links
+// to a kernel log only when one could be read, which is correct behaviour, so on a machine without
+// a journal the test failed while the code was right. CI runs each backend leg inside a bare
+// `ubuntu:*` container -- systemd is installed but there is no journal for the container's own boot
+// -- so these three checks failed there for every commit while passing on a developer laptop.
+//
+// A stub on PATH makes the environment an INPUT instead of an assumption. Both directions are
+// exercised: `available` for the linked-artifact case, and the failing stub for section 5a.
+class JournalStub {
+ public:
+  JournalStub(bool available, const std::string &directory) : directory_(directory) {
+    const char *path = getenv("PATH");
+    saved_path_ = path == nullptr ? std::string() : path;
+    {
+      std::ofstream stub(directory_ + "/journalctl");
+      // The reader keeps the output only when the command exits 0 AND wrote something, so a
+      // successful stub has to print a line.
+      stub << (available ? "#!/bin/sh\necho 'kernel: stub log line'\nexit 0\n" : "#!/bin/sh\nexit 1\n");
+    }
+    chmod((directory_ + "/journalctl").c_str(), 0755);
+    setenv("PATH", (directory_ + ":" + saved_path_).c_str(), 1);
+  }
+
+  ~JournalStub() {
+    setenv("PATH", saved_path_.c_str(), 1);
+    unlink((directory_ + "/journalctl").c_str());
+  }
+
+  JournalStub(const JournalStub &) = delete;
+  JournalStub &operator=(const JournalStub &) = delete;
+
+ private:
+  std::string directory_;
+  std::string saved_path_;
+};
+
 std::string read_file(const std::string &path) {
   std::ifstream in(path);
   std::ostringstream out;
@@ -119,6 +157,9 @@ int main() {
   {
     const v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::Hardware, "bench-rig.json", "stress-test.json");
     const std::string directory = make_temp_dir();
+    // The DMESG control exists only when a kernel log could be written, so the journal is forced
+    // available rather than assumed. Without this the four-label check depends on the host.
+    const JournalStub journal(true, make_temp_dir());
     const std::string html = write_and_read(run, directory, &ok);
 
     // The final label is "Export PDF". "Export as PDF" was a leftover from plan 2.2 and
@@ -236,6 +277,7 @@ int main() {
     // links to a file that already exists instead of asking a server for it at click time.
     const v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::Hardware, "bench-rig.json", "stress-test.json");
     const std::string directory = make_temp_dir();
+    const JournalStub journal(true, make_temp_dir());
     const std::string html = write_and_read(run, directory, &ok);
 
     v4l2diag::ReportNaming naming;
@@ -279,21 +321,14 @@ int main() {
     // its three mandatory artifacts, and the report must offer no DMESG control at all.
     // The alternative -- rendering the link anyway -- is a 404 the reader finds by
     // clicking, which is exactly what the disabled button used to prevent.
-    const std::string saved_path = getenv("PATH") == nullptr ? std::string() : getenv("PATH");
     const std::string stub_dir = make_temp_dir();
-    {
-      std::ofstream stub(stub_dir + "/journalctl");
-      stub << "#!/bin/sh\nexit 1\n";
-    }
-    chmod((stub_dir + "/journalctl").c_str(), 0755);
-    setenv("PATH", (stub_dir + ":" + saved_path).c_str(), 1);
-
     const v4l2diag::RunResult run = run_of(v4l2diag::TriggerMode::FreeRun, "", "");
     const std::string directory = make_temp_dir();
-    const std::string html = write_and_read(run, directory, &ok);
-
-    setenv("PATH", saved_path.c_str(), 1);
-    unlink((stub_dir + "/journalctl").c_str());
+    std::string html;
+    {
+      const JournalStub journal(false, stub_dir);
+      html = write_and_read(run, directory, &ok);
+    }
     rmdir(stub_dir.c_str());
 
     ok &= check(!contains(html, "Export DMESG"),

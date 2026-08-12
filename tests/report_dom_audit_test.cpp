@@ -333,7 +333,7 @@ int main() {
   // --- 6.12b.7: the @page A4 geometry is present ------------------------
   {
     // The remaining 6.12b checks need a real layout engine and live in the render harness
-    // (docs/assets/source-render). The geometry declaration itself is checkable here.
+    // (a headless-Chrome render). The geometry declaration itself is checkable here.
     ok &= check(contains(html, "@page") && contains(html, "size: A4") && contains(html, "margin: 12mm 10mm 14mm"),
                 "the approved @page geometry is missing");
   }

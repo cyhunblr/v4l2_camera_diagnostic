@@ -11,9 +11,12 @@
 //     parameters were recorded", while every one of them had already resolved its parameters
 //     through tpv()/thv() -- the values were in the runner's locals and never written down.
 //
-// The expectations below are read from docs/assets/refactored_previews/*.html: every
-// `<div class="config-row">` label of each preview's HARDWARE-TRIGGER card, in order. The previews
-// are the design authority (project rule 6), so this table is transcribed, not invented.
+// The expectations below were transcribed from the 26 approved preview HTMLs, one
+// `<div class="config-row">` per row of each preview's HARDWARE-TRIGGER card, in order. Those files
+// were an approval instrument and were removed on 2026-08-12 once the design was signed off, so
+// THIS TABLE is now the record of what was approved -- it is the authority, not a copy of one.
+// Changing a row here changes what the product is allowed to render, so it changes only on an
+// explicit design decision.
 //
 // Measured on the PRODUCTION path: the runner records, the renderer reads, and the assertion looks
 // at the rendered Variable cells. A renderer-only fixture would pass while a real run stayed

@@ -549,7 +549,7 @@ bool write_html(const RunResult &result, const std::string &path, bool dmesg_log
 <style>
 :root { --pass: #16a34a; --fail: #dc2626; --warn: #d97706; --skip: #64748b; }
 * { box-sizing: border-box; }
-/* The font stack the approved card shell declares (docs/assets/refactored_previews/
+/* The font stack the approved card shell declares (locked in report_css_contract_test.cpp,
    detailed-result-card.css): 'ui-sans-serif, system-ui' sit between Inter and the
    platform fallbacks, so a machine without Inter lands on the OS UI face rather than
    skipping straight to -apple-system. Production omitted both keywords.

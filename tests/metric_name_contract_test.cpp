@@ -1,7 +1,7 @@
 // The renderer may only ask for metric names the runner actually records.
 //
 // This is a SOURCE-level check, deliberately. A fixture cannot catch the defect it
-// exists to model: docs/assets/source-render/fixtures.py carried 133 metric names, and
+// exists to model: a render fixture carried 133 metric names, and
 // only 11 of them were names diagnostic_runner.cpp ever emits. Every report rendered
 // from that fixture looked complete while the same renderer, fed a real run, would have
 // printed "Unavailable" down the column.

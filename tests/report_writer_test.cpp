@@ -406,7 +406,7 @@ int main() {
   // that does. What this report proves is that the generic sweep chart is gone.
   // The edge-latency chart is not asserted here: this fixture's t16 records only hits_*,
   // so no lat_high_avg_* series exists to chart. It is covered by the conformance render,
-  // which supplies the full sweep (docs/assets/source-render/).
+  // which supplies the full sweep.
 
   // No chart for a test whose preview has none. Named individually so a regression says
   // which one came back.

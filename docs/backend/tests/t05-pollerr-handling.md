@@ -68,7 +68,7 @@ in `pollerr_recovery_verdict()` (`diagnostic_runner.hpp`) and is checked by
 `tests/verdict_rules_test.cpp`, which also verifies the test body delegates to it.
 
 Changed 2026-08-10 on the user's decision, resolving a conflict this table had with the
-approved `docs/assets/refactored_previews/t05-preview.html`: all three of its scenarios show
+approved t05 card design: all three of its scenarios show
 FAIL, and the hardware-trigger card words it "DQBUF was correctly rejected after STREAMOFF, but
 the restarted stream delivered no recovery frames (0/3)". A 2026-08-10 device run hit exactly
 that state and the report said WARN.

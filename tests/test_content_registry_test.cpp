@@ -104,7 +104,7 @@ struct Expectation {
 
 const Expectation kApproved[] = {
     // The columns each test's approved card names, read from the 26 previews in
-    // docs/assets/refactored_previews/. A renderer that renamed "Sizeimage" to "Size" would still
+    // the approved design, transcribed here. A renderer that renamed "Sizeimage" to "Size" would still
     // produce a plausible table, so the header text itself is the contract.
     //
     // Outcome/State are absent by design: a verdict lives in the Measurement Result

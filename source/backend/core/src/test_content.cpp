@@ -1169,7 +1169,7 @@ std::string measurement_items(const TestResult &test, const std::string &label, 
 }
 
 // The Measurement Result section for a test, built from its approved verdict rows
-// (docs/assets/refactored_previews/). Every row carries a Status -- that is what makes this
+// (locked in test_content_registry_test.cpp). Every row carries a Status -- that is what makes this
 // section the one place a reader looks to learn whether the numbers passed.
 //
 // A value the run never recorded reads "Unavailable" rather than being dropped: a missing

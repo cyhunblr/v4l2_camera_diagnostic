@@ -1,7 +1,7 @@
 // Locks the S1-S10 card contract from docs/report-ui-design-spec.md on the
 // HTML that write_reports() actually produces.
 //
-// The 26 approved previews in docs/assets/refactored_previews/ are the target;
+// The approved card design (26 previews, signed off and removed 2026-08-12) is the target;
 // this test states what the renderer must emit to match them. Each assertion
 // names the observed thing (a tag, a column header, a CSS class) rather than a
 // test title, so a green run means the markup was inspected, not that a
