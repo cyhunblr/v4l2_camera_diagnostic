@@ -890,14 +890,41 @@ bool is_measurement_key(const std::string &key) {
     const char *text;
   };
   static const MeasurementPrefix kPrefixes[] = {
-      {"cycle"}, {"evidence"}, {"probe"}, {"check"}, {"window"},  {"win"},     {"round"},
-      {"slot"},  {"variant"},  {"copy"},  {"delay"}, {"request"}, {"control"},
+      {"cycle"},
+      {"evidence"},
+      {"probe"},
+      {"check"},
+      {"window"},
+      {"win"},
+      {"round"},
+      {"slot"},
+      {"variant"},
+      {"copy"},
+      {"delay"},
+      {"request"},
+      {"control"},
+      // t13 writes its sweep as "coarse: 150ms -> 10/10" and "bsearch: 45ms -> 10/10" -- one line
+      // per probed timeout, so measurements. Neither key carries a number, so the name is the only
+      // marker; both reached the 2026-08-12 device run's Test Configuration as ten extra rows.
+      {"coarse"},
+      {"bsearch"},
   };
   const std::string lowered = lower_of(key);
   for (const auto &entry : kPrefixes) {
     const char *prefix = entry.text;
     const std::size_t len = std::strlen(prefix);
-    if (lowered.compare(0, len, prefix) != 0) {
+    // The prefix is looked for at any WORD boundary, not only at position 0: t13 writes
+    // "stability round 1: @45ms=10/10", where the marker word sits in the middle and the key was
+    // reaching the table as five extra rows on the 2026-08-12 device run. A boundary match keeps
+    // "Stability rounds" (a setting, no number after it) out of the filter.
+    std::size_t start = std::string::npos;
+    for (std::size_t at = 0; at + len <= lowered.size(); ++at) {
+      if ((at == 0 || lowered[at - 1] == ' ' || lowered[at - 1] == '_') && lowered.compare(at, len, prefix) == 0) {
+        start = at;
+        break;
+      }
+    }
+    if (start == std::string::npos) {
       continue;
     }
     // "window" alone is a measurement family; "Window size" is a setting. What separates them is a
@@ -907,10 +934,10 @@ bool is_measurement_key(const std::string &key) {
     // the runner started recording them: "Probe samples per timeout", "Window size" and "Round
     // deadline" all begin with a filtered prefix and are settings, not measurements. Requiring a
     // digit keeps the numbered lines out and lets the named settings through.
-    if (lowered.size() == len) {
-      return true;
+    if (start + len == lowered.size()) {
+      return start == 0;  // the key IS the family name ("window", "probe")
     }
-    std::size_t at = len;
+    std::size_t at = start + len;
     while (at < lowered.size() && lowered[at] == ' ') {
       ++at;
     }
@@ -1004,6 +1031,30 @@ std::string test_configuration_rows(const TestResult &test) {
     // not a setting. Listing it here put a sentence in the Value column under a "param" source.
     if (lower_of(key).find("note") != std::string::npos) {
       continue;
+    }
+    // An internal snake_case key is skipped ONLY when the same setting is already on the card under
+    // its approved display label. t13 keeps "production_timeout" because an Aggregate row reads it
+    // by name, and rendering both put "Production timeout" on the card twice.
+    //
+    // The check is against what THIS card already carries, not a blanket rule on snake_case: a
+    // runner key with no display-label counterpart ("capture_timeout" on the tests whose spec does
+    // not name it) is the only record of that setting and must still render.
+    if (key.find('_') != std::string::npos && key == lower_of(key)) {
+      std::string display = humanize(key);
+      bool already_shown = false;
+      for (const auto &other : test.details) {
+        const std::size_t other_colon = other.find(':');
+        if (other_colon == std::string::npos || other_colon == 0) {
+          continue;
+        }
+        if (trim_of(other.substr(0, other_colon)) == display) {
+          already_shown = true;
+          break;
+        }
+      }
+      if (already_shown) {
+        continue;
+      }
     }
     std::string value;
     std::string unit;

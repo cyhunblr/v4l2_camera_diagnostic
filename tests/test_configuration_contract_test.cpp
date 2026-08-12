@@ -293,6 +293,61 @@ int main() {
           std::string(e.slug) + " still renders the \"No parameters were recorded\" empty state");
   }
 
+  // --- exactly the approved rows, no extras, no duplicates ----------------------
+  //
+  // The 2026-08-12 device run showed T13 with 25 rows where the approved card specifies 7: the
+  // runner's own measurement lines ("coarse: 150ms -> 10/10", "stability round 1: ...") reached the
+  // table, and three settings appeared TWICE -- once from record_run_parameters() and once from a
+  // pre-existing push_back in the body. Counting only the missing rows could not see either fault.
+  for (const auto &e : expectations()) {
+    v4l2diag::TestResult test;
+    test.id = e.slug;
+    test.name = e.slug;
+    test.status = v4l2diag::TestStatus::Pass;
+    test.memory_backend = "mmap";
+    test.duration_ms = 1000;
+    test.category = "capture";
+    test.summary = "probe";
+    v4l2diag::record_run_parameters(&test);
+    for (const auto &d : derived_rows()) {
+      if (test.id == d.slug) {
+        v4l2diag::record_derived_config(&test, d.label, d.value, d.unit);
+      }
+    }
+    const std::vector<std::string> got = config_labels(v4l2diag::render_test_content(test));
+
+    // No duplicates: a row stating a setting twice invites the reader to wonder which one ran.
+    std::set<std::string> seen;
+    std::vector<std::string> dupes;
+    for (const auto &g : got) {
+      if (!seen.insert(g).second) {
+        dupes.push_back(g);
+      }
+    }
+    std::string dupe_list;
+    for (const auto &d : dupes) {
+      dupe_list += (dupe_list.empty() ? "" : ", ") + d;
+    }
+    check(dupes.empty(),
+          std::string(e.slug) + " lists " + std::to_string(dupes.size()) + " configuration row(s) twice: " + dupe_list);
+
+    // No extras: every rendered row must be one the approved card names.
+    std::vector<std::string> extra;
+    for (const auto &g : got) {
+      const bool approved =
+          std::any_of(e.labels.begin(), e.labels.end(), [&g](const char *label) { return g == label; });
+      if (!approved) {
+        extra.push_back(g);
+      }
+    }
+    std::string extra_list;
+    for (const auto &x : extra) {
+      extra_list += (extra_list.empty() ? "" : ", ") + x;
+    }
+    check(extra.empty(), std::string(e.slug) + " lists " + std::to_string(extra.size()) +
+                             " row(s) the approved card does not name: " + extra_list);
+  }
+
   // Every body that must record a derived row still does. Observed: the call in the runner source,
   // inside the function that owns it.
   {

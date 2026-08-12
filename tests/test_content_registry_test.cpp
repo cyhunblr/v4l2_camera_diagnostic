@@ -543,6 +543,7 @@ int main() {
     t04.metrics.push_back(mv("dqbuf_errno", 0, ""));
     t04.metrics.push_back(mv("buffers_requested", 4, ""));
     t04.metrics.push_back(mv("poll_timeout_ms", 50, ""));
+    v4l2diag::record_run_parameters(&t04);
     const std::string html = v4l2diag::render_test_content(t04);
 
     // 5.4.4: the structured CHECK/EXPECTED/OBSERVED/OUTCOME table replaces the raw metric
@@ -563,7 +564,8 @@ int main() {
 
     // 5.4.7: Buffers requested and Poll timeout in Test configuration.
     ok &= check(contains(html, "Test Configuration"), "T04 has no Test Configuration section");
-    ok &= check(contains(html, "Buffers requested") && contains(html, "Poll timeout"),
+    // Approved labels (Faz 2): "Buffer count", not "Buffers requested".
+    ok &= check(contains(html, "Buffer count") && contains(html, "Poll timeout"),
                 "T04's Test configuration is missing a required parameter");
 
     // A passing T04 (poll() timed out, DQBUF correctly rejected) shows no RESULT.
@@ -675,6 +677,7 @@ int main() {
     t06.details.push_back("rapid_warmup: 1 frame");
     t06.details.push_back("slow_start_guard_limit: 2s");
     t06.details.push_back("backend_memory: mmap");
+    v4l2diag::record_run_parameters(&t06);
     const std::string html = v4l2diag::render_test_content(t06);
 
     // The approved preview shows "Cycle reliability" as the threshold-banded bars alone;
@@ -750,6 +753,7 @@ int main() {
     t07.details.push_back("warmup: 3 frames");
     t07.details.push_back("capture_timeout: 100ms");
     t07.details.push_back("sample_interval: 200ms");
+    v4l2diag::record_run_parameters(&t07);
     const std::string html = v4l2diag::render_test_content(t07);
 
     // User decision 2026-08-10: the card opens with evidence, not with a sentence. The
@@ -783,19 +787,22 @@ int main() {
                 "T07's charts are not named by the approved item label");
     ok &= check(count_of(html, "t07-depth-point") == 0, "T07's unapproved depth chart came back");
 
-    // 5.7.8: the six configuration parameters, in order.
-    const std::size_t range_at = html.find("Requested range");
-    const std::size_t samples_at = html.find("Samples per request");
-    const std::size_t backend_at = html.find("Backend memory");
-    const std::size_t warmup_at = html.find("Warmup");
+    // 5.7.8: the six configuration parameters, in the approved card's own order and wording.
+    // Both changed in Faz 2: the rows now come from record_run_parameters() and read "Sample
+    // count" / "Max buffers" / "Warmup count", where this test used to expect the runner's
+    // internal spellings ("Requested range", "Samples per request", "Warmup").
+    const std::size_t sample_at = html.find("Sample count");
+    const std::size_t maxbuf_at = html.find("Max buffers");
+    const std::size_t warmup_at = html.find("Warmup count");
     const std::size_t timeout_at = html.find("Capture timeout");
     const std::size_t interval_at = html.find("Sample interval");
-    ok &=
-        check(range_at != std::string::npos && samples_at != std::string::npos && backend_at != std::string::npos &&
-                  warmup_at != std::string::npos && timeout_at != std::string::npos && interval_at != std::string::npos,
-              "T07 is missing one of its six configuration parameters");
-    ok &= check(range_at < samples_at && samples_at < backend_at && backend_at < warmup_at && warmup_at < timeout_at &&
-                    timeout_at < interval_at,
+    const std::size_t backend_at = html.find("Backend memory");
+    ok &= check(sample_at != std::string::npos && maxbuf_at != std::string::npos && warmup_at != std::string::npos &&
+                    timeout_at != std::string::npos && interval_at != std::string::npos &&
+                    backend_at != std::string::npos,
+                "T07 is missing one of its six configuration parameters");
+    ok &= check(sample_at < maxbuf_at && maxbuf_at < warmup_at && warmup_at < timeout_at && timeout_at < interval_at &&
+                    interval_at < backend_at,
                 "T07's configuration parameters are out of the approved order");
   }
 
@@ -1004,6 +1011,7 @@ int main() {
     t10.details.push_back("sample_interval: 100ms");
     t10.details.push_back("error_threshold: 0");
     t10.details.push_back("backend_memory: mmap");
+    v4l2diag::record_run_parameters(&t10);
     const std::string html = v4l2diag::render_test_content(t10);
 
     // 5.10.5: the four-field metadata summary, above the flag table.
@@ -1053,7 +1061,7 @@ int main() {
 
     // 5.10.9: the six configuration parameters.
     for (const char *key :
-         {"Requested samples", "Warmup", "Capture timeout", "Sample interval", "Error threshold", "Backend memory"}) {
+         {"Sample count", "Warmup count", "Capture timeout", "Sample interval", "Max error flags", "Backend memory"}) {
       ok &= check(contains(html, key), std::string("T10 is missing the ") + key + " configuration row");
     }
 
@@ -1076,6 +1084,7 @@ int main() {
     t11.details.push_back("warmup_copies: 20");
     t11.details.push_back("timer: CLOCK_MONOTONIC");
     t11.details.push_back("backend_memory: mmap");
+    v4l2diag::record_run_parameters(&t11);
     const std::string html = v4l2diag::render_test_content(t11);
 
     // 5.11.3: three DISTINCT buffer figures. A single "Frame size" cannot tell a reader
@@ -1165,6 +1174,7 @@ int main() {
     t13.metrics.push_back(mv("stability_confirmed", 1, "bool"));
     t13.metrics.push_back(mv("stability_rounds_passed", 5, "count"));
     t13.details.push_back("production_timeout: 48.5");
+    v4l2diag::record_run_parameters(&t13);
     const std::string html = v4l2diag::render_test_content(t13);
 
     // Observed: the cell that follows the "Production timeout" label in the Aggregate table.
@@ -1188,6 +1198,7 @@ int main() {
     t14.metrics.push_back(mv("latency_p95", 44.834056, "ms"));
     t14.metrics.push_back(mv("latency_jitter", 0.018048, "ms"));
     t14.details.push_back("capture_timeout: 100ms");
+    v4l2diag::record_run_parameters(&t14);
     const std::string html = v4l2diag::render_test_content(t14);
 
     const std::string reliability = cell_after_label(html, "Capture reliability");
@@ -1214,6 +1225,7 @@ int main() {
     t15.metrics.push_back(mv("nonblock_latency_p95", 44.808614, "ms"));
     t15.metrics.push_back(mv("nonblock_captures", 30, "count"));
     t15.metrics.push_back(mv("block_captures", 30, "count"));
+    v4l2diag::record_run_parameters(&t15);
     const std::string html = v4l2diag::render_test_content(t15);
 
     // 44.799275 - 44.796811 = 0.002464 -> "0.002" at three decimals.
@@ -1301,6 +1313,12 @@ int main() {
         // T18's five configuration rows were these combinations. The renderer humanizes the key,
         // so the report read "Ll0 bp0 wi0".
         {"t18-control-sweep", "ll0_bp0_wi0: n=20 mean=44.792377ms", "Ll0 bp0 wi0"},
+        // T13's sweep lines. The key carries no number ("coarse", "bsearch") so only the name marks
+        // them, and "stability round 1" hides its marker word in the MIDDLE of the key -- both
+        // shapes reached the 2026-08-12 device run's Test Configuration as fifteen extra rows.
+        {"t13-poll-timeout-cliff", "coarse: 150ms -> 10/10", "Coarse"},
+        {"t13-poll-timeout-cliff", "bsearch:  45ms -> 10/10", "Bsearch"},
+        {"t13-poll-timeout-cliff", "stability round 1: @45ms=10/10, @44ms=0/10", "Stability round 1"},
     };
     for (const auto &c : cases) {
       v4l2diag::TestResult test = test_of(c.slug, v4l2diag::TestStatus::Pass);
@@ -1332,6 +1350,7 @@ int main() {
     t21.name = "t21-timestamp-monotonicity";
     t21.metrics.push_back(mv("non_monotonic", 0, ""));
     t21.metrics.push_back(mv("delta_mean", 44.8, "ms"));
+    v4l2diag::record_run_parameters(&t21);
     const std::string html = v4l2diag::render_test_content(t21);
     const std::size_t cfg = html.find("Test Configuration");
     if (cfg != std::string::npos) {
