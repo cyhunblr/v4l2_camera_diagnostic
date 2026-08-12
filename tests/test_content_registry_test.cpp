@@ -1356,7 +1356,12 @@ int main() {
                             {"Pixel format", "UYVY"},
                             {"Pairs compared", "49"},
                             {"Participants", "4"}}) {
-        const auto &approved_here = v4l2diag::configuration_rows_for(c.slug);
+        // The slug is a `const char *` and the lookup takes `const std::string &`, so passing it
+        // directly builds a temporary and binds this reference to a value derived from it. GCC 13's
+        // -Wdangling-reference rejects that shape (CI, Ubuntu 24.04) even though the returned table
+        // is static. Naming the string keeps it alive for the whole loop body and says so.
+        const std::string slug_here(c.slug);
+        const std::vector<v4l2diag::ConfigRowSpec> &approved_here = v4l2diag::configuration_rows_for(slug_here);
         // Compared as text: both sides are `const char *`, so `==` would compare addresses and
         // never match.
         const bool belongs =
@@ -1378,7 +1383,8 @@ int main() {
       // ...and the genuine inputs are still there: filtering must not swallow the whole table.
       // Checked against the test's OWN approved row list rather than one hard-coded label -- t03's
       // approved card has no "Capture timeout" row at all, so asserting it there was wrong.
-      const auto &approved = v4l2diag::configuration_rows_for(c.slug);
+      const std::string slug(c.slug);
+      const std::vector<v4l2diag::ConfigRowSpec> &approved = v4l2diag::configuration_rows_for(slug);
       ok &= check(!approved.empty(), std::string(c.slug) + " has no approved configuration rows");
       for (const auto &spec : approved) {
         ok &= check(section.find(std::string(">") + spec.label + "<") != std::string::npos,
