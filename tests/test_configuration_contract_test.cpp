@@ -65,7 +65,7 @@ struct ExpectedRow {
   // bound to the wrong key entirely (t26's "Latency tolerance" read a millisecond interval for a
   // percentage tolerance).
   //
-  // Nine rows deliberately expect TODAY'S value rather than the design's:
+  // Eight rows deliberately expect TODAY'S value rather than the design's:
   //
   //   - Five `param` rows (four "Capture timeout" defaults, t19's "Samples per resolution"). A
   //     settings row states what THIS run used, so a preview authored with other numbers is not a
@@ -73,8 +73,6 @@ struct ExpectedRow {
   //     card says.
   //   - t13's "Production timeout" and t14's "Pulse width" are resolved per run; both match the
   //     design on a device, and only the parameter-table default differs.
-  //   - t17's "Sizeimage" keeps `float`: the design cell reads type `int` beside the value 4.69,
-  //     which cannot both be true.
   //   - t25's "Capture FAIL limit" shows 90 where the design says "< 95". Left alone because
   //     run_multi_camera has NO capture-rate rule at all -- its verdict is jitter p95 only -- so
   //     either number states a criterion the code does not apply. Reported as a gap, not painted
