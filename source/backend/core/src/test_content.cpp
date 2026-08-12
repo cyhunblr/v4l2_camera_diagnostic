@@ -1,3 +1,4 @@
+#include "v4l2diag/core/diagnostic_runner.hpp"
 #include "v4l2diag/core/test_content.hpp"
 
 #include <algorithm>
@@ -1009,88 +1010,52 @@ bool is_measurement_key(const std::string &key) {
 std::string test_configuration_rows(const TestResult &test) {
   std::string out = table_open({"Variable", "Source", "Type", "Unit", "Value"});
   bool any = false;
-  for (const auto &detail : test.details) {
-    const std::size_t colon = detail.find(':');
-    if (colon == std::string::npos || colon == 0) {
-      continue;
-    }
-    const std::string key = trim_of(detail.substr(0, colon));
-    // Structured evidence lines are data for a chart or a table, not configuration; listing them
-    // here prints a measurement under a column that says "param".
-    //
-    // Matching the key EXACTLY was not enough. The runner numbers its per-iteration lines --
-    // "cycle 1: STREAMON=1140ms...", "Win0 0-10s: n=65...", "1920x1280: mean=44ms..." -- so the
-    // key is "cycle 1", never "cycle", and every one of them reached the table. Measured on the
-    // 2026-08-11 device run: 24 such rows across T03, T18, T19, T23 and T26, with T26 showing
-    // ten "Cycle N" rows in place of four of its six approved inputs. The user reported it as
-    // "Cycle 1 diye variable olamaz" -- correct, and the same numbers are already in Measurement.
-    if (is_measurement_key(key)) {
-      continue;
-    }
-    // A recorded NOTE is prose the card renders in its own place (T05's capture-rate observation),
-    // not a setting. Listing it here put a sentence in the Value column under a "param" source.
-    if (lower_of(key).find("note") != std::string::npos) {
-      continue;
-    }
-    // An internal snake_case key is skipped ONLY when the same setting is already on the card under
-    // its approved display label. t13 keeps "production_timeout" because an Aggregate row reads it
-    // by name, and rendering both put "Production timeout" on the card twice.
-    //
-    // The check is against what THIS card already carries, not a blanket rule on snake_case: a
-    // runner key with no display-label counterpart ("capture_timeout" on the tests whose spec does
-    // not name it) is the only record of that setting and must still render.
-    if (key.find('_') != std::string::npos && key == lower_of(key)) {
-      std::string display = humanize(key);
-      bool already_shown = false;
-      for (const auto &other : test.details) {
-        const std::size_t other_colon = other.find(':');
-        if (other_colon == std::string::npos || other_colon == 0) {
+  // ALLOW-LIST: the rows the approved card for this test names, in the design's own order.
+  //
+  // This replaced a blocklist that tried to recognise measurement lines by shape. Three device runs
+  // in a row each leaked a fresh batch through it -- numbered cycles, sweep probes, per-width
+  // results ("1ms:"), per-camera rows ("/dev/video4:"), per-copy rows ("mmap_full:") -- because a
+  // rule that enumerates what to EXCLUDE can never be complete against a runner free to write any
+  // key it likes. Measured on the 2026-08-12 01:41 run: 69 extra rows across 15 tests.
+  //
+  // Rendering only what the design names is complete by construction. Every approved label is
+  // recorded as a detail key by record_run_parameters() or by the test body, verified for all 23
+  // tests, so nothing the card should show is lost.
+  const std::vector<std::string> &allowed = configuration_labels_for(test.id);
+  for (const auto &label : allowed) {
+    // First match wins: a duplicate key (a legacy line kept because some other renderer reads it by
+    // name) cannot put the same setting on the card twice.
+    for (const auto &detail : test.details) {
+      const std::size_t colon = detail.find(':');
+      if (colon == std::string::npos || colon == 0 || trim_of(detail.substr(0, colon)) != label) {
+        continue;
+      }
+      std::string value;
+      std::string unit;
+      split_unit(detail.substr(colon + 1), &value, &unit);
+      static const std::string kDerivedMark = "@derived";
+      bool is_derived = false;
+      for (std::string *field : {&value, &unit}) {
+        const std::size_t mark = field->find(kDerivedMark);
+        if (mark == std::string::npos) {
           continue;
         }
-        if (trim_of(other.substr(0, other_colon)) == display) {
-          already_shown = true;
-          break;
-        }
+        is_derived = true;
+        field->erase(mark, kDerivedMark.size());
+        *field = trim_of(*field);
       }
-      if (already_shown) {
-        continue;
+      if (is_derived && value.empty()) {
+        value = unit;
+        unit.clear();
       }
+      const std::string lowered = lower_of(label);
+      const bool is_threshold =
+          lowered.find("threshold") != std::string::npos || lowered.find("limit") != std::string::npos;
+      const char *source = is_derived ? "derived" : (is_threshold ? "threshold" : "param");
+      any = true;
+      out += row({html_escape(label), source, type_word(value), unit_word(unit), html_escape(value)});
+      break;
     }
-    std::string value;
-    std::string unit;
-    split_unit(detail.substr(colon + 1), &value, &unit);
-    const std::string lowered = lower_of(key);
-    // The approved previews use THREE source kinds in this column, not two. A `derived` row is a
-    // value the run computed rather than one it was given -- t18's "Controls discovered", t19's
-    // "Pixel format", t17's "Sizeimage". Inferring the kind from the label cannot express that
-    // ("Sizeimage" reads like neither a param nor a threshold), so the recorder marks it: a value
-    // ending in the sentinel below is derived, and the sentinel never reaches the page.
-    // split_unit() has already run, and where the mark lands depends on the value's shape: a bare
-    // count ("11  @derived") leaves unit "@derived", a value with a unit ("4.69 mebibytes
-    // @derived") leaves it at the end of the unit, and a string value ("UYVY  @derived") puts the
-    // whole thing in the unit. Stripping the marker wherever it sits covers all three -- keying on
-    // the exact two-space form matched only one of them.
-    static const std::string kDerivedMark = "@derived";
-    bool is_derived = false;
-    for (std::string *field : {&value, &unit}) {
-      const std::size_t mark = field->find(kDerivedMark);
-      if (mark == std::string::npos) {
-        continue;
-      }
-      is_derived = true;
-      field->erase(mark, kDerivedMark.size());
-      *field = trim_of(*field);
-    }
-    if (is_derived && value.empty()) {
-      // A non-numeric value ("UYVY") ends up entirely in the unit; it is the value, not a unit.
-      value = unit;
-      unit.clear();
-    }
-    const bool is_threshold =
-        lowered.find("threshold") != std::string::npos || lowered.find("limit") != std::string::npos;
-    any = true;
-    const char *source = is_derived ? "derived" : (is_threshold ? "threshold" : "param");
-    out += row({html_escape(humanize(key)), source, type_word(value), unit_word(unit), html_escape(value)});
   }
   // A run may record its parameters as METRICS rather than as detail lines. Reading only
   // the detail lines rendered a one-row "No parameters were recorded" table for five

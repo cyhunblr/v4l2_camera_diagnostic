@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <limits>
 #include <linux/videodev2.h>
+#include <map>
 #include <memory>
 #include <numeric>
 #include <poll.h>
@@ -3478,6 +3479,30 @@ struct ConfigRow {
   const char *text;
 };
 
+// A row the TEST BODY records via record_derived_config(), because its value is only known once the
+// measurement exists. Listed so configuration_labels_for() -- the renderer's allow-list -- knows the
+// row belongs on the card even though record_run_parameters() does not write it.
+struct DerivedConfigRow {
+  const char *slug;
+  const char *label;
+};
+
+const std::vector<DerivedConfigRow> &derived_config_rows() {
+  static const std::vector<DerivedConfigRow> table = {
+      {"t16-gpio-pulse-width", "Pulse width levels"},
+      {"t16-gpio-pulse-width", "Total captures"},
+      {"t17-format-comparison", "Sizeimage"},
+      {"t18-control-sweep", "Controls discovered"},
+      {"t18-control-sweep", "Writable controls"},
+      {"t18-control-sweep", "Measured max difference"},
+      {"t19-resolution-sweep", "Resolutions enumerated"},
+      {"t19-resolution-sweep", "Pixel format"},
+      {"t22-stuck-frame", "Pairs compared"},
+      {"t25-multi-camera", "Participants"},
+  };
+  return table;
+}
+
 struct TestConfigSpec {
   const char *slug;
   std::vector<ConfigRow> rows;
@@ -3697,6 +3722,34 @@ void record_run_parameters(TestResult *test, const TestThresholds &configured_th
     }
     return;
   }
+}
+
+const std::vector<std::string> &configuration_labels_for(const std::string &test_id) {
+  static const std::vector<std::string> kNone;
+  // Built once from the same spec table record_run_parameters() writes from, so the allow-list and
+  // the recorder can never disagree about which rows a card has.
+  static const std::map<std::string, std::vector<std::string>> kByTest = [] {
+    std::map<std::string, std::vector<std::string>> table;
+    for (const auto &spec : config_specs()) {
+      std::vector<std::string> labels;
+      labels.reserve(spec.rows.size() + 1);
+      for (const auto &row : spec.rows) {
+        labels.push_back(row.label);
+      }
+      if (spec.backend_row) {
+        labels.push_back("Backend memory");
+      }
+      for (const auto &derived : derived_config_rows()) {
+        if (spec.slug == derived.slug) {
+          labels.push_back(derived.label);
+        }
+      }
+      table.emplace(spec.slug, std::move(labels));
+    }
+    return table;
+  }();
+  const auto it = kByTest.find(test_id);
+  return it == kByTest.end() ? kNone : it->second;
 }
 
 void record_derived_config(TestResult *test, const std::string &label, const std::string &value,

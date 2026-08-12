@@ -1146,7 +1146,9 @@ int main() {
 
     // 5.11.6: the measurement evidence a reader needs to trust the number at all.
     ok &= check(contains(html, "CLOCK_MONOTONIC"), "T11 does not state which timer it measured with");
-    ok &= check(contains(html, "Warm-up") || contains(html, "Warmup"), "T11 does not state its warm-up");
+    // The approved t11 card states "Minimum repetitions" here; it has no warm-up row. The runner
+    // still records warmup_copies, but Test Configuration shows only what the design names.
+    ok &= check(contains(html, "Minimum repetitions"), "T11 does not state its repetition floor");
 
     // 5.11.2: PASS confirms a valid benchmark ran; no platform threshold was applied, so
     // there is no RESULT block on a passing card.
@@ -1319,14 +1321,43 @@ int main() {
         {"t13-poll-timeout-cliff", "coarse: 150ms -> 10/10", "Coarse"},
         {"t13-poll-timeout-cliff", "bsearch:  45ms -> 10/10", "Bsearch"},
         {"t13-poll-timeout-cliff", "stability round 1: @45ms=10/10, @44ms=0/10", "Stability round 1"},
+        // The 2026-08-12 01:41 run showed 69 further extras in shapes no prefix list anticipated:
+        // per-width results ("1ms: hits=8/8"), per-camera rows ("/dev/video4: ..."), per-copy rows
+        // ("mmap_full: ...") and surviving internal keys whose display label differs from the
+        // approved one ("requested_samples" beside "Sample count"). Chasing shapes one at a time was
+        // the wrong model -- the reader now renders only what the approved card NAMES.
+        {"t16-gpio-pulse-width", "1ms: hits=8/8 mean=44.801ms", "1ms"},
+        {"t25-multi-camera", "/dev/video4: 50/50 captured", "/dev/video4"},
+        {"t11-memory-throughput", "mmap_full: 1027 MB/s", "Mmap full"},
+        {"t10-buffer-flags", "flag: Frame health|ERROR|0|No frame reported an error", "Flag"},
+        {"t10-buffer-flags", "requested_samples: 50", "Requested samples"},
+        {"t08-buffer-overwrite", "Variant A: buffers=2 triggers=100 available=2 errors=1", "Variant A"},
     };
     for (const auto &c : cases) {
       v4l2diag::TestResult test = test_of(c.slug, v4l2diag::TestStatus::Pass);
       test.name = c.slug;
       test.details.push_back(c.detail);
       // A real input beside it, so the table still renders and the check is not observing an
-      // empty section.
-      test.details.push_back("capture_timeout: 100ms");
+      // empty section. Recorded under the approved DISPLAY label, because the renderer now shows
+      // exactly the rows the design names -- an internal "capture_timeout:" key is not one of them.
+      v4l2diag::record_run_parameters(&test);
+      // The `derived` rows come from the test BODY, which needs a real device; replayed here so the
+      // survival check below sees the complete approved set.
+      for (const auto &d : {std::pair<const char *, const char *>{"Pulse width levels", "11"},
+                            {"Total captures", "88"},
+                            {"Sizeimage", "4.69"},
+                            {"Controls discovered", "15"},
+                            {"Writable controls", "13"},
+                            {"Measured max difference", "0.005"},
+                            {"Resolutions enumerated", "1"},
+                            {"Pixel format", "UYVY"},
+                            {"Pairs compared", "49"},
+                            {"Participants", "4"}}) {
+        const auto &approved_here = v4l2diag::configuration_labels_for(c.slug);
+        if (std::find(approved_here.begin(), approved_here.end(), d.first) != approved_here.end()) {
+          v4l2diag::record_derived_config(&test, d.first, d.second);
+        }
+      }
       const std::string html = v4l2diag::render_test_content(test);
       const std::size_t cfg = html.find("Test Configuration");
       ok &= check(cfg != std::string::npos, std::string(c.slug) + " renders no Test Configuration section");
@@ -1336,9 +1367,15 @@ int main() {
       const std::string section = html.substr(cfg);
       ok &= check(section.find(std::string("<span>") + c.forbidden + "</span>") == std::string::npos,
                   std::string(c.slug) + " lists the measurement row '" + c.forbidden + "' as a configuration variable");
-      // ...and the genuine input is still there: the filter must not swallow the whole table.
-      ok &= check(section.find("Capture timeout") != std::string::npos,
-                  std::string(c.slug) + " lost its real 'Capture timeout' input row");
+      // ...and the genuine inputs are still there: filtering must not swallow the whole table.
+      // Checked against the test's OWN approved row list rather than one hard-coded label -- t03's
+      // approved card has no "Capture timeout" row at all, so asserting it there was wrong.
+      const auto &approved = v4l2diag::configuration_labels_for(c.slug);
+      ok &= check(!approved.empty(), std::string(c.slug) + " has no approved configuration rows");
+      for (const auto &label : approved) {
+        ok &= check(section.find(">" + label + "<") != std::string::npos,
+                    std::string(c.slug) + " lost its approved '" + label + "' configuration row");
+      }
     }
   }
 

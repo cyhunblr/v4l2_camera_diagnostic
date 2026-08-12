@@ -123,6 +123,16 @@ void record_run_parameters(TestResult *test, const TestThresholds &configured_th
 void record_derived_config(TestResult *test, const std::string &label, const std::string &value,
                            const std::string &unit = "");
 
+// The Test Configuration row labels a test's approved card carries, in order. Empty for a test whose
+// approved card has no such section (t01, t02).
+//
+// The renderer reads this as an ALLOW-LIST: a card shows exactly the rows the design names. It used
+// to exclude measurement lines by shape instead, which meant every new runner line shape -- per
+// width ("1ms:"), per camera ("/dev/video4:"), per copy ("mmap_full:") -- leaked into the table
+// until someone noticed and added another pattern. Three device runs each surfaced a fresh batch.
+// Naming what belongs is complete by construction; naming what does not never was.
+const std::vector<std::string> &configuration_labels_for(const std::string &test_id);
+
 // One pulse width in the t16 sweep.
 struct PulseWidthOutcome {
   int width_ms = 0;
