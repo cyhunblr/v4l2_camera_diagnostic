@@ -123,15 +123,39 @@ void record_run_parameters(TestResult *test, const TestThresholds &configured_th
 void record_derived_config(TestResult *test, const std::string &label, const std::string &value,
                            const std::string &unit = "");
 
-// The Test Configuration row labels a test's approved card carries, in order. Empty for a test whose
+// One Test Configuration row as the renderer needs it: the label to show and the Source cell to
+// stamp it with ("param", "threshold", "derived" or "fixed").
+struct ConfigRowSpec {
+  const char *label;
+  const char *source;
+};
+
+// The Test Configuration rows a test's approved card carries, in order. Empty for a test whose
 // approved card has no such section (t01, t02).
 //
-// The renderer reads this as an ALLOW-LIST: a card shows exactly the rows the design names. It used
-// to exclude measurement lines by shape instead, which meant every new runner line shape -- per
-// width ("1ms:"), per camera ("/dev/video4:"), per copy ("mmap_full:") -- leaked into the table
-// until someone noticed and added another pattern. Three device runs each surfaced a fresh batch.
-// Naming what belongs is complete by construction; naming what does not never was.
-const std::vector<std::string> &configuration_labels_for(const std::string &test_id);
+// The renderer reads this as an ALLOW-LIST: a card shows exactly the rows the design names, in the
+// design's order, with the design's Source cell. It used to exclude measurement lines by shape
+// instead, which meant every new runner line shape -- per width ("1ms:"), per camera
+// ("/dev/video4:"), per copy ("mmap_full:") -- leaked into the table until someone noticed and added
+// another pattern. Three device runs each surfaced a fresh batch. Naming what belongs is complete by
+// construction; naming what does not never was.
+//
+// Order and Source travel with the label for the same reason. The 2026-08-12 02:24 run rendered the
+// right rows in the wrong places on 7 cards (every body-recorded row appended after the parameters)
+// and stamped 13 approved thresholds `param`, because both facts were re-derived downstream -- order
+// from the order things happened to be appended, Source from the spelling of the label.
+const std::vector<ConfigRowSpec> &configuration_rows_for(const std::string &test_id);
+
+// Configuration rows whose value would not resolve: the row is read from the parameter table but the
+// key lives in the threshold table, or the reverse, or neither has it. One entry per broken row,
+// empty when every lookup resolves.
+//
+// Exposed because the row's Source cell and the table its value is READ from are separate fields --
+// t13's "Production timeout" is read from the thresholds while the approved card calls it a param --
+// so nothing about the rendered card reveals a wrong table. tpv()/thv() answer a missing key with
+// 0.0, which is a plausible-looking number: t13 printed "Production timeout 0ms" beside the runner's
+// own 48.5 and no test noticed.
+std::vector<std::string> configuration_lookup_gaps();
 
 // One pulse width in the t16 sweep.
 struct PulseWidthOutcome {

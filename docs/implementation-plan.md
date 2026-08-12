@@ -8,10 +8,11 @@ Kapsam: SPA (`source/frontend`), web sunucusu (`source/backend/web`), rapor
 ureticisi (`source/backend/core/report_writer.cpp`), test/threshold registry'leri
 ve bunlarin dokundugu hw davranislari.
 
-Uc belgelik yapinin ikinci parcasidir — bu belge **ne yapilacak** sorusunu
-yanitlar. Tasarim otoritesi `docs/report-ui-design-spec.md`, veri sozlesmesi
-`docs/renderer-data-contract.md`; bu belge onlari uygulamaya cevirir ve
-onlarla **celisemez**. Bir tasarim kurali buraya kopyalanmaz, atif verilir.
+Bu belge **ne yapilacak** sorusunu yanitlar. Tasarim otoritesi
+`docs/report-ui-design-spec.md`, veri sozlesmesi ise
+`docs/assets/refactored_previews/` icindeki 26 onayli preview'dir
+(`renderer-data-contract.md` 2026-08-12'de kullanici karariyla kaldirildi);
+bu belge onlari uygulamaya cevirir ve onlarla **celisemez**. Bir tasarim kurali buraya kopyalanmaz, atif verilir.
 
 Durum (2026-08-08): Faz 0-5 uygulandi; kalan is §6'da. Bitirilen fazlarin
 sureç kaydi arsiv ozetine indirildi — belge 2836 satirdan buraya kisaldi.
@@ -573,7 +574,8 @@ kalir (Kural 5).
 
 ### 3b.3. Icerik uyumu — KISMEN UYGULANDI (2026-08-08)
 
-Uretilen HTML `docs/renderer-data-contract.md` ile karsilastirildi.
+Uretilen HTML o tarihte `docs/renderer-data-contract.md` ile karsilastirildi
+(belge 2026-08-12'de kaldirildi; ayni sozlesme artik onayli preview'lerde).
 
 | olcut | once | sonra |
 | --- | --- | --- |

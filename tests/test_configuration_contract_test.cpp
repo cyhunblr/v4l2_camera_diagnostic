@@ -26,6 +26,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "v4l2diag/core/diagnostic_runner.hpp"
@@ -44,76 +45,217 @@ bool check(bool condition, const std::string &message) {
   return condition;
 }
 
-struct Expectation {
-  const char *slug;
-  std::vector<const char *> labels;
+struct ExpectedRow {
+  const char *label;
+  // The Source cell the approved card shows: "param", "threshold", "derived" or "fixed".
+  //
+  // Checked because the renderer used to INFER this from the label spelling -- "threshold" or
+  // "limit" in the text meant threshold, everything else param. The 2026-08-12 02:24 device run
+  // showed what that costs: 13 approved thresholds rendered as `param` (t05's "Minimum recovery",
+  // t08's and t10's "Max error flags", t13's "Configured safe margin", t20's "Max allowed gaps",
+  // t21's "Max non-monotonic events", t26's "Latency tolerance", t09's "Min safe cliff delay"),
+  // and the `fixed` kind the previews use for method constants was never emitted at all.
+  const char *source;
 };
 
-// Transcribed from the approved previews' hardware-trigger cards.
+struct Expectation {
+  const char *slug;
+  // In approved ORDER. The rendered sequence is compared position by position, not as a set: the
+  // same run showed 7 cards with the right rows in the wrong places, because the renderer's
+  // allow-list appended every body-recorded row after the parameters instead of carrying the
+  // design's position. t16's "Pulse width levels" is row 1 in the design and rendered as row 7.
+  std::vector<ExpectedRow> rows;
+};
+
+// Transcribed from the approved previews' hardware-trigger cards, in order.
+//
+// Two previews show cards for more than one trigger scenario and they differ: t03's software card
+// omits "Trigger retry interval" (nothing retries without a hardware trigger) and t14's software
+// card replaces "Pulse width" with "Trigger source". The hardware-trigger card is the one
+// transcribed, matching the run this project measures.
 const std::vector<Expectation> &expectations() {
   static const std::vector<Expectation> table = {
       {"t03-pipeline-ready",
-       {"Cycles", "Buffer count", "First-frame deadline", "Settle time", "Trigger retry interval", "Slow-start guard",
-        "PASS threshold", "WARN threshold", "Backend memory"}},
-      {"t04-no-streamon", {"Buffer count", "Poll timeout", "Backend memory"}},
+       {{"Cycles", "param"},
+        {"Buffer count", "param"},
+        {"First-frame deadline", "param"},
+        {"Settle time", "param"},
+        {"Trigger retry interval", "param"},
+        {"Slow-start guard", "param"},
+        {"PASS threshold", "threshold"},
+        {"WARN threshold", "threshold"},
+        {"Backend memory", "param"}}},
+      {"t04-no-streamon", {{"Buffer count", "param"}, {"Poll timeout", "param"}, {"Backend memory", "param"}}},
       {"t05-pollerr-handling",
-       {"Baseline captures", "Recovery captures", "Warmup count", "Minimum recovery", "Poll timeout",
-        "Backend memory"}},
+       {{"Baseline captures", "param"},
+        {"Recovery captures", "param"},
+        {"Warmup count", "param"},
+        {"Minimum recovery", "threshold"},
+        {"Poll timeout", "param"},
+        {"Backend memory", "param"}}},
       {"t06-stream-cycles",
-       {"Full cycles", "Rapid cycles", "Full warmup", "Rapid warmup", "Full timeout", "Rapid timeout", "Rapid pacing",
-        "Slow-start guard", "Full pass threshold", "Full warn threshold", "Rapid pass threshold",
-        "Rapid warn threshold", "Backend memory"}},
+       {{"Full cycles", "param"},
+        {"Rapid cycles", "param"},
+        {"Full warmup", "param"},
+        {"Rapid warmup", "param"},
+        {"Full timeout", "param"},
+        {"Rapid timeout", "param"},
+        {"Rapid pacing", "param"},
+        {"Slow-start guard", "param"},
+        {"Full pass threshold", "threshold"},
+        {"Full warn threshold", "threshold"},
+        {"Rapid pass threshold", "threshold"},
+        {"Rapid warn threshold", "threshold"},
+        {"Backend memory", "param"}}},
       {"t07-multi-buffer",
-       {"Sample count", "Max buffers", "Warmup count", "Capture timeout", "Sample interval", "Backend memory"}},
+       {{"Sample count", "param"},
+        {"Max buffers", "param"},
+        {"Warmup count", "param"},
+        {"Capture timeout", "param"},
+        {"Sample interval", "param"},
+        {"Backend memory", "param"}}},
       {"t08-buffer-overwrite",
-       {"Buffer count", "Variant A triggers", "Variant A interval", "Variant B triggers", "Variant B interval",
-        "Settle time", "Max error flags", "Backend memory"}},
+       {{"Buffer count", "param"},
+        {"Variant A triggers", "param"},
+        {"Variant A interval", "param"},
+        {"Variant B triggers", "param"},
+        {"Variant B interval", "param"},
+        {"Settle time", "param"},
+        {"Max error flags", "threshold"},
+        {"Backend memory", "param"}}},
+      {"t09-buffer-recycling",
+       {{"Reps per delay", "param"},
+        {"Capture timeout", "param"},
+        {"Inter-rep interval", "param"},
+        {"Warmup count", "param"},
+        {"Min safe cliff delay", "threshold"},
+        {"Backend memory", "param"}}},
       {"t10-buffer-flags",
-       {"Sample count", "Capture timeout", "Sample interval", "Warmup count", "Max error flags", "Backend memory"}},
+       {{"Sample count", "param"},
+        {"Capture timeout", "param"},
+        {"Sample interval", "param"},
+        {"Warmup count", "param"},
+        {"Max error flags", "threshold"},
+        {"Backend memory", "param"}}},
       {"t11-memory-throughput",
-       {"Backend memory", "Allocated buffers", "Minimum repetitions", "Target sample time", "Timer", "Stream state"}},
+       {{"Backend memory", "param"},
+        {"Allocated buffers", "param"},
+        {"Minimum repetitions", "param"},
+        {"Target sample time", "param"},
+        {"Timer", "fixed"},
+        {"Stream state", "derived"}}},
       {"t12-dmabuf-cache-sync",
-       {"Requested samples", "Compared data", "Warmup frames", "Capture timeout", "Buffer count"}},
+       {{"Requested samples", "param"},
+        {"Compared data", "fixed"},
+        {"Warmup frames", "param"},
+        {"Capture timeout", "param"},
+        {"Buffer count", "param"}}},
       {"t13-poll-timeout-cliff",
-       {"Probe samples per timeout", "Stability rounds", "Frames per round", "Warmup frames", "Configured safe margin",
-        "Production timeout", "Backend memory"}},
+       {{"Probe samples per timeout", "param"},
+        {"Stability rounds", "param"},
+        {"Frames per round", "param"},
+        {"Warmup frames", "param"},
+        {"Configured safe margin", "threshold"},
+        {"Production timeout", "param"},
+        {"Backend memory", "param"}}},
       {"t14-trigger-latency",
-       {"Latency samples", "Warmup triggers", "Capture timeout", "Sample interval", "Pulse width", "Backend memory"}},
+       {{"Latency samples", "param"},
+        {"Warmup triggers", "param"},
+        {"Capture timeout", "param"},
+        {"Sample interval", "param"},
+        {"Pulse width", "param"},
+        {"Backend memory", "param"}}},
       {"t15-nonblock-vs-block",
-       {"Samples per mode", "Spin deadline", "Sample interval", "Warmup frames", "Backend memory"}},
+       {{"Samples per mode", "param"},
+        {"Spin deadline", "param"},
+        {"Sample interval", "param"},
+        {"Warmup frames", "param"},
+        {"Backend memory", "param"}}},
       {"t16-gpio-pulse-width",
-       {"Pulse width levels", "Samples per width", "Total captures", "Poll timeout", "Warmup frames",
-        "LOW edge reference", "Trigger edge", "Backend memory"}},
+       {{"Pulse width levels", "param"},
+        {"Samples per width", "param"},
+        {"Total captures", "derived"},
+        {"Poll timeout", "param"},
+        {"Warmup frames", "param"},
+        {"LOW edge reference", "derived"},
+        {"Trigger edge", "derived"},
+        {"Backend memory", "param"}}},
       {"t17-format-comparison",
-       {"Samples per format", "Memcpy repetitions", "Sizeimage", "Capture timeout", "Latency basis",
-        "Throughput divisor", "Backend memory"}},
+       {{"Samples per format", "param"},
+        {"Memcpy repetitions", "param"},
+        {"Sizeimage", "derived"},
+        {"Capture timeout", "param"},
+        {"Latency basis", "derived"},
+        {"Throughput divisor", "fixed"},
+        {"Backend memory", "param"}}},
       {"t18-control-sweep",
-       {"Controls discovered", "Writable controls", "Captures per value", "Capture timeout",
-        "Practical impact threshold", "Measured max difference", "Backend memory"}},
+       {{"Controls discovered", "derived"},
+        {"Writable controls", "derived"},
+        {"Captures per value", "param"},
+        {"Capture timeout", "param"},
+        {"Practical impact threshold", "threshold"},
+        {"Measured max difference", "derived"},
+        {"Backend memory", "param"}}},
       {"t19-resolution-sweep",
-       {"Samples per resolution", "Resolutions enumerated", "Pixel format", "Capture timeout", "Latency basis",
-        "Backend memory"}},
+       {{"Samples per resolution", "param"},
+        {"Resolutions enumerated", "derived"},
+        {"Pixel format", "derived"},
+        {"Capture timeout", "param"},
+        {"Latency basis", "derived"},
+        {"Backend memory", "param"}}},
       {"t20-sequence-continuity",
-       {"Requested frames", "Warmup frames", "Capture timeout", "Max allowed gaps", "Continuity signal",
-        "Backend memory"}},
+       {{"Requested frames", "param"},
+        {"Warmup frames", "param"},
+        {"Capture timeout", "param"},
+        {"Max allowed gaps", "threshold"},
+        {"Continuity signal", "fixed"},
+        {"Backend memory", "param"}}},
       {"t21-timestamp-monotonicity",
-       {"Requested frames", "Warmup frames", "Capture timeout", "Max non-monotonic events", "Ordering signal",
-        "Backend memory"}},
+       {{"Requested frames", "param"},
+        {"Warmup frames", "param"},
+        {"Capture timeout", "param"},
+        {"Max non-monotonic events", "threshold"},
+        {"Ordering signal", "fixed"},
+        {"Backend memory", "param"}}},
       {"t22-stuck-frame",
-       {"Frames requested", "Pairs compared", "Compare bytes", "Identical threshold", "Capture timeout",
-        "Backend memory"}},
+       {{"Frames requested", "param"},
+        {"Pairs compared", "derived"},
+        {"Compare bytes", "param"},
+        {"Identical threshold", "threshold"},
+        {"Capture timeout", "param"},
+        {"Backend memory", "param"}}},
       {"t23-sustained-capture",
-       {"Test duration", "Window size", "Sample interval", "Capture timeout", "Warmup frames", "Drift PASS limit",
-        "Backend memory"}},
+       {{"Test duration", "param"},
+        {"Window size", "param"},
+        {"Sample interval", "param"},
+        {"Capture timeout", "param"},
+        {"Warmup frames", "param"},
+        {"Drift PASS limit", "threshold"},
+        {"Backend memory", "param"}}},
       {"t24-latency-under-load",
-       {"Samples per phase", "Load threads", "Baseline timeout", "Load phase timeout", "P95 delta PASS limit",
-        "P95 delta FAIL limit", "Backend memory"}},
+       {{"Samples per phase", "param"},
+        {"Load threads", "param"},
+        {"Baseline timeout", "param"},
+        {"Load phase timeout", "param"},
+        {"P95 delta PASS limit", "threshold"},
+        {"P95 delta FAIL limit", "threshold"},
+        {"Backend memory", "param"}}},
       {"t25-multi-camera",
-       {"Requested rounds", "Participants", "Round deadline", "Capture PASS limit", "Capture FAIL limit",
-        "Sync PASS limit", "Sync FAIL limit", "Backend memory"}},
+       {{"Requested rounds", "param"},
+        {"Participants", "derived"},
+        {"Round deadline", "param"},
+        {"Capture PASS limit", "threshold"},
+        {"Capture FAIL limit", "threshold"},
+        {"Sync PASS limit", "threshold"},
+        {"Sync FAIL limit", "threshold"},
+        {"Backend memory", "param"}}},
       {"t26-cold-start",
-       {"Fresh cycles", "Observation window (frames)", "Reference window", "Latency tolerance", "Capture timeout",
-        "Backend memory"}},
+       {{"Fresh cycles", "param"},
+        {"Observation window (frames)", "param"},
+        {"Reference window", "param"},
+        {"Latency tolerance", "threshold"},
+        {"Capture timeout", "param"},
+        {"Backend memory", "param"}}},
   };
   return table;
 }
@@ -178,45 +320,42 @@ std::string read_file(const std::string &path) {
   return buffer.str();
 }
 
-// The Source cell of the Test Configuration row whose Variable cell is `label`.
-std::string source_of(const std::string &html, const std::string &label) {
-  const std::size_t cfg = html.find("Test Configuration");
-  if (cfg == std::string::npos) {
-    return "(no section)";
-  }
-  const std::string section = html.substr(cfg);
-  const std::string needle = "<span>" + label + "</span>";
-  const std::size_t at = section.find(needle);
+// The Variable and Source cells of every Test Configuration row, in render order.
+//
+// Bounded to the config section's own </section>. Scanning to the end of the card would pick up
+// grid rows from the measurement tables that follow, so a missing configuration row could be
+// "found" in a later section and the sequence check would pass on the wrong evidence.
+std::vector<std::pair<std::string, std::string>> config_rows(const std::string &html) {
+  std::vector<std::pair<std::string, std::string>> rows;
+  const std::size_t at = html.find("config-section");
   if (at == std::string::npos) {
-    return "(not rendered)";
+    return rows;
   }
-  const std::size_t open = section.find("<span>", at + needle.size());
-  if (open == std::string::npos) {
-    return "(row truncated)";
+  const std::size_t close = html.find("</section>", at);
+  const std::string section = html.substr(at, close == std::string::npos ? std::string::npos : close - at);
+  const std::string open = "<div class=\"grid-row";
+  for (std::size_t r = section.find(open); r != std::string::npos; r = section.find(open, r + 1)) {
+    std::vector<std::string> cells;
+    for (std::size_t c = section.find("<span>", r); cells.size() < 2 && c != std::string::npos;
+         c = section.find("<span>", c + 1)) {
+      const std::size_t end = section.find("</span>", c);
+      if (end == std::string::npos) {
+        break;
+      }
+      cells.push_back(section.substr(c + 6, end - c - 6));
+    }
+    if (cells.size() == 2) {
+      rows.emplace_back(cells[0], cells[1]);
+    }
   }
-  const std::size_t end = section.find("</span>", open);
-  return end == std::string::npos ? "(row truncated)" : section.substr(open + 6, end - open - 6);
+  return rows;
 }
 
 // The Variable cell of every row in the Test Configuration section, in render order.
 std::vector<std::string> config_labels(const std::string &html) {
   std::vector<std::string> labels;
-  const std::size_t at = html.find("Test Configuration");
-  if (at == std::string::npos) {
-    return labels;
-  }
-  const std::string section = html.substr(at);
-  const std::string open = "<div class=\"grid-row";
-  for (std::size_t r = section.find(open); r != std::string::npos; r = section.find(open, r + 1)) {
-    const std::size_t first = section.find("<span>", r);
-    if (first == std::string::npos) {
-      break;
-    }
-    const std::size_t end = section.find("</span>", first);
-    if (end == std::string::npos) {
-      break;
-    }
-    labels.push_back(section.substr(first + 6, end - first - 6));
+  for (const auto &row : config_rows(html)) {
+    labels.push_back(row.first);
   }
   return labels;
 }
@@ -249,16 +388,17 @@ int main() {
     }
 
     const std::string html = v4l2diag::render_test_content(test);
+    const std::vector<std::pair<std::string, std::string>> got_rows = config_rows(html);
     const std::vector<std::string> got = config_labels(html);
     const std::set<std::string> got_set(got.begin(), got.end());
 
     std::vector<std::string> missing;
-    for (const char *label : e.labels) {
+    for (const ExpectedRow &row : e.rows) {
       ++expected_total;
-      if (got_set.count(label) != 0) {
+      if (got_set.count(row.label) != 0) {
         ++present_total;
       } else {
-        missing.push_back(label);
+        missing.push_back(row.label);
       }
     }
     // Nine rows across six tests carry `Source: derived` in the approved previews: they are
@@ -273,18 +413,41 @@ int main() {
       joined += (joined.empty() ? "" : ", ") + m;
     }
     check(missing.empty(), std::string(e.slug) + " is missing " + std::to_string(missing.size()) + " of " +
-                               std::to_string(e.labels.size()) + " approved configuration rows: " + joined);
+                               std::to_string(e.rows.size()) + " approved configuration rows: " + joined);
 
-    // ...and each derived row must be STAMPED `derived`, not `param`. Checking only the label let a
-    // sabotage that disabled the derived source kind pass: the rows rendered, mislabelled as
-    // settings, which is the claim the Source column exists to make.
-    for (const auto &d : derived_rows()) {
-      if (test.id != d.slug) {
-        continue;
+    // ...in the approved ORDER. Position is part of the design: t18's card opens with what the run
+    // discovered ("Controls discovered", "Writable controls") before the settings that drove it, and
+    // t11's opens with the backend. Comparing sets cannot see that, and did not: the 02:24 run put
+    // every body-recorded row at the bottom of 7 cards and no assertion moved.
+    if (missing.empty()) {
+      std::vector<std::string> approved_order;
+      for (const ExpectedRow &row : e.rows) {
+        approved_order.push_back(row.label);
       }
-      const std::string cell = source_of(html, d.label);
-      check(cell == "derived", std::string(e.slug) + " renders '" + d.label + "' with source '" + cell +
-                                   "'; a computed value must read 'derived'");
+      std::string diff;
+      for (std::size_t i = 0; i < approved_order.size() && i < got.size(); ++i) {
+        if (approved_order[i] != got[i]) {
+          diff = " first difference at row " + std::to_string(i + 1) + ": expected '" + approved_order[i] + "', got '" +
+                 got[i] + "'";
+          break;
+        }
+      }
+      check(approved_order == got,
+            std::string(e.slug) + " renders its configuration rows out of the approved order." + diff);
+    }
+
+    // ...and each row's Source cell must be the one the approved card shows. Derived and fixed rows
+    // make a claim about PROVENANCE -- a computed measurement or a constant of the method, not a
+    // setting somebody chose -- and rendering them all as `param` states the opposite.
+    for (const ExpectedRow &row : e.rows) {
+      const auto at =
+          std::find_if(got_rows.begin(), got_rows.end(),
+                       [&row](const std::pair<std::string, std::string> &r) { return r.first == row.label; });
+      if (at == got_rows.end()) {
+        continue;  // already reported as missing
+      }
+      check(at->second == row.source, std::string(e.slug) + " renders '" + row.label + "' with source '" + at->second +
+                                          "'; the approved card shows '" + row.source + "'");
     }
 
     // The honest empty state must be GONE for every test that has approved rows: it told the
@@ -335,7 +498,7 @@ int main() {
     std::vector<std::string> extra;
     for (const auto &g : got) {
       const bool approved =
-          std::any_of(e.labels.begin(), e.labels.end(), [&g](const char *label) { return g == label; });
+          std::any_of(e.rows.begin(), e.rows.end(), [&g](const ExpectedRow &row) { return g == row.label; });
       if (!approved) {
         extra.push_back(g);
       }
@@ -346,6 +509,21 @@ int main() {
     }
     check(extra.empty(), std::string(e.slug) + " lists " + std::to_string(extra.size()) +
                              " row(s) the approved card does not name: " + extra_list);
+  }
+
+  // Every lookup row reads from the table that actually holds its key. A row pointed at the wrong
+  // table renders 0 -- a number, not an error -- so neither the label check, the order check nor the
+  // Source check can see it. Observed: the resolved default tables, not the runner's source text.
+  {
+    const std::vector<std::string> gaps = v4l2diag::configuration_lookup_gaps();
+    std::string joined;
+    for (const auto &gap : gaps) {
+      joined += "\n    " + gap;
+    }
+    check(gaps.empty(), std::to_string(gaps.size()) +
+                            " configuration row(s) read from a table that does not hold "
+                            "their key, so each renders 0:" +
+                            joined);
   }
 
   // Every body that must record a derived row still does. Observed: the call in the runner source,

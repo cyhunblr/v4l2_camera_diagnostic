@@ -1021,8 +1021,9 @@ std::string test_configuration_rows(const TestResult &test) {
   // Rendering only what the design names is complete by construction. Every approved label is
   // recorded as a detail key by record_run_parameters() or by the test body, verified for all 23
   // tests, so nothing the card should show is lost.
-  const std::vector<std::string> &allowed = configuration_labels_for(test.id);
-  for (const auto &label : allowed) {
+  const std::vector<ConfigRowSpec> &allowed = configuration_rows_for(test.id);
+  for (const auto &spec : allowed) {
+    const std::string label = spec.label;
     // First match wins: a duplicate key (a legacy line kept because some other renderer reads it by
     // name) cannot put the same setting on the card twice.
     for (const auto &detail : test.details) {
@@ -1033,27 +1034,26 @@ std::string test_configuration_rows(const TestResult &test) {
       std::string value;
       std::string unit;
       split_unit(detail.substr(colon + 1), &value, &unit);
+      // record_derived_config() appends this sentinel so a body-recorded value survives the flat
+      // "key: value" transport. It is stripped here for the VALUE's sake only -- the Source cell
+      // comes from the spec, which is the design's statement about the row and not a guess.
       static const std::string kDerivedMark = "@derived";
-      bool is_derived = false;
+      bool marked = false;
       for (std::string *field : {&value, &unit}) {
         const std::size_t mark = field->find(kDerivedMark);
         if (mark == std::string::npos) {
           continue;
         }
-        is_derived = true;
+        marked = true;
         field->erase(mark, kDerivedMark.size());
         *field = trim_of(*field);
       }
-      if (is_derived && value.empty()) {
+      if (marked && value.empty()) {
         value = unit;
         unit.clear();
       }
-      const std::string lowered = lower_of(label);
-      const bool is_threshold =
-          lowered.find("threshold") != std::string::npos || lowered.find("limit") != std::string::npos;
-      const char *source = is_derived ? "derived" : (is_threshold ? "threshold" : "param");
       any = true;
-      out += row({html_escape(label), source, type_word(value), unit_word(unit), html_escape(value)});
+      out += row({html_escape(label), spec.source, type_word(value), unit_word(unit), html_escape(value)});
       break;
     }
   }
@@ -1157,7 +1157,7 @@ std::string measurement_items(const TestResult &test, const std::string &label, 
 }
 
 // The Measurement Result section for a test, built from its approved verdict rows
-// (docs/renderer-data-contract.md). Every row carries a Status -- that is what makes this
+// (docs/assets/refactored_previews/). Every row carries a Status -- that is what makes this
 // section the one place a reader looks to learn whether the numbers passed.
 //
 // A value the run never recorded reads "Unavailable" rather than being dropped: a missing

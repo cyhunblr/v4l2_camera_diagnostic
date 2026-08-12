@@ -103,8 +103,8 @@ struct Expectation {
 };
 
 const Expectation kApproved[] = {
-    // The columns docs/renderer-data-contract.md names for each test, derived from the
-    // 26 approved previews. A renderer that renamed "Sizeimage" to "Size" would still
+    // The columns each test's approved card names, read from the 26 previews in
+    // docs/assets/refactored_previews/. A renderer that renamed "Sizeimage" to "Size" would still
     // produce a plausible table, so the header text itself is the contract.
     //
     // Outcome/State are absent by design: a verdict lives in the Measurement Result
@@ -1353,8 +1353,13 @@ int main() {
                             {"Pixel format", "UYVY"},
                             {"Pairs compared", "49"},
                             {"Participants", "4"}}) {
-        const auto &approved_here = v4l2diag::configuration_labels_for(c.slug);
-        if (std::find(approved_here.begin(), approved_here.end(), d.first) != approved_here.end()) {
+        const auto &approved_here = v4l2diag::configuration_rows_for(c.slug);
+        // Compared as text: both sides are `const char *`, so `==` would compare addresses and
+        // never match.
+        const bool belongs =
+            std::any_of(approved_here.begin(), approved_here.end(),
+                        [&d](const v4l2diag::ConfigRowSpec &r) { return std::string(d.first) == r.label; });
+        if (belongs) {
           v4l2diag::record_derived_config(&test, d.first, d.second);
         }
       }
@@ -1370,11 +1375,11 @@ int main() {
       // ...and the genuine inputs are still there: filtering must not swallow the whole table.
       // Checked against the test's OWN approved row list rather than one hard-coded label -- t03's
       // approved card has no "Capture timeout" row at all, so asserting it there was wrong.
-      const auto &approved = v4l2diag::configuration_labels_for(c.slug);
+      const auto &approved = v4l2diag::configuration_rows_for(c.slug);
       ok &= check(!approved.empty(), std::string(c.slug) + " has no approved configuration rows");
-      for (const auto &label : approved) {
-        ok &= check(section.find(">" + label + "<") != std::string::npos,
-                    std::string(c.slug) + " lost its approved '" + label + "' configuration row");
+      for (const auto &spec : approved) {
+        ok &= check(section.find(std::string(">") + spec.label + "<") != std::string::npos,
+                    std::string(c.slug) + " lost its approved '" + spec.label + "' configuration row");
       }
     }
   }

@@ -3464,52 +3464,49 @@ int multi_buffer_usable_count(const std::vector<MultiBufferOutcome> &outcomes) {
 
 namespace {
 
-// One Test Configuration row: the label the approved preview shows, the parameter key that holds
-// its value, whether it is a threshold, and the display unit.
+// Where record_run_parameters() gets a row's value. Separate from the row's DISPLAYED source (below)
+// because the two genuinely differ: t13's "Production timeout" is read from the threshold table but
+// the approved card calls it a param, and t26's "Latency tolerance" is read from the params table
+// while the card calls it a threshold. Collapsing them into one field would have emptied both rows.
+enum class ConfigOrigin {
+  Param,      // look `key` up in the run's parameter table
+  Threshold,  // look `key` up in the run's threshold table
+  Fixed,      // state `text` as written -- a constant of the method, not a lookup
+  Backend,    // the memory backend this card belongs to, already on the TestResult
+  Body,       // the test body records it with record_derived_config() once its measurement exists
+};
+
+constexpr ConfigOrigin kParam = ConfigOrigin::Param;
+constexpr ConfigOrigin kThreshold = ConfigOrigin::Threshold;
+constexpr ConfigOrigin kFixed = ConfigOrigin::Fixed;
+constexpr ConfigOrigin kBackend = ConfigOrigin::Backend;
+constexpr ConfigOrigin kBody = ConfigOrigin::Body;
+
+// One Test Configuration row, carrying everything the card states about it: the label, the Source
+// cell, where the value comes from, the key it is read under and the display unit.
 //
-// `key == nullptr` marks a row whose value is not a number from the parameter tables -- a fixed
-// statement about the method ("Latency basis", "Continuity signal") or a value only the run itself
-// knows ("Backend memory", "Resolutions enumerated"). Those carry `text` instead, and the ones the
-// run discovers are recorded by the test body rather than here.
+// `source` is CARRIED rather than derived. The renderer used to infer it from the label -- the word
+// "threshold" or "limit" meant threshold, anything else param -- which put `param` on 13 approved
+// thresholds (t05's "Minimum recovery", t08's and t10's "Max error flags", ...) and never emitted
+// the `fixed` kind at all. Inferring a claim from the spelling of a label is the same mistake the
+// allow-list replaced: reading what is already known beats guessing it back.
 struct ConfigRow {
   const char *label;
+  // "param", "threshold", "derived" or "fixed" -- exactly what the approved card's Source cell says.
+  const char *source;
+  ConfigOrigin origin;
   const char *key;
-  bool threshold;
   const char *unit;
   const char *text;
 };
 
-// A row the TEST BODY records via record_derived_config(), because its value is only known once the
-// measurement exists. Listed so configuration_labels_for() -- the renderer's allow-list -- knows the
-// row belongs on the card even though record_run_parameters() does not write it.
-struct DerivedConfigRow {
-  const char *slug;
-  const char *label;
-};
-
-const std::vector<DerivedConfigRow> &derived_config_rows() {
-  static const std::vector<DerivedConfigRow> table = {
-      {"t16-gpio-pulse-width", "Pulse width levels"},
-      {"t16-gpio-pulse-width", "Total captures"},
-      {"t17-format-comparison", "Sizeimage"},
-      {"t18-control-sweep", "Controls discovered"},
-      {"t18-control-sweep", "Writable controls"},
-      {"t18-control-sweep", "Measured max difference"},
-      {"t19-resolution-sweep", "Resolutions enumerated"},
-      {"t19-resolution-sweep", "Pixel format"},
-      {"t22-stuck-frame", "Pairs compared"},
-      {"t25-multi-camera", "Participants"},
-  };
-  return table;
-}
-
 struct TestConfigSpec {
   const char *slug;
+  // In approved ORDER, including the body-recorded rows and the backend row. Both used to be
+  // appended after the parameters, which put them at the bottom of 7 cards while the design has
+  // them elsewhere: t16 opens with "Pulse width levels", t18 with what the run discovered, and
+  // t11 with the backend. Order is part of the design, so the table states it.
   std::vector<ConfigRow> rows;
-  // Almost every approved card closes its Test Configuration with the backend, but t12's does not:
-  // that card is DMABUF-only and its backend band already carries the method note. Defaulted so a
-  // new spec entry gets the row without saying so.
-  bool backend_row = true;
 };
 
 // Transcribed from the approved previews' hardware-trigger cards, in their order. The label is what
@@ -3517,167 +3514,200 @@ struct TestConfigSpec {
 const std::vector<TestConfigSpec> &config_specs() {
   static const std::vector<TestConfigSpec> table = {
       {"t03-pipeline-ready",
-       {{"Cycles", "cycles", false, "", nullptr},
-        {"Buffer count", "buffer_count", false, "", nullptr},
-        {"First-frame deadline", "first_frame_deadline_ms", false, "ms", nullptr},
-        {"Settle time", "settle_ms", false, "ms", nullptr},
-        {"Trigger retry interval", "trigger_retry_ms", false, "ms", nullptr},
-        {"Slow-start guard", "slow_start_ms", false, "ms", nullptr},
-        {"PASS threshold", "pass_first_frame_ms", true, "ms", nullptr},
-        {"WARN threshold", "warn_first_frame_ms", true, "ms", nullptr}}},
+       {{"Cycles", "param", kParam, "cycles", "", nullptr},
+        {"Buffer count", "param", kParam, "buffer_count", "", nullptr},
+        {"First-frame deadline", "param", kParam, "first_frame_deadline_ms", "ms", nullptr},
+        {"Settle time", "param", kParam, "settle_ms", "ms", nullptr},
+        {"Trigger retry interval", "param", kParam, "trigger_retry_ms", "ms", nullptr},
+        {"Slow-start guard", "param", kParam, "slow_start_ms", "ms", nullptr},
+        {"PASS threshold", "threshold", kThreshold, "pass_first_frame_ms", "ms", nullptr},
+        {"WARN threshold", "threshold", kThreshold, "warn_first_frame_ms", "ms", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t04-no-streamon",
-       {{"Buffer count", "buffer_count", false, "", nullptr},
-        {"Poll timeout", "poll_timeout_ms", false, "ms", nullptr}}},
+       {{"Buffer count", "param", kParam, "buffer_count", "", nullptr},
+        {"Poll timeout", "param", kParam, "poll_timeout_ms", "ms", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t05-pollerr-handling",
-       {{"Baseline captures", "baseline_captures", false, "", nullptr},
-        {"Recovery captures", "recovery_captures", false, "", nullptr},
-        {"Warmup count", "warmup_count", false, "", nullptr},
-        {"Minimum recovery", "min_recovery_ok", true, "", nullptr},
-        {"Poll timeout", "poll_timeout_ms", false, "ms", nullptr}}},
+       {{"Baseline captures", "param", kParam, "baseline_captures", "", nullptr},
+        {"Recovery captures", "param", kParam, "recovery_captures", "", nullptr},
+        {"Warmup count", "param", kParam, "warmup_count", "", nullptr},
+        {"Minimum recovery", "threshold", kThreshold, "min_recovery_ok", "", nullptr},
+        {"Poll timeout", "param", kParam, "poll_timeout_ms", "ms", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t06-stream-cycles",
-       {{"Full cycles", "full_cycles", false, "", nullptr},
-        {"Rapid cycles", "rapid_cycles", false, "", nullptr},
-        {"Full warmup", "full_warmup", false, "", nullptr},
-        {"Rapid warmup", "rapid_warmup", false, "", nullptr},
-        {"Full timeout", "full_timeout_ms", false, "ms", nullptr},
-        {"Rapid timeout", "rapid_timeout_ms", false, "ms", nullptr},
-        {"Rapid pacing", "rapid_pacing_ms", false, "ms", nullptr},
-        {"Slow-start guard", "slow_start_ms", false, "ms", nullptr},
-        {"Full pass threshold", "max_full_failures_pass", true, "", nullptr},
-        {"Full warn threshold", "max_full_failures_warn", true, "", nullptr},
-        {"Rapid pass threshold", "rapid_pct_pass", true, "", nullptr},
-        {"Rapid warn threshold", "rapid_pct_warn", true, "", nullptr}}},
+       {{"Full cycles", "param", kParam, "full_cycles", "", nullptr},
+        {"Rapid cycles", "param", kParam, "rapid_cycles", "", nullptr},
+        {"Full warmup", "param", kParam, "full_warmup", "", nullptr},
+        {"Rapid warmup", "param", kParam, "rapid_warmup", "", nullptr},
+        {"Full timeout", "param", kParam, "full_timeout_ms", "ms", nullptr},
+        {"Rapid timeout", "param", kParam, "rapid_timeout_ms", "ms", nullptr},
+        {"Rapid pacing", "param", kParam, "rapid_pacing_ms", "ms", nullptr},
+        {"Slow-start guard", "param", kParam, "slow_start_ms", "ms", nullptr},
+        {"Full pass threshold", "threshold", kThreshold, "max_full_failures_pass", "", nullptr},
+        {"Full warn threshold", "threshold", kThreshold, "max_full_failures_warn", "", nullptr},
+        {"Rapid pass threshold", "threshold", kThreshold, "rapid_pct_pass", "", nullptr},
+        {"Rapid warn threshold", "threshold", kThreshold, "rapid_pct_warn", "", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t07-multi-buffer",
-       {{"Sample count", "sample_count", false, "", nullptr},
-        {"Max buffers", "max_buffers", false, "", nullptr},
-        {"Warmup count", "warmup_count", false, "", nullptr},
-        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
-        {"Sample interval", "sample_interval_ms", false, "ms", nullptr}}},
+       {{"Sample count", "param", kParam, "sample_count", "", nullptr},
+        {"Max buffers", "param", kParam, "max_buffers", "", nullptr},
+        {"Warmup count", "param", kParam, "warmup_count", "", nullptr},
+        {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
+        {"Sample interval", "param", kParam, "sample_interval_ms", "ms", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t08-buffer-overwrite",
-       {{"Buffer count", "buffer_count", false, "", nullptr},
-        {"Variant A triggers", "variant_a_triggers", false, "", nullptr},
-        {"Variant A interval", "variant_a_interval_ms", false, "ms", nullptr},
-        {"Variant B triggers", "variant_b_triggers", false, "", nullptr},
-        {"Variant B interval", "variant_b_interval_ms", false, "ms", nullptr},
-        {"Settle time", "settle_ms", false, "ms", nullptr},
-        {"Max error flags", "max_error_flags", true, "", nullptr}}},
+       {{"Buffer count", "param", kParam, "buffer_count", "", nullptr},
+        {"Variant A triggers", "param", kParam, "variant_a_triggers", "", nullptr},
+        {"Variant A interval", "param", kParam, "variant_a_interval_ms", "ms", nullptr},
+        {"Variant B triggers", "param", kParam, "variant_b_triggers", "", nullptr},
+        {"Variant B interval", "param", kParam, "variant_b_interval_ms", "ms", nullptr},
+        {"Settle time", "param", kParam, "settle_ms", "ms", nullptr},
+        {"Max error flags", "threshold", kThreshold, "max_error_flags", "", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       // T09 did not run on the 2026-08-11 device (no trigger match), so it was absent from the
       // deviation scan; its preview does carry these six rows.
       {"t09-buffer-recycling",
-       {{"Reps per delay", "reps_per_delay", false, "", nullptr},
-        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
-        {"Inter-rep interval", "inter_rep_interval_ms", false, "ms", nullptr},
-        {"Warmup count", "warmup_count", false, "", nullptr},
-        {"Min safe cliff delay", "min_safe_cliff_delay_ms", true, "ms", nullptr}}},
+       {{"Reps per delay", "param", kParam, "reps_per_delay", "", nullptr},
+        {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
+        {"Inter-rep interval", "param", kParam, "inter_rep_interval_ms", "ms", nullptr},
+        {"Warmup count", "param", kParam, "warmup_count", "", nullptr},
+        {"Min safe cliff delay", "threshold", kThreshold, "min_safe_cliff_delay_ms", "ms", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t10-buffer-flags",
-       {{"Sample count", "sample_count", false, "", nullptr},
-        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
-        {"Sample interval", "sample_interval_ms", false, "ms", nullptr},
-        {"Warmup count", "warmup_count", false, "", nullptr},
-        {"Max error flags", "max_error_flags", true, "", nullptr}}},
+       {{"Sample count", "param", kParam, "sample_count", "", nullptr},
+        {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
+        {"Sample interval", "param", kParam, "sample_interval_ms", "ms", nullptr},
+        {"Warmup count", "param", kParam, "warmup_count", "", nullptr},
+        {"Max error flags", "threshold", kThreshold, "max_error_flags", "", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t11-memory-throughput",
-       {// T11 opens its session with a fixed depth of 2 (see run_memory_throughput); it is not a
+       {{"Backend memory", "param", kBackend, nullptr, "", nullptr},
+        // T11 opens its session with a fixed depth of 2 (see run_memory_throughput); it is not a
         // configurable parameter, so it is stated rather than looked up.
-        {"Allocated buffers", nullptr, false, "", "2"},
-        {"Minimum repetitions", "benchmark_reps", false, "", nullptr},
-        {"Target sample time", nullptr, false, "", "100ms"},
-        {"Timer", nullptr, false, "", "CLOCK_MONOTONIC"},
-        {"Stream state", nullptr, false, "", "Streaming"}}},
+        {"Allocated buffers", "param", kFixed, nullptr, "", "2"},
+        {"Minimum repetitions", "param", kParam, "benchmark_reps", "", nullptr},
+        {"Target sample time", "param", kFixed, nullptr, "", "100ms"},
+        {"Timer", "fixed", kFixed, nullptr, "", "CLOCK_MONOTONIC"},
+        {"Stream state", "derived", kFixed, nullptr, "", "Streaming"}}},
       {"t12-dmabuf-cache-sync",
-       {{"Requested samples", "sample_count", false, "", nullptr},
-        {"Compared data", nullptr, false, "", "Full bytesused"},
-        {"Warmup frames", "warmup_count", false, "", nullptr},
-        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
-        {"Buffer count", nullptr, false, "", "2"}},
-       false},
+       {{"Requested samples", "param", kParam, "sample_count", "", nullptr},
+        {"Compared data", "fixed", kFixed, nullptr, "", "Full bytesused"},
+        {"Warmup frames", "param", kParam, "warmup_count", "", nullptr},
+        {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
+        {"Buffer count", "param", kFixed, nullptr, "", "2"}}},
       {"t13-poll-timeout-cliff",
-       {{"Probe samples per timeout", "probe_frames", false, "", nullptr},
-        {"Stability rounds", "stability_rounds", false, "", nullptr},
-        {"Frames per round", "stability_frames", false, "", nullptr},
-        {"Warmup frames", "warmup_count", false, "", nullptr},
-        {"Configured safe margin", "safe_margin_ms", true, "ms", nullptr},
-        // Lives in the THRESHOLD table, not the params table -- reading it through tpv() resolved
-        // to 0 and the card printed "Production timeout 0ms" beside the runner's own 48.5.
-        {"Production timeout", "production_timeout_ms", true, "ms", nullptr}}},
+       {{"Probe samples per timeout", "param", kParam, "probe_frames", "", nullptr},
+        {"Stability rounds", "param", kParam, "stability_rounds", "", nullptr},
+        {"Frames per round", "param", kParam, "stability_frames", "", nullptr},
+        {"Warmup frames", "param", kParam, "warmup_count", "", nullptr},
+        {"Configured safe margin", "threshold", kThreshold, "safe_margin_ms", "ms", nullptr},
+        // Read from the THRESHOLD table -- tpv() resolved it to 0 and the card printed "Production
+        // timeout 0ms" beside the runner's own 48.5. The approved card still calls it a param, which
+        // is why origin and source are separate fields.
+        {"Production timeout", "param", kThreshold, "production_timeout_ms", "ms", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t14-trigger-latency",
-       {{"Latency samples", "sample_count", false, "", nullptr},
-        {"Warmup triggers", "warmup_count", false, "", nullptr},
-        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
-        {"Sample interval", "sample_interval_ms", false, "ms", nullptr},
+       {{"Latency samples", "param", kParam, "sample_count", "", nullptr},
+        {"Warmup triggers", "param", kParam, "warmup_count", "", nullptr},
+        {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
+        {"Sample interval", "param", kParam, "sample_interval_ms", "ms", nullptr},
         // The trigger profile's pulse width. run_test() injects it into `tp` in NANOseconds, and
         // the approved row shows milliseconds, so it is scaled below rather than printed raw.
-        {"Pulse width", "__pulse_width_ns", false, "ms", nullptr}}},
+        {"Pulse width", "param", kParam, "__pulse_width_ns", "ms", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t15-nonblock-vs-block",
-       {{"Samples per mode", "sample_count", false, "", nullptr},
-        {"Spin deadline", "spin_deadline_ms", false, "ms", nullptr},
-        {"Sample interval", "sample_interval_ms", false, "ms", nullptr},
-        {"Warmup frames", "warmup_count", false, "", nullptr}}},
+       {{"Samples per mode", "param", kParam, "sample_count", "", nullptr},
+        {"Spin deadline", "param", kParam, "spin_deadline_ms", "ms", nullptr},
+        {"Sample interval", "param", kParam, "sample_interval_ms", "ms", nullptr},
+        {"Warmup frames", "param", kParam, "warmup_count", "", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t16-gpio-pulse-width",
-       {// "Pulse width levels" and "Total captures" are recorded by the test body: they come from
-        // the sweep's own width list, not from the parameter tables.
-        {"Samples per width", "samples_per_width", false, "", nullptr},
-        {"Poll timeout", "poll_timeout_ms", false, "ms", nullptr},
-        {"Warmup frames", "warmup_count", false, "", nullptr},
-        {"LOW edge reference", "edge_margin_ms", false, "ms", nullptr},
-        {"Trigger edge", nullptr, false, "", "Rising"}}},
+       {// "Pulse width levels" and "Total captures" come from the sweep's own width list, so the
+        // body records them -- but the design puts them at rows 1 and 3, not at the end.
+        {"Pulse width levels", "param", kBody, nullptr, "", nullptr},
+        {"Samples per width", "param", kParam, "samples_per_width", "", nullptr},
+        {"Total captures", "derived", kBody, nullptr, "", nullptr},
+        {"Poll timeout", "param", kParam, "poll_timeout_ms", "ms", nullptr},
+        {"Warmup frames", "param", kParam, "warmup_count", "", nullptr},
+        {"LOW edge reference", "derived", kParam, "edge_margin_ms", "ms", nullptr},
+        {"Trigger edge", "derived", kFixed, nullptr, "", "Rising"},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t17-format-comparison",
-       {{"Samples per format", "sample_count", false, "", nullptr},
-        {"Memcpy repetitions", "throughput_reps", false, "", nullptr},
-        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
-        {"Latency basis", nullptr, false, "", "Trigger to DQBUF"},
-        {"Throughput divisor", nullptr, false, "", "bytesused"}}},
+       {{"Samples per format", "param", kParam, "sample_count", "", nullptr},
+        {"Memcpy repetitions", "param", kParam, "throughput_reps", "", nullptr},
+        {"Sizeimage", "derived", kBody, nullptr, "", nullptr},
+        {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
+        {"Latency basis", "derived", kFixed, nullptr, "", "Trigger to DQBUF"},
+        {"Throughput divisor", "fixed", kFixed, nullptr, "", "bytesused"},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t18-control-sweep",
-       {{"Captures per value", "sample_count", false, "", nullptr},
-        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
-        {"Practical impact threshold", nullptr, true, "", "1ms"}}},
+       {{"Controls discovered", "derived", kBody, nullptr, "", nullptr},
+        {"Writable controls", "derived", kBody, nullptr, "", nullptr},
+        {"Captures per value", "param", kParam, "sample_count", "", nullptr},
+        {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
+        {"Practical impact threshold", "threshold", kFixed, nullptr, "", "1ms"},
+        {"Measured max difference", "derived", kBody, nullptr, "", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t19-resolution-sweep",
-       {{"Samples per resolution", "sample_count", false, "", nullptr},
-        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
-        {"Latency basis", nullptr, false, "", "Trigger to DQBUF"}}},
+       {{"Samples per resolution", "param", kParam, "sample_count", "", nullptr},
+        {"Resolutions enumerated", "derived", kBody, nullptr, "", nullptr},
+        {"Pixel format", "derived", kBody, nullptr, "", nullptr},
+        {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
+        {"Latency basis", "derived", kFixed, nullptr, "", "Trigger to DQBUF"},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t20-sequence-continuity",
-       {{"Requested frames", "sample_count", false, "", nullptr},
-        {"Warmup frames", "warmup_count", false, "", nullptr},
-        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
-        {"Max allowed gaps", "max_dropped_frames", true, "", nullptr},
-        {"Continuity signal", nullptr, false, "", "buffer.sequence"}}},
+       {{"Requested frames", "param", kParam, "sample_count", "", nullptr},
+        {"Warmup frames", "param", kParam, "warmup_count", "", nullptr},
+        {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
+        {"Max allowed gaps", "threshold", kThreshold, "max_dropped_frames", "", nullptr},
+        {"Continuity signal", "fixed", kFixed, nullptr, "", "buffer.sequence"},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t21-timestamp-monotonicity",
-       {{"Requested frames", "sample_count", false, "", nullptr},
-        {"Warmup frames", "warmup_count", false, "", nullptr},
-        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
-        {"Max non-monotonic events", "max_non_monotonic", true, "", nullptr},
-        {"Ordering signal", nullptr, false, "", "buffer.timestamp"}}},
+       {{"Requested frames", "param", kParam, "sample_count", "", nullptr},
+        {"Warmup frames", "param", kParam, "warmup_count", "", nullptr},
+        {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
+        {"Max non-monotonic events", "threshold", kThreshold, "max_non_monotonic", "", nullptr},
+        {"Ordering signal", "fixed", kFixed, nullptr, "", "buffer.timestamp"},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t22-stuck-frame",
-       {{"Frames requested", "sample_count", false, "", nullptr},
-        {"Compare bytes", "compare_bytes", false, "", nullptr},
-        {"Identical threshold", "max_identical_run", true, "", nullptr},
-        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr}}},
+       {{"Frames requested", "param", kParam, "sample_count", "", nullptr},
+        {"Pairs compared", "derived", kBody, nullptr, "", nullptr},
+        {"Compare bytes", "param", kParam, "compare_bytes", "", nullptr},
+        {"Identical threshold", "threshold", kThreshold, "max_identical_run", "", nullptr},
+        {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t23-sustained-capture",
-       {{"Test duration", "duration_sec", false, "s", nullptr},
-        {"Window size", "window_sec", false, "s", nullptr},
-        {"Sample interval", "sample_interval_ms", false, "ms", nullptr},
-        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr},
-        {"Warmup frames", "warmup_count", false, "", nullptr},
-        {"Drift PASS limit", "pass_drift_ms", true, "ms", nullptr}}},
+       {{"Test duration", "param", kParam, "duration_sec", "s", nullptr},
+        {"Window size", "param", kParam, "window_sec", "s", nullptr},
+        {"Sample interval", "param", kParam, "sample_interval_ms", "ms", nullptr},
+        {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
+        {"Warmup frames", "param", kParam, "warmup_count", "", nullptr},
+        {"Drift PASS limit", "threshold", kThreshold, "pass_drift_ms", "ms", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t24-latency-under-load",
-       {{"Samples per phase", "sample_count", false, "", nullptr},
-        {"Load threads", "load_threads", false, "", nullptr},
-        {"Baseline timeout", "baseline_timeout_ms", false, "ms", nullptr},
-        {"Load phase timeout", "load_timeout_ms", false, "ms", nullptr},
-        {"P95 delta PASS limit", "pass_delta_p95_ms", true, "ms", nullptr},
-        {"P95 delta FAIL limit", "warn_delta_p95_ms", true, "ms", nullptr}}},
+       {{"Samples per phase", "param", kParam, "sample_count", "", nullptr},
+        {"Load threads", "param", kParam, "load_threads", "", nullptr},
+        {"Baseline timeout", "param", kParam, "baseline_timeout_ms", "ms", nullptr},
+        {"Load phase timeout", "param", kParam, "load_timeout_ms", "ms", nullptr},
+        {"P95 delta PASS limit", "threshold", kThreshold, "pass_delta_p95_ms", "ms", nullptr},
+        {"P95 delta FAIL limit", "threshold", kThreshold, "warn_delta_p95_ms", "ms", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t25-multi-camera",
-       {{"Requested rounds", "sample_count", false, "", nullptr},
-        {"Round deadline", "poll_timeout_ms", false, "ms", nullptr},
-        {"Capture PASS limit", nullptr, true, "", "100%"},
-        {"Capture FAIL limit", nullptr, true, "", "90%"},
-        {"Sync PASS limit", nullptr, true, "", "1ms"},
-        {"Sync FAIL limit", nullptr, true, "", "5ms"}}},
+       {{"Requested rounds", "param", kParam, "sample_count", "", nullptr},
+        {"Participants", "derived", kBody, nullptr, "", nullptr},
+        {"Round deadline", "param", kParam, "poll_timeout_ms", "ms", nullptr},
+        {"Capture PASS limit", "threshold", kFixed, nullptr, "", "100%"},
+        {"Capture FAIL limit", "threshold", kFixed, nullptr, "", "90%"},
+        {"Sync PASS limit", "threshold", kFixed, nullptr, "", "1ms"},
+        {"Sync FAIL limit", "threshold", kFixed, nullptr, "", "5ms"},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t26-cold-start",
-       {{"Fresh cycles", "cycles", false, "", nullptr},
-        {"Observation window (frames)", "max_frames_per_cycle", false, "", nullptr},
-        {"Reference window", "stability_threshold_pct", false, "", nullptr},
-        {"Latency tolerance", "inter_frame_interval_ms", false, "ms", nullptr},
-        {"Capture timeout", "capture_timeout_ms", false, "ms", nullptr}}},
+       {{"Fresh cycles", "param", kParam, "cycles", "", nullptr},
+        {"Observation window (frames)", "param", kParam, "max_frames_per_cycle", "", nullptr},
+        {"Reference window", "param", kParam, "stability_threshold_pct", "", nullptr},
+        {"Latency tolerance", "threshold", kParam, "inter_frame_interval_ms", "ms", nullptr},
+        {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
+        {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
   };
   return table;
 }
@@ -3694,13 +3724,31 @@ void record_run_parameters(TestResult *test, const TestThresholds &configured_th
       continue;
     }
     for (const auto &row : spec.rows) {
-      if (row.key == nullptr) {
-        // A fixed statement about the method, or a value the run does not compute.
+      // The test body writes this one, once its measurement exists. Nothing to record here; the
+      // row still belongs to the spec so the card shows it in the design's position.
+      if (row.origin == ConfigOrigin::Body) {
+        continue;
+      }
+      // The backend the card belongs to. Only 13 of 24 runners used to record it, so 11 cards
+      // omitted a row the design always shows -- and it is already on the TestResult, so no runner
+      // needs to remember to write it.
+      if (row.origin == ConfigOrigin::Backend) {
+        if (test->memory_backend.empty()) {
+          continue;
+        }
+        std::string display;
+        for (const char c : test->memory_backend) {
+          display.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+        }
+        test->details.push_back(std::string(row.label) + ": " + display);
+        continue;
+      }
+      if (row.origin == ConfigOrigin::Fixed) {
         test->details.push_back(std::string(row.label) + ": " + row.text);
         continue;
       }
-      double value =
-          row.threshold ? thv(configured_thresholds, spec.slug, row.key) : tpv(configured_params, spec.slug, row.key);
+      double value = row.origin == ConfigOrigin::Threshold ? thv(configured_thresholds, spec.slug, row.key)
+                                                           : tpv(configured_params, spec.slug, row.key);
       // The injected keys carry the units run_test() uses, not the units the row displays.
       if (std::string(row.key) == "__pulse_width_ns") {
         if (value <= 0.0) {
@@ -3710,41 +3758,59 @@ void record_run_parameters(TestResult *test, const TestThresholds &configured_th
       }
       test->details.push_back(std::string(row.label) + ": " + param_text(value, row.unit));
     }
-    // Every approved card ends its Test Configuration with the backend the cards belong to. Only
-    // 13 of 24 runners recorded it, so the other 11 cards omitted a row the design always shows --
-    // and the backend is already on the TestResult, so no runner needs to remember to write it.
-    if (spec.backend_row && !test->memory_backend.empty()) {
-      std::string display;
-      for (const char c : test->memory_backend) {
-        display.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
-      }
-      test->details.push_back("Backend memory: " + display);
-    }
     return;
   }
 }
 
-const std::vector<std::string> &configuration_labels_for(const std::string &test_id) {
-  static const std::vector<std::string> kNone;
-  // Built once from the same spec table record_run_parameters() writes from, so the allow-list and
-  // the recorder can never disagree about which rows a card has.
-  static const std::map<std::string, std::vector<std::string>> kByTest = [] {
-    std::map<std::string, std::vector<std::string>> table;
+std::vector<std::string> configuration_lookup_gaps() {
+  std::vector<std::string> gaps;
+  const std::map<std::string, TestThresholds> params = default_test_params();
+  const ThresholdConfig thresholds = default_threshold_config();
+  for (const auto &spec : config_specs()) {
+    for (const auto &row : spec.rows) {
+      if (row.origin != ConfigOrigin::Param && row.origin != ConfigOrigin::Threshold) {
+        continue;
+      }
+      // Injected into `tp` by run_test() per run, so it is absent from the default table by
+      // design; record_run_parameters() carries its own fallback for it.
+      if (std::string(row.key) == "__pulse_width_ns") {
+        continue;
+      }
+      const bool in_params = [&] {
+        const auto it = params.find(spec.slug);
+        return it != params.end() && it->second.count(row.key) != 0;
+      }();
+      const bool in_thresholds = [&] {
+        const auto it = thresholds.values.find(spec.slug);
+        return it != thresholds.values.end() && it->second.count(row.key) != 0;
+      }();
+      const bool wants_params = row.origin == ConfigOrigin::Param;
+      if (wants_params == in_params) {
+        continue;
+      }
+      const std::string table = wants_params ? "parameter" : "threshold";
+      const std::string other = wants_params ? "threshold" : "parameter";
+      gaps.push_back(std::string(spec.slug) + "/" + row.key + " is read from the " + table +
+                     " table, which has no such key" +
+                     ((wants_params ? in_thresholds : in_params) ? " (it is in the " + other + " table)" : ""));
+    }
+  }
+  return gaps;
+}
+
+const std::vector<ConfigRowSpec> &configuration_rows_for(const std::string &test_id) {
+  static const std::vector<ConfigRowSpec> kNone;
+  // Built once from the same spec table record_run_parameters() writes from, so the allow-list, the
+  // row order and the Source column can never disagree with what the recorder produces.
+  static const std::map<std::string, std::vector<ConfigRowSpec>> kByTest = [] {
+    std::map<std::string, std::vector<ConfigRowSpec>> table;
     for (const auto &spec : config_specs()) {
-      std::vector<std::string> labels;
-      labels.reserve(spec.rows.size() + 1);
+      std::vector<ConfigRowSpec> rows;
+      rows.reserve(spec.rows.size());
       for (const auto &row : spec.rows) {
-        labels.push_back(row.label);
+        rows.push_back(ConfigRowSpec{row.label, row.source});
       }
-      if (spec.backend_row) {
-        labels.push_back("Backend memory");
-      }
-      for (const auto &derived : derived_config_rows()) {
-        if (spec.slug == derived.slug) {
-          labels.push_back(derived.label);
-        }
-      }
-      table.emplace(spec.slug, std::move(labels));
+      table.emplace(spec.slug, std::move(rows));
     }
     return table;
   }();
