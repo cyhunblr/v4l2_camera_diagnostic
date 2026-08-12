@@ -56,6 +56,37 @@ struct ExpectedRow {
   // t21's "Max non-monotonic events", t26's "Latency tolerance", t09's "Min safe cliff delay"),
   // and the `fixed` kind the previews use for method constants was never emitted at all.
   const char *source;
+  // Type, Unit and Value as the approved card shows them, checked alongside Variable and Source.
+  //
+  // Three of the five cells were unchecked until the 2026-08-12 measurement, which found 35 rows
+  // deviating: 16 thresholds printed a bare number where the design states a DIRECTION ("500" for
+  // "<= 500", so the reader cannot tell a ceiling from a floor), 5 method constants carried the
+  // code's wording instead of the design's ("CLOCK_MONOTONIC" for "Monotonic"), and 2 rows were
+  // bound to the wrong key entirely (t26's "Latency tolerance" read a millisecond interval for a
+  // percentage tolerance).
+  //
+  // Nine rows deliberately expect TODAY'S value rather than the design's:
+  //
+  //   - Five `param` rows (four "Capture timeout" defaults, t19's "Samples per resolution"). A
+  //     settings row states what THIS run used, so a preview authored with other numbers is not a
+  //     deviation -- forcing the default to match it would change how runs behave, not what the
+  //     card says.
+  //   - t13's "Production timeout" and t14's "Pulse width" are resolved per run; both match the
+  //     design on a device, and only the parameter-table default differs.
+  //   - t17's "Sizeimage" keeps `float`: the design cell reads type `int` beside the value 4.69,
+  //     which cannot both be true.
+  //   - t25's "Capture FAIL limit" shows 90 where the design says "< 95". Left alone because
+  //     run_multi_camera has NO capture-rate rule at all -- its verdict is jitter p95 only -- so
+  //     either number states a criterion the code does not apply. Reported as a gap, not painted
+  //     over.
+  //
+  // t20's "Max allowed gaps" and t25's two sync limits USED to sit in this list and no longer do:
+  // the code turned out to agree with the design once read (t20's doc defines PASS as zero dropped
+  // frames; run_multi_camera passes under 5 ms and fails at 20 ms), so the card was simply wrong.
+  const char *type;
+  const char *unit;
+  // Includes the comparator the design prints ("<= 500"), because dropping it drops the direction.
+  const char *value;
 };
 
 struct Expectation {
@@ -76,186 +107,189 @@ struct Expectation {
 const std::vector<Expectation> &expectations() {
   static const std::vector<Expectation> table = {
       {"t03-pipeline-ready",
-       {{"Cycles", "param"},
-        {"Buffer count", "param"},
-        {"First-frame deadline", "param"},
-        {"Settle time", "param"},
-        {"Trigger retry interval", "param"},
-        {"Slow-start guard", "param"},
-        {"PASS threshold", "threshold"},
-        {"WARN threshold", "threshold"},
-        {"Backend memory", "param"}}},
-      {"t04-no-streamon", {{"Buffer count", "param"}, {"Poll timeout", "param"}, {"Backend memory", "param"}}},
+       {{"Cycles", "param", "int", "—", "3"},
+        {"Buffer count", "param", "int", "—", "2"},
+        {"First-frame deadline", "param", "int", "milliseconds", "3000"},
+        {"Settle time", "param", "int", "milliseconds", "500"},
+        {"Trigger retry interval", "param", "int", "milliseconds", "100"},
+        {"Slow-start guard", "param", "int", "milliseconds", "2000"},
+        {"PASS threshold", "threshold", "int", "milliseconds", "≤ 500"},
+        {"WARN threshold", "threshold", "int", "milliseconds", "≤ 1500"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
+      {"t04-no-streamon",
+       {{"Buffer count", "param", "int", "—", "2"},
+        {"Poll timeout", "param", "int", "milliseconds", "50"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t05-pollerr-handling",
-       {{"Baseline captures", "param"},
-        {"Recovery captures", "param"},
-        {"Warmup count", "param"},
-        {"Minimum recovery", "threshold"},
-        {"Poll timeout", "param"},
-        {"Backend memory", "param"}}},
+       {{"Baseline captures", "param", "int", "—", "3"},
+        {"Recovery captures", "param", "int", "—", "3"},
+        {"Warmup count", "param", "int", "—", "3"},
+        {"Minimum recovery", "threshold", "int", "—", "≥ 2"},
+        {"Poll timeout", "param", "int", "milliseconds", "100"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t06-stream-cycles",
-       {{"Full cycles", "param"},
-        {"Rapid cycles", "param"},
-        {"Full warmup", "param"},
-        {"Rapid warmup", "param"},
-        {"Full timeout", "param"},
-        {"Rapid timeout", "param"},
-        {"Rapid pacing", "param"},
-        {"Slow-start guard", "param"},
-        {"Full pass threshold", "threshold"},
-        {"Full warn threshold", "threshold"},
-        {"Rapid pass threshold", "threshold"},
-        {"Rapid warn threshold", "threshold"},
-        {"Backend memory", "param"}}},
+       {{"Full cycles", "param", "int", "—", "20"},
+        {"Rapid cycles", "param", "int", "—", "50"},
+        {"Full warmup", "param", "int", "—", "3"},
+        {"Rapid warmup", "param", "int", "—", "2"},
+        {"Full timeout", "param", "int", "milliseconds", "150"},
+        {"Rapid timeout", "param", "int", "milliseconds", "200"},
+        {"Rapid pacing", "param", "int", "milliseconds", "250"},
+        {"Slow-start guard", "param", "int", "milliseconds", "2000"},
+        {"Full pass threshold", "threshold", "int", "—", "≤ 0"},
+        {"Full warn threshold", "threshold", "int", "—", "≤ 2"},
+        {"Rapid pass threshold", "threshold", "float", "percent", "≥ 90"},
+        {"Rapid warn threshold", "threshold", "float", "percent", "≥ 70"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t07-multi-buffer",
-       {{"Sample count", "param"},
-        {"Max buffers", "param"},
-        {"Warmup count", "param"},
-        {"Capture timeout", "param"},
-        {"Sample interval", "param"},
-        {"Backend memory", "param"}}},
+       {{"Sample count", "param", "int", "—", "20"},
+        {"Max buffers", "param", "int", "—", "5"},
+        {"Warmup count", "param", "int", "—", "3"},
+        {"Capture timeout", "param", "int", "milliseconds", "100"},
+        {"Sample interval", "param", "int", "milliseconds", "200"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t08-buffer-overwrite",
-       {{"Buffer count", "param"},
-        {"Variant A triggers", "param"},
-        {"Variant A interval", "param"},
-        {"Variant B triggers", "param"},
-        {"Variant B interval", "param"},
-        {"Settle time", "param"},
-        {"Max error flags", "threshold"},
-        {"Backend memory", "param"}}},
+       {{"Buffer count", "param", "int", "—", "2"},
+        {"Variant A triggers", "param", "int", "—", "100"},
+        {"Variant A interval", "param", "int", "milliseconds", "100"},
+        {"Variant B triggers", "param", "int", "—", "200"},
+        {"Variant B interval", "param", "int", "milliseconds", "50"},
+        {"Settle time", "param", "int", "milliseconds", "500"},
+        {"Max error flags", "threshold", "int", "—", "0"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t09-buffer-recycling",
-       {{"Reps per delay", "param"},
-        {"Capture timeout", "param"},
-        {"Inter-rep interval", "param"},
-        {"Warmup count", "param"},
-        {"Min safe cliff delay", "threshold"},
-        {"Backend memory", "param"}}},
+       {{"Reps per delay", "param", "int", "—", "10"},
+        {"Capture timeout", "param", "int", "milliseconds", "100"},
+        {"Inter-rep interval", "param", "int", "milliseconds", "100"},
+        {"Warmup count", "param", "int", "—", "5"},
+        {"Min safe cliff delay", "threshold", "int", "milliseconds", "50"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t10-buffer-flags",
-       {{"Sample count", "param"},
-        {"Capture timeout", "param"},
-        {"Sample interval", "param"},
-        {"Warmup count", "param"},
-        {"Max error flags", "threshold"},
-        {"Backend memory", "param"}}},
+       {{"Sample count", "param", "int", "—", "50"},
+        {"Capture timeout", "param", "int", "milliseconds", "100"},
+        {"Sample interval", "param", "int", "milliseconds", "100"},
+        {"Warmup count", "param", "int", "—", "5"},
+        {"Max error flags", "threshold", "int", "—", "0"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t11-memory-throughput",
-       {{"Backend memory", "param"},
-        {"Allocated buffers", "param"},
-        {"Minimum repetitions", "param"},
-        {"Target sample time", "param"},
-        {"Timer", "fixed"},
-        {"Stream state", "derived"}}},
+       {{"Backend memory", "param", "string", "—", "MMAP"},
+        {"Allocated buffers", "param", "int", "—", "2"},
+        {"Minimum repetitions", "param", "int", "—", "100"},
+        {"Target sample time", "param", "int", "milliseconds", "100"},
+        {"Timer", "fixed", "string", "—", "Monotonic"},
+        {"Stream state", "derived", "string", "—", "Not started"}}},
       {"t12-dmabuf-cache-sync",
-       {{"Requested samples", "param"},
-        {"Compared data", "fixed"},
-        {"Warmup frames", "param"},
-        {"Capture timeout", "param"},
-        {"Buffer count", "param"}}},
+       {{"Requested samples", "param", "int", "—", "20"},
+        {"Compared data", "fixed", "string", "—", "Full bytesused"},
+        {"Warmup frames", "param", "int", "—", "5"},
+        {"Capture timeout", "param", "int", "milliseconds", "100"},
+        {"Buffer count", "param", "int", "—", "2"}}},
       {"t13-poll-timeout-cliff",
-       {{"Probe samples per timeout", "param"},
-        {"Stability rounds", "param"},
-        {"Frames per round", "param"},
-        {"Warmup frames", "param"},
-        {"Configured safe margin", "threshold"},
-        {"Production timeout", "param"},
-        {"Backend memory", "param"}}},
+       {{"Probe samples per timeout", "param", "int", "—", "10"},
+        {"Stability rounds", "param", "int", "—", "5"},
+        {"Frames per round", "param", "int", "—", "10"},
+        {"Warmup frames", "param", "int", "—", "10"},
+        {"Configured safe margin", "threshold", "int", "milliseconds", "5"},
+        {"Production timeout", "param", "int", "milliseconds", "100"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t14-trigger-latency",
-       {{"Latency samples", "param"},
-        {"Warmup triggers", "param"},
-        {"Capture timeout", "param"},
-        {"Sample interval", "param"},
-        {"Pulse width", "param"},
-        {"Backend memory", "param"}}},
+       {{"Latency samples", "param", "int", "—", "50"},
+        {"Warmup triggers", "param", "int", "—", "5"},
+        {"Capture timeout", "param", "int", "milliseconds", "100"},
+        {"Sample interval", "param", "int", "milliseconds", "200"},
+        {"Pulse width", "param", "int", "milliseconds", "13"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t15-nonblock-vs-block",
-       {{"Samples per mode", "param"},
-        {"Spin deadline", "param"},
-        {"Sample interval", "param"},
-        {"Warmup frames", "param"},
-        {"Backend memory", "param"}}},
+       {{"Samples per mode", "param", "int", "—", "30"},
+        {"Spin deadline", "param", "int", "milliseconds", "100"},
+        {"Sample interval", "param", "int", "milliseconds", "200"},
+        {"Warmup frames", "param", "int", "—", "5"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t16-gpio-pulse-width",
-       {{"Pulse width levels", "param"},
-        {"Samples per width", "param"},
-        {"Total captures", "derived"},
-        {"Poll timeout", "param"},
-        {"Warmup frames", "param"},
-        {"LOW edge reference", "derived"},
-        {"Trigger edge", "derived"},
-        {"Backend memory", "param"}}},
+       {{"Pulse width levels", "param", "int", "—", "11"},
+        {"Samples per width", "param", "int", "—", "8"},
+        {"Total captures", "derived", "int", "—", "88"},
+        {"Poll timeout", "param", "int", "milliseconds", "500"},
+        {"Warmup frames", "param", "int", "—", "5"},
+        {"LOW edge reference", "derived", "string", "—", "HIGH + width"},
+        {"Trigger edge", "derived", "string", "—", "Rising"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t17-format-comparison",
-       {{"Samples per format", "param"},
-        {"Memcpy repetitions", "param"},
-        {"Sizeimage", "derived"},
-        {"Capture timeout", "param"},
-        {"Latency basis", "derived"},
-        {"Throughput divisor", "fixed"},
-        {"Backend memory", "param"}}},
+       {{"Samples per format", "param", "int", "—", "20"},
+        {"Memcpy repetitions", "param", "int", "—", "50"},
+        {"Sizeimage", "derived", "float", "mebibytes", "4.69"},
+        {"Capture timeout", "param", "int", "milliseconds", "500"},
+        {"Latency basis", "derived", "string", "—", "Frame availability"},
+        {"Throughput divisor", "fixed", "string", "—", "Binary MiB"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t18-control-sweep",
-       {{"Controls discovered", "derived"},
-        {"Writable controls", "derived"},
-        {"Captures per value", "param"},
-        {"Capture timeout", "param"},
-        {"Practical impact threshold", "threshold"},
-        {"Measured max difference", "derived"},
-        {"Backend memory", "param"}}},
+       {{"Controls discovered", "derived", "int", "—", "15"},
+        {"Writable controls", "derived", "int", "—", "13"},
+        {"Captures per value", "param", "int", "—", "20"},
+        {"Capture timeout", "param", "int", "milliseconds", "200"},
+        {"Practical impact threshold", "threshold", "float", "milliseconds", "≥ 1.0"},
+        {"Measured max difference", "derived", "float", "milliseconds", "0.005"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t19-resolution-sweep",
-       {{"Samples per resolution", "param"},
-        {"Resolutions enumerated", "derived"},
-        {"Pixel format", "derived"},
-        {"Capture timeout", "param"},
-        {"Latency basis", "derived"},
-        {"Backend memory", "param"}}},
+       {{"Samples per resolution", "param", "int", "—", "15"},
+        {"Resolutions enumerated", "derived", "int", "—", "1"},
+        {"Pixel format", "derived", "string", "—", "YUYV"},
+        {"Capture timeout", "param", "int", "milliseconds", "500"},
+        {"Latency basis", "derived", "string", "—", "Frame availability"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t20-sequence-continuity",
-       {{"Requested frames", "param"},
-        {"Warmup frames", "param"},
-        {"Capture timeout", "param"},
-        {"Max allowed gaps", "threshold"},
-        {"Continuity signal", "fixed"},
-        {"Backend memory", "param"}}},
+       {{"Requested frames", "param", "int", "—", "100"},
+        {"Warmup frames", "param", "int", "—", "5"},
+        {"Capture timeout", "param", "int", "milliseconds", "100"},
+        {"Max allowed gaps", "threshold", "int", "—", "0"},
+        {"Continuity signal", "fixed", "string", "—", "buffer.sequence"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t21-timestamp-monotonicity",
-       {{"Requested frames", "param"},
-        {"Warmup frames", "param"},
-        {"Capture timeout", "param"},
-        {"Max non-monotonic events", "threshold"},
-        {"Ordering signal", "fixed"},
-        {"Backend memory", "param"}}},
+       {{"Requested frames", "param", "int", "—", "100"},
+        {"Warmup frames", "param", "int", "—", "5"},
+        {"Capture timeout", "param", "int", "milliseconds", "100"},
+        {"Max non-monotonic events", "threshold", "int", "—", "0"},
+        {"Ordering signal", "fixed", "string", "—", "buffer.timestamp"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t22-stuck-frame",
-       {{"Frames requested", "param"},
-        {"Pairs compared", "derived"},
-        {"Compare bytes", "param"},
-        {"Identical threshold", "threshold"},
-        {"Capture timeout", "param"},
-        {"Backend memory", "param"}}},
+       {{"Frames requested", "param", "int", "—", "50"},
+        {"Pairs compared", "derived", "int", "—", "49"},
+        {"Compare bytes", "param", "int", "bytes", "4096"},
+        {"Identical threshold", "threshold", "int", "—", "≥ 5"},
+        {"Capture timeout", "param", "int", "milliseconds", "100"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t23-sustained-capture",
-       {{"Test duration", "param"},
-        {"Window size", "param"},
-        {"Sample interval", "param"},
-        {"Capture timeout", "param"},
-        {"Warmup frames", "param"},
-        {"Drift PASS limit", "threshold"},
-        {"Backend memory", "param"}}},
+       {{"Test duration", "param", "int", "seconds", "60"},
+        {"Window size", "param", "int", "seconds", "10"},
+        {"Sample interval", "param", "int", "milliseconds", "100"},
+        {"Capture timeout", "param", "int", "milliseconds", "100"},
+        {"Warmup frames", "param", "int", "—", "5"},
+        {"Drift PASS limit", "threshold", "float", "milliseconds", "≤ 1.0"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t24-latency-under-load",
-       {{"Samples per phase", "param"},
-        {"Load threads", "param"},
-        {"Baseline timeout", "param"},
-        {"Load phase timeout", "param"},
-        {"P95 delta PASS limit", "threshold"},
-        {"P95 delta FAIL limit", "threshold"},
-        {"Backend memory", "param"}}},
+       {{"Samples per phase", "param", "int", "—", "30"},
+        {"Load threads", "param", "int", "—", "4"},
+        {"Baseline timeout", "param", "int", "milliseconds", "100"},
+        {"Load phase timeout", "param", "int", "milliseconds", "200"},
+        {"P95 delta PASS limit", "threshold", "float", "milliseconds", "≤ 5.0"},
+        {"P95 delta FAIL limit", "threshold", "float", "milliseconds", "≥ 20.0"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t25-multi-camera",
-       {{"Requested rounds", "param"},
-        {"Participants", "derived"},
-        {"Round deadline", "param"},
-        {"Capture PASS limit", "threshold"},
-        {"Capture FAIL limit", "threshold"},
-        {"Sync PASS limit", "threshold"},
-        {"Sync FAIL limit", "threshold"},
-        {"Backend memory", "param"}}},
+       {{"Requested rounds", "param", "int", "—", "50"},
+        {"Participants", "derived", "int", "—", "4"},
+        {"Round deadline", "param", "int", "milliseconds", "200"},
+        {"Capture PASS limit", "threshold", "float", "percent", "100"},
+        {"Capture FAIL limit", "threshold", "float", "percent", "< 95"},
+        {"Sync PASS limit", "threshold", "float", "milliseconds", "< 5.0"},
+        {"Sync FAIL limit", "threshold", "float", "milliseconds", "≥ 20.0"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
       {"t26-cold-start",
-       {{"Fresh cycles", "param"},
-        {"Observation window (frames)", "param"},
-        {"Reference window", "param"},
-        {"Latency tolerance", "threshold"},
-        {"Capture timeout", "param"},
-        {"Backend memory", "param"}}},
+       {{"Fresh cycles", "param", "int", "—", "10"},
+        {"Observation window (frames)", "param", "int", "—", "30"},
+        {"Reference window", "param", "int", "—", "5"},
+        {"Latency tolerance", "threshold", "float", "percent", "≤ 15"},
+        {"Capture timeout", "param", "int", "milliseconds", "500"},
+        {"Backend memory", "param", "string", "—", "MMAP"}}},
   };
   return table;
 }
@@ -282,7 +316,7 @@ const std::vector<DerivedRow> &derived_rows() {
       {"t18-control-sweep", "Writable controls", "13", ""},
       {"t18-control-sweep", "Measured max difference", "0.005", "milliseconds"},
       {"t19-resolution-sweep", "Resolutions enumerated", "1", ""},
-      {"t19-resolution-sweep", "Pixel format", "UYVY", ""},
+      {"t19-resolution-sweep", "Pixel format", "YUYV", ""},
       {"t22-stuck-frame", "Pairs compared", "49", ""},
       {"t25-multi-camera", "Participants", "4", ""},
   };
@@ -325,6 +359,49 @@ std::string read_file(const std::string &path) {
 // Bounded to the config section's own </section>. Scanning to the end of the card would pick up
 // grid rows from the measurement tables that follow, so a missing configuration row could be
 // "found" in a later section and the sequence check would pass on the wrong evidence.
+// Cell text as a reader sees it. t25's "< 5.0" is correctly emitted as "&lt; 5.0", so comparing raw
+// markup would fail on a row that renders exactly right.
+std::string unescaped(const std::string &raw) {
+  static const std::pair<const char *, const char *> kEntities[] = {
+      {"&lt;", "<"}, {"&gt;", ">"}, {"&quot;", "\""}, {"&#39;", "'"}, {"&amp;", "&"}};
+  std::string text = raw;
+  for (const auto &entity : kEntities) {
+    const std::string from = entity.first;
+    const std::string to = entity.second;
+    for (std::size_t at = text.find(from); at != std::string::npos; at = text.find(from, at + to.size())) {
+      text.replace(at, from.size(), to);
+    }
+  }
+  return text;
+}
+
+std::vector<std::vector<std::string>> config_cells(const std::string &html) {
+  std::vector<std::vector<std::string>> rows;
+  const std::size_t at = html.find("config-section");
+  if (at == std::string::npos) {
+    return rows;
+  }
+  const std::size_t close = html.find("</section>", at);
+  const std::string section = html.substr(at, close == std::string::npos ? std::string::npos : close - at);
+  const std::string open = "<div class=\"grid-row";
+  for (std::size_t r = section.find(open); r != std::string::npos; r = section.find(open, r + 1)) {
+    const std::size_t row_end = section.find("</div>", r);
+    std::vector<std::string> cells;
+    for (std::size_t c = section.find("<span>", r); c != std::string::npos && c < row_end;
+         c = section.find("<span>", c + 1)) {
+      const std::size_t end = section.find("</span>", c);
+      if (end == std::string::npos) {
+        break;
+      }
+      cells.push_back(unescaped(section.substr(c + 6, end - c - 6)));
+    }
+    if (cells.size() >= 5) {
+      rows.push_back(cells);
+    }
+  }
+  return rows;
+}
+
 std::vector<std::pair<std::string, std::string>> config_rows(const std::string &html) {
   std::vector<std::pair<std::string, std::string>> rows;
   const std::size_t at = html.find("config-section");
@@ -448,6 +525,22 @@ int main() {
       }
       check(at->second == row.source, std::string(e.slug) + " renders '" + row.label + "' with source '" + at->second +
                                           "'; the approved card shows '" + row.source + "'");
+    }
+
+    // ...and the Type, Unit and Value cells alongside it. A threshold that prints "500" where the
+    // design states "<= 500" has dropped the direction of the comparison, which is the only thing
+    // that tells a ceiling from a floor.
+    for (const ExpectedRow &row : e.rows) {
+      const auto cells = config_cells(html);
+      const auto at = std::find_if(cells.begin(), cells.end(),
+                                   [&row](const std::vector<std::string> &c) { return c[0] == row.label; });
+      if (at == cells.end()) {
+        continue;  // already reported as missing
+      }
+      const std::string got = (*at)[2] + "|" + (*at)[3] + "|" + (*at)[4];
+      const std::string want = std::string(row.type) + "|" + row.unit + "|" + row.value;
+      check(got == want, std::string(e.slug) + " renders '" + row.label + "' as type|unit|value " + got +
+                             "; the approved card shows " + want);
     }
 
     // The honest empty state must be GONE for every test that has approved rows: it told the

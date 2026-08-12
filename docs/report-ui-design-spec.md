@@ -7,13 +7,16 @@ Belge yalnizca **gorsellestirme** kapsamindadir: backend'den gelen sonuclari
 alir ve nasil sunulacaklarini tanimlar. Verdict kurallari, olcum mantigi,
 parametreler ve backend davranisi bu belgenin konusu degildir.
 
-Uc belgelik yapinin ilk parcasidir; her karar **tek** bir dosyada yasar:
+Iki belgelik yapinin ilk parcasidir; her karar **tek** bir dosyada yasar:
 
 | belge | soru |
 | --- | --- |
 | `docs/report-ui-design-spec.md` (bu belge) | ne gorunmeli |
 | `docs/implementation-plan.md` | ne yapilacak |
-| `docs/renderer-data-contract.md` | hangi veri, hangi test |
+
+Ucuncu parca `docs/renderer-data-contract.md` idi; 2026-08-12'de kullanici
+karariyla kaldirildi. "Hangi veri, hangi test" sorusunu artik
+`docs/assets/refactored_previews/` icindeki 26 onayli preview yanitlar.
 >
 > **Software-trigger notu:** Software-trigger raporu hardware-trigger ile ayni
 > kart yapisini kullanir. Fark yalnizca trigger timing etiketleri ve bazi
@@ -363,9 +366,8 @@ renderer'a uygulandi.
 iki yerde yasiyor ve ikisi de bu metinden daha guvenilir:
 
 - `docs/assets/refactored_previews/t01..t26-preview.html` — 26 onaylı preview,
-  uc trigger modu. Tasarimin **kendisi**, tarifi degil.
-- `docs/renderer-data-contract.md` — her testin bolumleri, tablo sutun imzalari
-  ve metric adlari; uretilen HTML'e karsi iki yonlu dogrulandi.
+  uc trigger modu. Tasarimin **kendisi**, tarifi degil. Her testin bolumleri,
+  tablo sutun imzalari ve metric adlari buradan okunur.
 
 Sozlesme ayrica testle kilitli: `report_card_contract` (S1-S8 yapisal
 sozlesme, 26 testi kapsayan fixture) ve `metric_name_contract` (renderer'in

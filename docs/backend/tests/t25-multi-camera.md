@@ -75,11 +75,32 @@ Cross-camera jitter mean: 2.340000 ms
 
 ## Verdict Logic
 
+Two independent dimensions; the worse of the two decides the verdict.
+
+**Capture completeness** — `successful_rounds / sample_count`, the share of rounds in which *every*
+camera delivered a frame.
+
 | Status | Condition |
 | -------- | ----------- |
-| **Pass** | `cross_jitter_p95 < 5.0` ms |
-| **Warn** | `cross_jitter_p95 < 20.0` ms |
-| **Fail** | `cross_jitter_p95 ≥ 20.0` ms, or no successful rounds (all cameras never captured in the same round). |
+| **Pass** | `capture_pct ≥ capture_pass_pct` (100%) |
+| **Warn** | `capture_fail_pct ≤ capture_pct < capture_pass_pct` |
+| **Fail** | `capture_pct < capture_fail_pct` (95%), including no successful rounds at all |
+
+**Synchronisation** — the p95 of cross-camera jitter.
+
+| Status | Condition |
+| -------- | ----------- |
+| **Pass** | `cross_jitter_p95 < sync_pass_p95_ms` (5.0 ms) |
+| **Warn** | `sync_pass_p95_ms ≤ cross_jitter_p95 < sync_fail_p95_ms` |
+| **Fail** | `cross_jitter_p95 ≥ sync_fail_p95_ms` (20.0 ms) |
+
+All four limits are threshold-table values, so a threshold config overrides them and the report's
+Test Configuration section shows the ones the run used.
+
+> **Changed 2026-08-12.** The verdict used to read the jitter alone, with the two limits hard-coded.
+> A camera that missed a third of the rounds still PASSED, because the rounds it missed never
+> entered the jitter sample. The approved t25 card had stated all four limits from the start; the
+> capture pair is now applied rather than merely printed.
 
 ## Interpretation Guide
 
@@ -87,7 +108,7 @@ Cross-camera jitter mean: 2.340000 ms
 - **`cross_jitter_p95` 1–5 ms** — good synchronisation; acceptable for most multi-camera applications.
 - **`cross_jitter_p95` 5–20 ms** — moderate desynchronisation; may cause visible artefacts in stitching or stereo matching at high speeds.
 - **`cross_jitter_p95` > 20 ms** — cameras are significantly out of sync; the trigger path has different latencies per camera (different USB hubs, interrupt routing, or driver versions).
-- **`successful_rounds` much less than `sample_count`** — at least one camera frequently fails; check individual camera health before interpreting jitter.
+- **`successful_rounds` much less than `sample_count`** — at least one camera frequently fails. This now drives the verdict through the capture dimension, so such a run cannot pass on good jitter alone; check individual camera health before interpreting jitter.
 - **One camera's `camN_latency_mean` significantly higher** — that camera has a longer trigger-to-DQBUF path (e.g. behind a USB hub, or a different sensor model with longer readout time).
 
 ## Failure Modes

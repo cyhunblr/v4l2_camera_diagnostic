@@ -342,6 +342,14 @@ ThresholdConfig default_threshold_config() {
       {"t12-dmabuf-cache-sync", {{"min_match_ratio", 1.0}}},
       {"t22-stuck-frame", {{"max_identical_run", 5}}},
       {"t24-latency-under-load", {{"pass_delta_p95_ms", 5.0}, {"warn_delta_p95_ms", 20.0}}},
+      // t25 judges two dimensions and the approved card states all four limits. They were display
+      // text until 2026-08-12 while the verdict used hard-coded jitter numbers, so a camera that
+      // missed rounds could still PASS; the card and the rule now read the same four values.
+      {"t25-multi-camera",
+       {{"capture_pass_pct", 100.0},
+        {"capture_fail_pct", 95.0},
+        {"sync_pass_p95_ms", 5.0},
+        {"sync_fail_p95_ms", 20.0}}},
   };
   config.params = default_test_params();
   return config;

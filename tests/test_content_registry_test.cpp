@@ -1145,7 +1145,10 @@ int main() {
     ok &= check(!contains(html, "class=\"detail-list\""), "T11 still emits the raw detail block");
 
     // 5.11.6: the measurement evidence a reader needs to trust the number at all.
-    ok &= check(contains(html, "CLOCK_MONOTONIC"), "T11 does not state which timer it measured with");
+    // The approved card words this "Monotonic", not "CLOCK_MONOTONIC" (t11-preview.html, Test
+    // Configuration). The assertion keeps its intent -- the card must still say which timer produced
+    // the numbers -- and follows the design on the wording, which outranks the earlier code.
+    ok &= check(contains(html, "Monotonic"), "T11 does not state which timer it measured with");
     // The approved t11 card states "Minimum repetitions" here; it has no warm-up row. The runner
     // still records warmup_copies, but Test Configuration shows only what the design names.
     ok &= check(contains(html, "Minimum repetitions"), "T11 does not state its repetition floor");

@@ -3202,7 +3202,7 @@ struct MultiCamParticipant {
 
 // Docs: docs/backend/tests/t25-multi-camera.md
 void run_multi_camera(const std::vector<MultiCamParticipant> &participants, MemoryBackend backend, TestResult &r,
-                      const LogFn &log, const TestThresholds &tp) {
+                      const LogFn &log, const TestThresholds &th, const TestThresholds &tp) {
   const int SAMPLES = static_cast<int>(tpv(tp, "t25-multi-camera", "sample_count"));
   const int POLL_TIMEOUT = static_cast<int>(tpv(tp, "t25-multi-camera", "poll_timeout_ms"));
   const int WARMUP_COUNT = static_cast<int>(tpv(tp, "t25-multi-camera", "warmup_count"));
@@ -3416,16 +3416,26 @@ void run_multi_camera(const std::vector<MultiCamParticipant> &participants, Memo
     push_stats_metrics(r.metrics, "cross_jitter", js);
     r.details.push_back("Cross-camera jitter mean: " + std::to_string(js.mean) + " ms");
 
-    if (js.p95 < 5.0) {
-      r.status = TestStatus::Pass;
-      r.summary = "Cross-device jitter p95=" + std::to_string(static_cast<int>(js.p95)) + "ms across " +
-                  std::to_string(participants.size()) + " cameras.";
-    } else if (js.p95 < 20.0) {
-      r.status = TestStatus::Warn;
-      r.summary = "Moderate cross-device jitter p95=" + std::to_string(static_cast<int>(js.p95)) + "ms.";
+    // Both dimensions the approved card states: how many rounds every camera made, and how
+    // tightly they agreed. The limits come from the threshold table the card reads, so the numbers
+    // on the report and the numbers in this decision cannot drift apart.
+    const double capture_pass = thv(th, "t25-multi-camera", "capture_pass_pct");
+    const double capture_fail = thv(th, "t25-multi-camera", "capture_fail_pct");
+    const double sync_pass = thv(th, "t25-multi-camera", "sync_pass_p95_ms");
+    const double sync_fail = thv(th, "t25-multi-camera", "sync_fail_p95_ms");
+    r.status =
+        multi_camera_verdict(successful_rounds, SAMPLES, js.p95, capture_pass, capture_fail, sync_pass, sync_fail);
+    const std::string sync_text = "cross-device jitter p95=" + std::to_string(static_cast<int>(js.p95)) + "ms";
+    const std::string capture_text =
+        std::to_string(successful_rounds) + "/" + std::to_string(SAMPLES) + " rounds complete";
+    // The summary names the dimension that decided it, so a FAIL on a well-synchronised run does
+    // not read as a contradiction.
+    if (r.status == TestStatus::Pass) {
+      r.summary = "All " + std::to_string(participants.size()) + " cameras synchronised: " + sync_text + ", " +
+                  capture_text + ".";
     } else {
-      r.status = TestStatus::Fail;
-      r.summary = "High cross-device jitter p95=" + std::to_string(static_cast<int>(js.p95)) + "ms.";
+      r.summary = "Multi-camera capture " + std::string(r.status == TestStatus::Fail ? "failed" : "degraded") + ": " +
+                  capture_text + ", " + sync_text + ".";
     }
   } else {
     r.status = TestStatus::Fail;
@@ -3498,6 +3508,20 @@ struct ConfigRow {
   const char *key;
   const char *unit;
   const char *text;
+
+  // --- display-only, defaulted so a row that needs none says nothing -----------------
+  //
+  // The Type cell, when the design's does not follow from the value text. t06's "Rapid pass
+  // threshold" shows `float` beside the whole number 90, and deriving the type from "90" gives
+  // `int`. Carried for the same reason `source` is: the design states it, so it is read, not guessed.
+  const char *type = nullptr;
+  // The comparator the design prints before the number: "<=" for a ceiling, ">=" for a floor.
+  // Sixteen threshold rows printed the bare number, which leaves the reader unable to tell which
+  // side of the value passes -- "Max allowed gaps 0" and "Minimum recovery 2" read identically.
+  const char *compare = nullptr;
+  // Decimals the design shows, when they differ from the value's own text: t24's limits read
+  // "<= 5.0", not "<= 5". -1 leaves the value exactly as recorded.
+  int decimals = -1;
 };
 
 struct TestConfigSpec {
@@ -3520,8 +3544,8 @@ const std::vector<TestConfigSpec> &config_specs() {
         {"Settle time", "param", kParam, "settle_ms", "ms", nullptr},
         {"Trigger retry interval", "param", kParam, "trigger_retry_ms", "ms", nullptr},
         {"Slow-start guard", "param", kParam, "slow_start_ms", "ms", nullptr},
-        {"PASS threshold", "threshold", kThreshold, "pass_first_frame_ms", "ms", nullptr},
-        {"WARN threshold", "threshold", kThreshold, "warn_first_frame_ms", "ms", nullptr},
+        {"PASS threshold", "threshold", kThreshold, "pass_first_frame_ms", "ms", nullptr, nullptr, "\xE2\x89\xA4"},
+        {"WARN threshold", "threshold", kThreshold, "warn_first_frame_ms", "ms", nullptr, nullptr, "\xE2\x89\xA4"},
         {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t04-no-streamon",
        {{"Buffer count", "param", kParam, "buffer_count", "", nullptr},
@@ -3531,7 +3555,7 @@ const std::vector<TestConfigSpec> &config_specs() {
        {{"Baseline captures", "param", kParam, "baseline_captures", "", nullptr},
         {"Recovery captures", "param", kParam, "recovery_captures", "", nullptr},
         {"Warmup count", "param", kParam, "warmup_count", "", nullptr},
-        {"Minimum recovery", "threshold", kThreshold, "min_recovery_ok", "", nullptr},
+        {"Minimum recovery", "threshold", kThreshold, "min_recovery_ok", "", nullptr, nullptr, "\xE2\x89\xA5"},
         {"Poll timeout", "param", kParam, "poll_timeout_ms", "ms", nullptr},
         {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t06-stream-cycles",
@@ -3543,10 +3567,12 @@ const std::vector<TestConfigSpec> &config_specs() {
         {"Rapid timeout", "param", kParam, "rapid_timeout_ms", "ms", nullptr},
         {"Rapid pacing", "param", kParam, "rapid_pacing_ms", "ms", nullptr},
         {"Slow-start guard", "param", kParam, "slow_start_ms", "ms", nullptr},
-        {"Full pass threshold", "threshold", kThreshold, "max_full_failures_pass", "", nullptr},
-        {"Full warn threshold", "threshold", kThreshold, "max_full_failures_warn", "", nullptr},
-        {"Rapid pass threshold", "threshold", kThreshold, "rapid_pct_pass", "", nullptr},
-        {"Rapid warn threshold", "threshold", kThreshold, "rapid_pct_warn", "", nullptr},
+        {"Full pass threshold", "threshold", kThreshold, "max_full_failures_pass", "", nullptr, nullptr,
+         "\xE2\x89\xA4"},
+        {"Full warn threshold", "threshold", kThreshold, "max_full_failures_warn", "", nullptr, nullptr,
+         "\xE2\x89\xA4"},
+        {"Rapid pass threshold", "threshold", kThreshold, "rapid_pct_pass", "%", nullptr, "float", "\xE2\x89\xA5"},
+        {"Rapid warn threshold", "threshold", kThreshold, "rapid_pct_warn", "%", nullptr, "float", "\xE2\x89\xA5"},
         {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t07-multi-buffer",
        {{"Sample count", "param", kParam, "sample_count", "", nullptr},
@@ -3587,8 +3613,8 @@ const std::vector<TestConfigSpec> &config_specs() {
         {"Allocated buffers", "param", kFixed, nullptr, "", "2"},
         {"Minimum repetitions", "param", kParam, "benchmark_reps", "", nullptr},
         {"Target sample time", "param", kFixed, nullptr, "", "100ms"},
-        {"Timer", "fixed", kFixed, nullptr, "", "CLOCK_MONOTONIC"},
-        {"Stream state", "derived", kFixed, nullptr, "", "Streaming"}}},
+        {"Timer", "fixed", kFixed, nullptr, "", "Monotonic"},
+        {"Stream state", "derived", kFixed, nullptr, "", "Not started"}}},
       {"t12-dmabuf-cache-sync",
        {{"Requested samples", "param", kParam, "sample_count", "", nullptr},
         {"Compared data", "fixed", kFixed, nullptr, "", "Full bytesused"},
@@ -3629,7 +3655,7 @@ const std::vector<TestConfigSpec> &config_specs() {
         {"Total captures", "derived", kBody, nullptr, "", nullptr},
         {"Poll timeout", "param", kParam, "poll_timeout_ms", "ms", nullptr},
         {"Warmup frames", "param", kParam, "warmup_count", "", nullptr},
-        {"LOW edge reference", "derived", kParam, "edge_margin_ms", "ms", nullptr},
+        {"LOW edge reference", "derived", kFixed, nullptr, "", "HIGH + width"},
         {"Trigger edge", "derived", kFixed, nullptr, "", "Rising"},
         {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t17-format-comparison",
@@ -3637,15 +3663,15 @@ const std::vector<TestConfigSpec> &config_specs() {
         {"Memcpy repetitions", "param", kParam, "throughput_reps", "", nullptr},
         {"Sizeimage", "derived", kBody, nullptr, "", nullptr},
         {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
-        {"Latency basis", "derived", kFixed, nullptr, "", "Trigger to DQBUF"},
-        {"Throughput divisor", "fixed", kFixed, nullptr, "", "bytesused"},
+        {"Latency basis", "derived", kFixed, nullptr, "", "Frame availability"},
+        {"Throughput divisor", "fixed", kFixed, nullptr, "", "Binary MiB"},
         {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t18-control-sweep",
        {{"Controls discovered", "derived", kBody, nullptr, "", nullptr},
         {"Writable controls", "derived", kBody, nullptr, "", nullptr},
         {"Captures per value", "param", kParam, "sample_count", "", nullptr},
         {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
-        {"Practical impact threshold", "threshold", kFixed, nullptr, "", "1ms"},
+        {"Practical impact threshold", "threshold", kFixed, nullptr, "ms", "1", "float", "\xE2\x89\xA5", 1},
         {"Measured max difference", "derived", kBody, nullptr, "", nullptr},
         {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t19-resolution-sweep",
@@ -3653,13 +3679,17 @@ const std::vector<TestConfigSpec> &config_specs() {
         {"Resolutions enumerated", "derived", kBody, nullptr, "", nullptr},
         {"Pixel format", "derived", kBody, nullptr, "", nullptr},
         {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
-        {"Latency basis", "derived", kFixed, nullptr, "", "Trigger to DQBUF"},
+        {"Latency basis", "derived", kFixed, nullptr, "", "Frame availability"},
         {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t20-sequence-continuity",
        {{"Requested frames", "param", kParam, "sample_count", "", nullptr},
         {"Warmup frames", "param", kParam, "warmup_count", "", nullptr},
         {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
-        {"Max allowed gaps", "threshold", kThreshold, "max_dropped_frames", "", nullptr},
+        // The PASS rule, which t20's own doc states as `dropped_frames == 0`. The tunable
+        // `max_dropped_frames` (5) is the WARN ceiling, not this: binding the row to it printed
+        // 5 where the design shows 0. Left at 5 in the threshold table -- pulling it to 0 would
+        // delete the WARN band the test documents.
+        {"Max allowed gaps", "threshold", kFixed, nullptr, "", "0"},
         {"Continuity signal", "fixed", kFixed, nullptr, "", "buffer.sequence"},
         {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t21-timestamp-monotonicity",
@@ -3672,8 +3702,8 @@ const std::vector<TestConfigSpec> &config_specs() {
       {"t22-stuck-frame",
        {{"Frames requested", "param", kParam, "sample_count", "", nullptr},
         {"Pairs compared", "derived", kBody, nullptr, "", nullptr},
-        {"Compare bytes", "param", kParam, "compare_bytes", "", nullptr},
-        {"Identical threshold", "threshold", kThreshold, "max_identical_run", "", nullptr},
+        {"Compare bytes", "param", kParam, "compare_bytes", "B", nullptr},
+        {"Identical threshold", "threshold", kThreshold, "max_identical_run", "", nullptr, nullptr, "\xE2\x89\xA5"},
         {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
         {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t23-sustained-capture",
@@ -3682,30 +3712,44 @@ const std::vector<TestConfigSpec> &config_specs() {
         {"Sample interval", "param", kParam, "sample_interval_ms", "ms", nullptr},
         {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
         {"Warmup frames", "param", kParam, "warmup_count", "", nullptr},
-        {"Drift PASS limit", "threshold", kThreshold, "pass_drift_ms", "ms", nullptr},
+        {"Drift PASS limit", "threshold", kThreshold, "pass_drift_ms", "ms", nullptr, "float", "\xE2\x89\xA4", 1},
         {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t24-latency-under-load",
        {{"Samples per phase", "param", kParam, "sample_count", "", nullptr},
         {"Load threads", "param", kParam, "load_threads", "", nullptr},
         {"Baseline timeout", "param", kParam, "baseline_timeout_ms", "ms", nullptr},
         {"Load phase timeout", "param", kParam, "load_timeout_ms", "ms", nullptr},
-        {"P95 delta PASS limit", "threshold", kThreshold, "pass_delta_p95_ms", "ms", nullptr},
-        {"P95 delta FAIL limit", "threshold", kThreshold, "warn_delta_p95_ms", "ms", nullptr},
+        {"P95 delta PASS limit", "threshold", kThreshold, "pass_delta_p95_ms", "ms", nullptr, "float", "\xE2\x89\xA4",
+         1},
+        {"P95 delta FAIL limit", "threshold", kThreshold, "warn_delta_p95_ms", "ms", nullptr, "float", "\xE2\x89\xA5",
+         1},
         {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t25-multi-camera",
        {{"Requested rounds", "param", kParam, "sample_count", "", nullptr},
         {"Participants", "derived", kBody, nullptr, "", nullptr},
         {"Round deadline", "param", kParam, "poll_timeout_ms", "ms", nullptr},
-        {"Capture PASS limit", "threshold", kFixed, nullptr, "", "100%"},
-        {"Capture FAIL limit", "threshold", kFixed, nullptr, "", "90%"},
-        {"Sync PASS limit", "threshold", kFixed, nullptr, "", "1ms"},
-        {"Sync FAIL limit", "threshold", kFixed, nullptr, "", "5ms"},
+        // Read from the threshold table the verdict reads (multi_camera_verdict), so the card
+        // cannot state a limit the rule does not use. These four were fixed text while the
+        // verdict used hard-coded numbers; two of the four did not even match it.
+        {"Capture PASS limit", "threshold", kThreshold, "capture_pass_pct", "%", nullptr, "float"},
+        {"Capture FAIL limit", "threshold", kThreshold, "capture_fail_pct", "%", nullptr, "float", "<"},
+        // The verdict is decided by cross-camera jitter p95: PASS under 5 ms, WARN under 20 ms
+        // (see the tail of run_multi_camera). The card used to print 1 ms and 5 ms, which match
+        // nothing in the code -- a limit the reader could not have met or missed.
+        {"Sync PASS limit", "threshold", kThreshold, "sync_pass_p95_ms", "ms", nullptr, "float", "<", 1},
+        {"Sync FAIL limit", "threshold", kThreshold, "sync_fail_p95_ms", "ms", nullptr, "float", "\xE2\x89\xA5", 1},
         {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
       {"t26-cold-start",
        {{"Fresh cycles", "param", kParam, "cycles", "", nullptr},
         {"Observation window (frames)", "param", kParam, "max_frames_per_cycle", "", nullptr},
-        {"Reference window", "param", kParam, "stability_threshold_pct", "", nullptr},
-        {"Latency tolerance", "threshold", kParam, "inter_frame_interval_ms", "ms", nullptr},
+        // The steady-state reference is the last 5 latencies of the cycle, hard-coded in
+        // run_cold_start -- a constant of the method, not a setting. It used to read
+        // `stability_threshold_pct`, printing that PERCENTAGE (15) as a frame count.
+        {"Reference window", "param", kFixed, nullptr, "", "5"},
+        // `stability_threshold_pct` IS this tolerance. The two t26 rows were crossed: this one
+        // read `inter_frame_interval_ms` and reported a 100 ms pacing interval as a percentage
+        // tolerance, while "Reference window" above showed the percentage.
+        {"Latency tolerance", "threshold", kParam, "stability_threshold_pct", "%", nullptr, "float", "\xE2\x89\xA4"},
         {"Capture timeout", "param", kParam, "capture_timeout_ms", "ms", nullptr},
         {"Backend memory", "param", kBackend, nullptr, "", nullptr}}},
   };
@@ -3744,7 +3788,14 @@ void record_run_parameters(TestResult *test, const TestThresholds &configured_th
         continue;
       }
       if (row.origin == ConfigOrigin::Fixed) {
-        test->details.push_back(std::string(row.label) + ": " + row.text);
+        // The unit rides on the value the same way param_text() attaches it, because the transport
+        // is one "key: value" line and the renderer splits it back apart. Pushing the bare text lost
+        // the unit for the two fixed rows that have one -- t18's "1 ms" and t25's "100 %".
+        std::string text = row.text;
+        if (row.unit != nullptr && row.unit[0] != '\0') {
+          text += row.unit;
+        }
+        test->details.push_back(std::string(row.label) + ": " + text);
         continue;
       }
       double value = row.origin == ConfigOrigin::Threshold ? thv(configured_thresholds, spec.slug, row.key)
@@ -3808,7 +3859,7 @@ const std::vector<ConfigRowSpec> &configuration_rows_for(const std::string &test
       std::vector<ConfigRowSpec> rows;
       rows.reserve(spec.rows.size());
       for (const auto &row : spec.rows) {
-        rows.push_back(ConfigRowSpec{row.label, row.source});
+        rows.push_back(ConfigRowSpec{row.label, row.source, row.type, row.compare, row.decimals});
       }
       table.emplace(spec.slug, std::move(rows));
     }
@@ -3830,6 +3881,41 @@ void record_derived_config(TestResult *test, const std::string &label, const std
     text += " " + unit;
   }
   test->details.push_back(label + ": " + text + "  @derived");
+}
+
+// See the rule and its authority in diagnostic_runner.hpp.
+TestStatus multi_camera_verdict(int successful_rounds, int requested_rounds, double jitter_p95_ms,
+                                double capture_pass_pct, double capture_fail_pct, double sync_pass_p95_ms,
+                                double sync_fail_p95_ms) {
+  // No round requested means the run never got off the ground. Treating it as 100% complete would
+  // turn a broken run into the best possible score.
+  if (requested_rounds <= 0) {
+    return TestStatus::Fail;
+  }
+  const double capture_pct = 100.0 * static_cast<double>(successful_rounds) / static_cast<double>(requested_rounds);
+
+  TestStatus capture = TestStatus::Warn;
+  if (capture_pct >= capture_pass_pct) {
+    capture = TestStatus::Pass;
+  } else if (capture_pct < capture_fail_pct) {
+    capture = TestStatus::Fail;
+  }
+
+  TestStatus sync = TestStatus::Warn;
+  if (jitter_p95_ms < sync_pass_p95_ms) {
+    sync = TestStatus::Pass;
+  } else if (jitter_p95_ms >= sync_fail_p95_ms) {
+    sync = TestStatus::Fail;
+  }
+
+  // The worse of the two. A test cannot pass on one dimension's strength while failing the other.
+  if (capture == TestStatus::Fail || sync == TestStatus::Fail) {
+    return TestStatus::Fail;
+  }
+  if (capture == TestStatus::Warn || sync == TestStatus::Warn) {
+    return TestStatus::Warn;
+  }
+  return TestStatus::Pass;
 }
 
 // See the rule and its authority in diagnostic_runner.hpp.
@@ -4281,7 +4367,7 @@ TestResult DiagnosticRunner::run_test(const std::string &camera_path, MemoryBack
         result.status = TestStatus::Skipped;
         result.summary = "No slave camera resolved a valid hardware trigger channel.";
       } else {
-        run_multi_camera(participants, backend, result, log, tp);
+        run_multi_camera(participants, backend, result, log, thresholds_for(definition.id), tp);
       }
     }
   } else if (definition.id == "t26-cold-start") {

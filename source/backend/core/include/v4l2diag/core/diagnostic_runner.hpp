@@ -128,6 +128,13 @@ void record_derived_config(TestResult *test, const std::string &label, const std
 struct ConfigRowSpec {
   const char *label;
   const char *source;
+  // The Type cell, when the design's does not follow from the value text (nullptr: derive it).
+  const char *type;
+  // The comparator printed before the number -- "<=" for a ceiling, ">=" for a floor (nullptr: none).
+  // A threshold rendered as a bare number does not say which side of it passes.
+  const char *compare;
+  // Decimals the design shows, when they differ from the recorded value (-1: leave it alone).
+  int decimals;
 };
 
 // The Test Configuration rows a test's approved card carries, in order. Empty for a test whose
@@ -156,6 +163,31 @@ const std::vector<ConfigRowSpec> &configuration_rows_for(const std::string &test
 // 0.0, which is a plausible-looking number: t13 printed "Production timeout 0ms" beside the runner's
 // own 48.5 and no test noticed.
 std::vector<std::string> configuration_lookup_gaps();
+
+// t25 verdict.
+//
+// Two independent dimensions, and the worse of the two wins. Both are stated on the approved t25
+// card as threshold rows -- "Capture PASS limit 100%", "Capture FAIL limit < 95%", "Sync PASS limit
+// < 5.0 ms", "Sync FAIL limit >= 20.0 ms" -- and only the sync pair was ever applied:
+//
+//   capture completeness  rounds in which EVERY camera delivered a frame, as a percentage of the
+//                         rounds requested. PASS at the pass limit, FAIL below the fail limit,
+//                         WARN between them.
+//   synchronisation       cross-camera jitter p95. PASS below the pass limit, FAIL at or above the
+//                         fail limit, WARN between them.
+//
+// Until 2026-08-12 the verdict read the jitter alone, so a camera that missed 40% of the rounds
+// still PASSED as long as the rounds it did make were tightly synchronised -- the starved camera
+// was invisible in the verdict, and t25's own doc listed the capture count as a diagnostic hint
+// rather than a criterion. The card promised a rule the code never applied; the user decided
+// (2026-08-12) to apply it.
+//
+// `requested_rounds <= 0` is a broken run, not a perfect one: it FAILS rather than dividing by zero.
+// A run with no successful round fails through the capture dimension, so the caller no longer needs
+// a separate early exit for it.
+TestStatus multi_camera_verdict(int successful_rounds, int requested_rounds, double jitter_p95_ms,
+                                double capture_pass_pct, double capture_fail_pct, double sync_pass_p95_ms,
+                                double sync_fail_p95_ms);
 
 // One pulse width in the t16 sweep.
 struct PulseWidthOutcome {

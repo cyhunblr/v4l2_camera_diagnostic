@@ -291,5 +291,58 @@ int main() {
     }
   }
 
+  // --- t25 multi-camera: capture completeness AND synchronisation -----------------
+  //
+  // The card states four limits; only the sync pair was applied. A camera that missed 40% of the
+  // rounds still PASSED, because the rounds it skipped never entered the jitter sample.
+  {
+    using v4l2diag::multi_camera_verdict;
+    // The approved card's four limits.
+    const double kCapturePass = 100.0;
+    const double kCaptureFail = 95.0;
+    const double kSyncPass = 5.0;
+    const double kSyncFail = 20.0;
+    const auto verdict = [&](int ok_rounds, int rounds, double p95) {
+      return multi_camera_verdict(ok_rounds, rounds, p95, kCapturePass, kCaptureFail, kSyncPass, kSyncFail);
+    };
+
+    ok &= check(verdict(50, 50, 2.0) == TestStatus::Pass, "every round complete and tight sync must PASS");
+    // The regression this rule exists for: perfect sync, a third of the rounds missing.
+    ok &= check(verdict(30, 50, 2.0) == TestStatus::Fail,
+                "60% capture with tight sync must FAIL; a starved camera is not a pass");
+    ok &= check(verdict(48, 50, 2.0) == TestStatus::Warn, "96% capture is between the limits, so WARN");
+    ok &= check(verdict(47, 50, 2.0) == TestStatus::Fail, "94% capture is below the fail limit");
+    // Exactly at the fail limit is not below it.
+    ok &= check(verdict(0, 50, 2.0) == TestStatus::Fail, "no successful round must FAIL");
+    // The sync dimension still decides when capture is perfect.
+    ok &= check(verdict(50, 50, 10.0) == TestStatus::Warn, "complete capture with moderate jitter must WARN");
+    ok &= check(verdict(50, 50, 20.0) == TestStatus::Fail, "jitter at the fail limit must FAIL");
+    ok &= check(verdict(50, 50, 25.0) == TestStatus::Fail, "jitter above the fail limit must FAIL");
+    // The WORSE dimension wins, in both directions.
+    ok &= check(verdict(48, 50, 25.0) == TestStatus::Fail, "a failing dimension outranks a warning one");
+    ok &= check(verdict(48, 50, 10.0) == TestStatus::Warn, "two warnings stay a warning");
+    ok &= check(verdict(0, 0, 2.0) == TestStatus::Fail, "a run that requested no round must FAIL, not divide by zero");
+  }
+
+  // ...and run_multi_camera must DELEGATE to it. Reverting the body to its own inline jitter
+  // if/else would leave every case above green while no report changed -- the vacuous shape this
+  // project has hit four times.
+  {
+    const std::string runner = read_file("source/backend/core/src/diagnostic_runner.cpp");
+    ok &= check(!runner.empty(), "diagnostic_runner.cpp not readable; run from the repository root");
+    const std::size_t body = runner.find("void run_multi_camera(");
+    ok &= check(body != std::string::npos, "run_multi_camera not found; this guard would pass vacuously");
+    if (body != std::string::npos) {
+      const std::size_t end = runner.find("\n// Docs:", body);
+      const std::string fn = runner.substr(body, end == std::string::npos ? std::string::npos : end - body);
+      ok &= check(fn.find("multi_camera_verdict(") != std::string::npos,
+                  "run_multi_camera no longer calls multi_camera_verdict; the capture rule is not applied");
+      // The old inline rule must be gone, not merely bypassed: while `js.p95 < 5.0` still decides a
+      // status in the body, the hard-coded limits are back and the threshold rows are decoration.
+      ok &= check(fn.find("js.p95 < 5.0") == std::string::npos && fn.find("js.p95 < 20.0") == std::string::npos,
+                  "run_multi_camera still branches on hard-coded jitter limits");
+    }
+  }
+
   return ok ? 0 : 1;
 }

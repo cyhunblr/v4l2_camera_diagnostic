@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iomanip>
 #include <map>
 #include <regex>
 #include <set>
@@ -1052,8 +1053,19 @@ std::string test_configuration_rows(const TestResult &test) {
         value = unit;
         unit.clear();
       }
+      // Type is read off the numeric text BEFORE the comparator is attached: "<= 500" is not a
+      // number, so deriving the type afterwards would call every threshold a string.
+      const std::string type = spec.type != nullptr ? std::string(spec.type) : type_word(value);
+      if (spec.decimals >= 0 && type_word(value) != "string") {
+        std::ostringstream fixed;
+        fixed << std::fixed << std::setprecision(spec.decimals) << std::strtod(value.c_str(), nullptr);
+        value = fixed.str();
+      }
+      if (spec.compare != nullptr) {
+        value = std::string(spec.compare) + " " + value;
+      }
       any = true;
-      out += row({html_escape(label), spec.source, type_word(value), unit_word(unit), html_escape(value)});
+      out += row({html_escape(label), spec.source, type, unit_word(unit), html_escape(value)});
       break;
     }
   }
