@@ -1,0 +1,343 @@
+#include "v4l2diag/core/threshold_registry.hpp"
+
+#include "v4l2diag/core/test_registry.hpp"
+
+#include <algorithm>
+#include <fstream>
+#include <iterator>
+#include <iostream>
+#include <set>
+#include <vector>
+#include <string>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <cstdio>
+
+namespace {
+
+std::string make_temp_dir() {
+  std::string pattern = "/tmp/v4l2diag-threshold-test-XXXXXX";
+  std::vector<char> buffer(pattern.begin(), pattern.end());
+  buffer.push_back('\0');
+  char *created = mkdtemp(buffer.data());
+  return created ? created : "/tmp/v4l2diag-threshold-test";
+}
+
+std::string read_file(const std::string &path) {
+  std::ifstream in(path);
+  if (!in.good()) {
+    return std::string();
+  }
+  return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+bool require(bool condition, const std::string &message) {
+  if (!condition) {
+    std::cerr << message << "\n";
+  }
+  return condition;
+}
+
+// A preset as it was written before the tests were renumbered: every numeric
+// prefix is one lower than today's, "t24-max-fps" is a test that no longer exists
+// at all, and the threshold entry for the format sweep is meaningless because that
+// test defines run parameters only.
+void write_stale_config(const std::string &path) {
+  std::ofstream out(path);
+  out << R"({
+  "schema_version": 2,
+  "id": "default",
+  "name": "Default",
+  "description": "written before the tests were renumbered",
+  "values": {
+    "t22-sustained-capture": { "pass_rate_pct": 91 },
+    "t16-format-comparison": { "throughput_reps": 12 },
+    "t24-max-fps": { "min_fps": 42 }
+  },
+  "params": {
+    "t16-format-comparison": { "throughput_reps": 12 },
+    "t17-control-sweep": { "sample_count": 33 },
+    "t24-max-fps": { "sample_count": 7 }
+  }
+})";
+}
+
+}  // namespace
+
+namespace testing {
+
+// Redirects stderr to a temporary file for the lifetime of the object, so a test can read
+// what a component printed. Restores the original descriptor on destruction.
+class CapturedStderr {
+ public:
+  CapturedStderr() {
+    path_ = "/tmp/v4l2diag-stderr-XXXXXX";
+    fd_ = mkstemp(&path_[0]);
+    saved_ = dup(STDERR_FILENO);
+    fflush(stderr);
+    dup2(fd_, STDERR_FILENO);
+  }
+  ~CapturedStderr() {
+    fflush(stderr);
+    dup2(saved_, STDERR_FILENO);
+    close(saved_);
+    close(fd_);
+    unlink(path_.c_str());
+  }
+  std::string text() const {
+    fflush(stderr);
+    std::ifstream in(path_);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  }
+
+ private:
+  std::string path_;
+  int fd_ = -1;
+  int saved_ = -1;
+};
+
+}  // namespace testing
+
+int main() {
+  const std::string dir = make_temp_dir();
+
+  std::set<std::string> real_ids;
+  for (const auto &test : v4l2diag::built_in_tests()) {
+    real_ids.insert(test.id);
+  }
+
+  bool ok = true;
+
+  // Every id the built-in default configures must be a real test id. A drift here
+  // is what let a stale on-disk preset go unnoticed.
+  const v4l2diag::ThresholdConfig defaults = v4l2diag::default_threshold_config();
+  for (const auto &entry : defaults.values) {
+    ok &= require(real_ids.count(entry.first) != 0,
+                  "built-in default threshold references unknown test id: " + entry.first);
+  }
+  for (const auto &entry : v4l2diag::default_test_params()) {
+    ok &=
+        require(real_ids.count(entry.first) != 0, "built-in default params reference unknown test id: " + entry.first);
+  }
+
+  write_stale_config(dir + "/default.json");
+  v4l2diag::ThresholdRegistry registry(dir);
+  v4l2diag::ThresholdConfig loaded;
+  if (!require(registry.get_config("default", &loaded), "stale config was not loaded at all")) {
+    return 1;
+  }
+
+  // Nothing a stored preset contains may introduce a test that does not exist:
+  // that made the configuration page render cards for dead tests while hiding
+  // every live one.
+  for (const auto &entry : loaded.values) {
+    ok &= require(real_ids.count(entry.first) != 0, "loaded config kept unknown value test id: " + entry.first);
+  }
+  for (const auto &entry : loaded.params) {
+    ok &= require(real_ids.count(entry.first) != 0, "loaded config kept unknown param test id: " + entry.first);
+  }
+
+  // Renumbered ids are migrated by suffix, so configured values survive.
+  ok &= require(loaded.values.count("t23-sustained-capture") == 1,
+                "t22-sustained-capture was not migrated to t23-sustained-capture");
+  ok &= require(loaded.values.count("t22-sustained-capture") == 0,
+                "the stale value id was kept alongside the migrated one");
+  ok &= require(loaded.values["t23-sustained-capture"]["pass_rate_pct"] == 91,
+                "migrated threshold lost its configured value");
+  ok &=
+      require(loaded.params.count("t18-control-sweep") == 1, "t17-control-sweep was not migrated to t18-control-sweep");
+  ok &=
+      require(loaded.params["t18-control-sweep"]["sample_count"] == 33, "migrated parameter lost its configured value");
+  ok &= require(loaded.params.count("t17-format-comparison") == 1,
+                "t16-format-comparison was not migrated to t17-format-comparison");
+  ok &= require(loaded.params["t17-format-comparison"]["throughput_reps"] == 12,
+                "migrated parameter lost its configured value");
+
+  // A suffix that matches nothing is dropped rather than carried forward.
+  ok &= require(loaded.values.count("t24-max-fps") == 0, "a removed test was kept in values");
+  ok &= require(loaded.params.count("t24-max-fps") == 0, "a removed test was kept in params");
+
+  // The format sweep defines run parameters but no verdict thresholds, so a stored
+  // threshold for it is meaningless even after the id is migrated.
+  ok &= require(loaded.values.count("t17-format-comparison") == 0,
+                "a threshold was kept for a test that defines run parameters only");
+
+  // resolve() still yields a fully-populated config with the migrated value on top.
+  const v4l2diag::ThresholdConfig resolved = registry.resolve("default");
+  ok &= require(resolved.values.size() == defaults.values.size(),
+                "resolve() did not return the full built-in threshold set");
+  ok &= require(resolved.get_param("t18-control-sweep", "sample_count") == 33,
+                "resolve() did not overlay the migrated parameter");
+
+  // An exact id always wins over a migrated one.
+  {
+    const std::string second = make_temp_dir();
+    std::ofstream out(second + "/default.json");
+    out << R"({"id":"default","name":"Default","values":{},"params":{
+      "t17-control-sweep": { "sample_count": 1 },
+      "t18-control-sweep": { "sample_count": 2 }
+    }})";
+    out.close();
+    v4l2diag::ThresholdRegistry other(second);
+    v4l2diag::ThresholdConfig both;
+    other.get_config("default", &both);
+    ok &=
+        require(both.params["t18-control-sweep"]["sample_count"] == 2, "a migrated id overwrote an already-current id");
+    unlink((second + "/default.json").c_str());
+    rmdir(second.c_str());
+  }
+
+  // The default preset is read-only. remove_config() already refused it, but
+  // add_or_update_config() did not, so PUT /api/thresholds/default could
+  // overwrite it -- the UI's read-only badge was client-side only.
+  {
+    const std::string guard_dir = make_temp_dir();
+    v4l2diag::ThresholdRegistry registry(guard_dir);
+
+    v4l2diag::ThresholdConfig overwrite;
+    overwrite.id = "default";
+    overwrite.name = "Hijacked";
+    overwrite.description = "should never be written";
+    overwrite.params["t13-poll-timeout-cliff"]["sample_count"] = 1;
+
+    // The constructor seeds default.json, so the invariant is that the
+    // rejected write leaves that file byte-for-byte untouched.
+    const std::string default_path = guard_dir + "/default.json";
+    const std::string before = read_file(default_path);
+    ok &= require(!before.empty(), "the constructor did not seed default.json");
+
+    std::string error;
+    ok &= require(!registry.add_or_update_config(overwrite, &error),
+                  "add_or_update_config accepted the reserved \"default\" id");
+    ok &= require(!error.empty(), "rejecting the default preset produced no error message");
+    ok &= require(read_file(default_path) == before, "the rejected write still modified default.json");
+
+    // import_config() funnels through add_or_update_config(), so the same id
+    // must be refused when it arrives as imported JSON.
+    std::string import_error;
+    ok &= require(!registry.import_config(R"({"id":"default","name":"Hijacked"})", &import_error),
+                  "import_config accepted the reserved \"default\" id");
+    ok &= require(read_file(default_path) == before, "a rejected import still modified default.json");
+
+    // The built-in default must still be readable and unchanged.
+    v4l2diag::ThresholdConfig fallback;
+    ok &= require(registry.get_config("default", &fallback), "the built-in default became unreadable");
+    ok &= require(fallback.name != "Hijacked", "the built-in default was replaced");
+
+    // A non-reserved id still round-trips.
+    v4l2diag::ThresholdConfig custom = v4l2diag::default_threshold_config();
+    custom.id = "stress-test";
+    custom.name = "Stress Test";
+    ok &= require(registry.add_or_update_config(custom, &error), "add_or_update_config rejected a normal id: " + error);
+    v4l2diag::ThresholdConfig read_back;
+    ok &= require(registry.get_config("stress-test", &read_back) && read_back.name == "Stress Test",
+                  "a normal config did not round-trip");
+
+    unlink((guard_dir + "/stress-test.json").c_str());
+    unlink((guard_dir + "/default.json").c_str());
+    rmdir(guard_dir.c_str());
+  }
+
+  // A stale config must announce itself ONCE, and each renumbered id must appear once in
+  // that announcement. Measured before this check, on a real UI session: the web server
+  // builds a ThresholdRegistry per request, so the warning was reprinted on every call --
+  // and each id appeared TWICE inside it, because the values map and the params map both
+  // append to one shared list. The log filled with the same paragraph until it drowned
+  // everything else, which is the opposite of what a reconciliation notice is for.
+  {
+    const std::string noisy_dir = dir + "-noise";
+    mkdir(noisy_dir.c_str(), 0755);
+    {
+      std::ofstream out(noisy_dir + "/default.json");
+      out << R"JSON({"id":"default","name":"Default",
+        "values":{"t22-sustained-capture":{"min_success_rate_pct":90}},
+        "params":{"t22-sustained-capture":{"duration_sec":10}}})JSON";
+    }
+
+    testing::CapturedStderr capture;
+    v4l2diag::ThresholdRegistry first(noisy_dir);
+    const std::string first_log = capture.text();
+    v4l2diag::ThresholdRegistry second(noisy_dir);
+    const std::string second_log = capture.text().substr(first_log.size());
+
+    const std::string needle = "no longer matches the current tests";
+    ok &= require(first_log.find(needle) != std::string::npos,
+                  "a stale threshold config no longer reports that it was reconciled");
+    ok &= require(second_log.find(needle) == std::string::npos,
+                  "the reconciliation notice is reprinted on every registry construction");
+
+    // The same id, listed twice in one notice.
+    const std::string id = "t22-sustained-capture -> t23-sustained-capture";
+    std::size_t occurrences = 0;
+    for (std::size_t at = first_log.find(id); at != std::string::npos; at = first_log.find(id, at + 1)) {
+      ++occurrences;
+    }
+    ok &= require(occurrences == 1,
+                  "the reconciliation notice lists the same migrated id " + std::to_string(occurrences) + " times");
+
+    unlink((noisy_dir + "/default.json").c_str());
+    rmdir(noisy_dir.c_str());
+  }
+
+  // Reconciling in memory is not enough: the FILE has to be repaired, or every future
+  // process re-reads the same stale ids and reprints the same notice. The dedup above is
+  // per-process, so it cannot help here -- measured on the user's device, the notice
+  // returned on every server start. The notice used to end "save the preset to rewrite
+  // it", asking a person to do by hand what the migration already computed losslessly.
+  //
+  // The assertion is deliberately on a SECOND registry over the same directory: it proves
+  // the repair reached the disk, which an in-memory check would pass without.
+  {
+    const std::string heal_dir = dir + "-heal";
+    mkdir(heal_dir.c_str(), 0755);
+    const std::string heal_file = heal_dir + "/default.json";
+    write_stale_config(heal_file);
+    const std::string before = read_file(heal_file);
+
+    // Observe inside the capture, assert outside it. require() writes to stderr, so an
+    // assertion made while CapturedStderr is redirecting lands in its temp file and is
+    // unlinked with it -- the test would fail with no message at all, which is how this
+    // block first behaved.
+    std::string after;
+    std::string second_log;
+    {
+      testing::CapturedStderr capture;
+      v4l2diag::ThresholdRegistry first(heal_dir);
+      after = read_file(heal_file);
+
+      // A fresh registry over the repaired directory has nothing left to reconcile.
+      const std::string mark = capture.text();
+      v4l2diag::ThresholdRegistry second(heal_dir);
+      second_log = capture.text().substr(mark.size());
+    }
+
+    ok &= require(after != before, "a stale threshold config file is left unrepaired on disk");
+    // The renumbered ids are what the file must now carry, and the vanished test must be
+    // gone. Checked on the file text, not on the registry, so an in-memory-only fix fails.
+    ok &= require(after.find("t23-sustained-capture") != std::string::npos,
+                  "the rewritten config lost the migrated id t23-sustained-capture");
+    ok &= require(after.find("t22-sustained-capture") == std::string::npos,
+                  "the rewritten config still carries the pre-renumbering id t22-sustained-capture");
+    ok &= require(after.find("t24-max-fps") == std::string::npos,
+                  "the rewritten config still carries the dropped test t24-max-fps");
+    // The user's configured value must survive the rewrite, or self-healing silently
+    // resets thresholds to defaults -- worse than the notice it replaces.
+    ok &= require(after.find("91") != std::string::npos,
+                  "the rewritten config discarded the value the user had configured");
+
+    ok &= require(second_log.find("no longer matches the current tests") == std::string::npos,
+                  "the notice returns after the file was rewritten, so the repair did not stick");
+
+    unlink(heal_file.c_str());
+    rmdir(heal_dir.c_str());
+  }
+
+  unlink((dir + "/default.json").c_str());
+  rmdir(dir.c_str());
+
+  if (!ok) {
+    return 1;
+  }
+  std::cout << "threshold_registry tests passed\n";
+  return 0;
+}

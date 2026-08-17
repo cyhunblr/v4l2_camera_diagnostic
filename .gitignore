@@ -1,0 +1,31 @@
+# Build output
+/build/
+/build-*/
+/Testing/
+
+# Generated diagnostic reports
+/reports/*
+# Reports produced by a real device run and dropped here for review. Never evidence
+# on their own: a report is measured against the contract tests, not against a file.
+/output/
+
+# Local device profiles (never commit hardware-specific wiring)
+/configs/profiles/
+/configs/profiles.local/
+
+# Node / frontend
+source/frontend/dist/
+source/frontend/node_modules/
+# Vitest coverage output
+source/frontend/coverage/
+
+# Editor
+.vscode/
+
+# OS
+.DS_Store
+
+# Agent
+.claude/
+.codex/
+.agents/
