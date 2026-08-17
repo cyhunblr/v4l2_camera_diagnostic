@@ -1,0 +1,90 @@
+# Canonical duration formatting vectors (plan 3.2).
+#
+# ONE contract, read by BOTH implementations' tests: the C++ report writer
+# (format_duration) and the frontend (formatDuration). Two hand-maintained copies of
+# these cases would drift, and the whole point of the contract is that a duration reads
+# identically in the HTML report and in the web UI -- the same run, the same number.
+#
+# The rule (plan 1.1):
+#   * < 10s      at most two decimals
+#   * 10s - <60s at most one decimal
+#   * >= 60s     rounded to the nearest whole second, "Xm Ys"
+#   * zero       "0s"
+#   * trailing zeros are always stripped ("19.0s" -> "19s", "1m 0s" -> "1m")
+#
+# Format: <milliseconds> <TAB> <expected>. Lines starting with # and blank lines are
+# comments. A comment must be on its OWN line: the expectation runs to end-of-line, so a
+# trailing "# note" would become part of the expected string.
+#
+# Rounding is HALF-UP on the printed decimal (0.125s -> "0.13s"). Stated explicitly
+# because neither language gives it for free: C's "%.2f" rounds half-to-even and
+# JavaScript's toFixed follows the binary representation, so both implementations round
+# by hand to stay identical.
+
+# --- zero and the sub-millisecond floor -----------------------------------------
+0	0s
+# A fraction of a millisecond is still time that was measured, so it takes the floor
+# rather than reading as "no time at all".
+0.4	0.01s
+# 0.004s rounds to two decimals as 0s, which would read as "no time at all" for a
+# measurement that did take time. The floor keeps the smallest reportable value visible.
+4	0.01s
+5	0.01s
+9	0.01s
+10	0.01s
+14	0.01s
+15	0.02s
+
+# --- under 10s: two decimals ----------------------------------------------------
+# The eleven values corrected across the approved preview sources (plan 1.1) are all
+# present in the bands below -- 6000, 8000, 12420, 19000, 20000, 23370, 26810, 31790,
+# 46890, 61700 and 87200 ms. Pinning them here ties the formatter to the previews: a
+# formatter change that would re-render any of them fails this file first.
+100	0.1s
+120	0.12s
+125	0.13s
+1000	1s
+1500	1.5s
+1234	1.23s
+1235	1.24s
+6000	6s
+8000	8s
+8004	8s
+9999	10s
+9994	9.99s
+
+# --- 10s to under 60s: one decimal ----------------------------------------------
+10000	10s
+10040	10s
+10050	10.1s
+12420	12.4s
+19000	19s
+19040	19s
+20000	20s
+23370	23.4s
+26810	26.8s
+31790	31.8s
+46890	46.9s
+59900	59.9s
+# Rounds up to 60.0s, which is a whole minute -- it must read as "1m", not "60s".
+59960	1m
+
+# --- 60s and over: whole seconds, "Xm Ys" ---------------------------------------
+60000	1m
+60400	1m
+60600	1m 1s
+61700	1m 2s
+87200	1m 27s
+90000	1m 30s
+119500	2m
+120000	2m
+125000	2m 5s
+599000	9m 59s
+3600000	60m
+3661000	61m 1s
+
+# --- negative input -------------------------------------------------------------
+# Not a real duration. Clamped rather than rendered with a minus sign, which would look
+# like a formatter bug in a report.
+-1	0s
+-60000	0s
